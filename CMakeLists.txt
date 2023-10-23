@@ -2,109 +2,26 @@ cmake_minimum_required(VERSION 3.16.3)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
-if(NOT CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE Release)
-endif()
-
 project(shadps4)
 
-include_directories(third-party/)
-include_directories(third-party/discord-rpc/include)
-include_directories(third-party/imgui/)
-include_directories(third-party/imgui/backends)
-include_directories(third-party/sdl/)
-include_directories(third-party/fmt/include)
-include_directories(third-party/magic_enum/include)
-include_directories(third-party/zydis/include/Zydis)
-include_directories(third-party/winpthread/include)
-include_directories(third-party/vulkan/include)
-include_directories(third-party/xxhash/include)
-include_directories(third-party/result/include)
-add_subdirectory("third-party")
-#=================== EXAMPLE ===================
-include_directories(src)
+# This function should be passed a list of all files in a target. It will automatically generate
+# file groups following the directory hierarchy, so that the layout of the files in IDEs matches the
+# one in the filesystem.
+function(create_target_directory_groups target_name)
+    # Place any files that aren't in the source list in a separate group so that they don't get in
+    # the way.
+    source_group("Other Files" REGULAR_EXPRESSION ".")
 
-set(LIBC_SOURCES src/Emulator/HLE/Libraries/LibC/Libc.cpp 
-                 src/Emulator/HLE/Libraries/LibC/Libc.h
-                 src/Emulator/HLE/Libraries/LibC/printf.h
-                 src/Emulator/HLE/Libraries/LibC/va_ctx.h
-                 src/Emulator/HLE/Libraries/LibC/libc_cxa.cpp
-                 src/Emulator/HLE/Libraries/LibC/libc_cxa.h
-)
-set(USERSERVICE_SOURCES src/Emulator/HLE/Libraries/LibUserService/user_service.cpp
-                        src/Emulator/HLE/Libraries/LibUserService/user_service.h
-)
+    get_target_property(target_sources "${target_name}" SOURCES)
 
-set(PAD_SOURCES src/Emulator/HLE/Libraries/LibPad/pad.cpp
-                src/Emulator/HLE/Libraries/LibPad/pad.h
-)
+    foreach(file_name IN LISTS target_sources)
+        get_filename_component(dir_name "${file_name}" PATH)
+        # Group names use '\' as a separator even though the entire rest of CMake uses '/'...
+        string(REPLACE "/" "\\" group_name "${dir_name}")
+        source_group("${group_name}" FILES "${file_name}")
+    endforeach()
+endfunction()
 
-set(SYSTEMSERVICE_SOURCES src/Emulator/HLE/Libraries/LibSystemService/system_service.cpp
-                          src/Emulator/HLE/Libraries/LibSystemService/system_service.h
-)
-
-set(FILESYSTEM_SOURCES src/Emulator/HLE/Libraries/LibKernel/FileSystem/file_system.cpp
-                       src/Emulator/HLE/Libraries/LibKernel/FileSystem/file_system.h
-                       src/Emulator/HLE/Libraries/LibKernel/FileSystem/posix_file_system.cpp
-                       src/Emulator/HLE/Libraries/LibKernel/FileSystem/posix_file_system.h
-)
-
-set(HOST_SOURCES src/Emulator/Host/controller.cpp
-                 src/Emulator/Host/controller.h
-)
-
-set(UTIL_SOURCES src/Emulator/Util/singleton.h
-)
-
-add_executable(shadps4
-    ${LIBC_SOURCES}
-    ${USERSERVICE_SOURCES}
-    ${PAD_SOURCES}
-    ${SYSTEMSERVICE_SOURCES}
-    ${FILESYSTEM_SOURCES}
-    ${HOST_SOURCES}
-    ${UTIL_SOURCES}
-    src/main.cpp
-    src/types.h
-    src/Core/FsFile.cpp
-    src/Core/FsFile.h
-    src/Core/PS4/Loader/Elf.cpp
-    src/Core/PS4/Loader/Elf.h
-    src/GUI/ElfViewer.cpp
-    src/GUI/ElfViewer.h 
-    src/Util/log.h
-    src/Util/log.cpp
-    src/Util/config.cpp
-    src/Util/config.h
-    src/Core/virtual_memory.cpp
-    src/Core/virtual_memory.h
-    src/Core/PS4/Linker.cpp
-    src/Core/PS4/Linker.h
-    src/Core/PS4/Stubs.cpp
-    src/Core/PS4/Stubs.h
-    src/Core/PS4/Util/aerolib.cpp
-    src/Core/PS4/HLE/Kernel/Objects/physical_memory.h
-    src/Core/PS4/HLE/Kernel/Objects/physical_memory.cpp
-    src/Util/string_util.cpp
-    src/Util/string_util.cpp
-    src/Core/PS4/HLE/Graphics/video_out.cpp
-    src/Core/PS4/HLE/Graphics/video_out.h
-    src/discord.h
-    src/discord.cpp
-    src/Core/PS4/HLE/Kernel/event_queues.cpp
-    src/Core/PS4/HLE/Kernel/event_queues.h
-    src/Core/PS4/HLE/Kernel/cpu_management.cpp
-    src/Core/PS4/HLE/Kernel/cpu_management.h
-    
-    "src/Util/Disassembler.cpp" "src/Util/Disassembler.h" "src/Core/PS4/Util/aerolib.h" "src/Core/PS4/Loader/SymbolsResolver.h" "src/Core/PS4/Loader/SymbolsResolver.cpp" "src/Core/PS4/HLE/Libs.cpp" "src/Core/PS4/HLE/Libs.h" "src/Core/PS4/HLE/LibC.cpp" "src/Core/PS4/HLE/LibC.h" "src/Core/PS4/HLE/LibKernel.cpp" "src/Core/PS4/HLE/LibKernel.h"   "src/Core/PS4/HLE/LibSceGnmDriver.cpp" "src/Core/PS4/HLE/LibSceGnmDriver.h" "src/Core/PS4/HLE/Kernel/ThreadManagement.cpp" "src/Core/PS4/HLE/Kernel/ThreadManagement.h" "src/Core/PS4/HLE/ErrorCodes.h" "src/debug.h" "src/Core/PS4/HLE/Kernel/memory_management.cpp" "src/Core/PS4/HLE/Kernel/memory_management.h" "src/Core/PS4/GPU/gpu_memory.cpp" "src/Core/PS4/GPU/gpu_memory.h" "src/emulator.cpp" "src/emulator.h"  "src/Core/PS4/HLE/Kernel/Objects/event_queue.h" "src/Core/PS4/HLE/Kernel/Objects/event_queue.cpp" "src/Core/PS4/HLE/Graphics/Objects/video_out_ctx.cpp" "src/Core/PS4/HLE/Graphics/Objects/video_out_ctx.h" "src/Core/PS4/HLE/Graphics/graphics_ctx.h" "src/vulkan_util.cpp" "src/vulkan_util.h" "src/Core/PS4/GPU/video_out_buffer.cpp" "src/Core/PS4/GPU/video_out_buffer.h" "src/Core/PS4/HLE/Graphics/graphics_render.cpp" "src/Core/PS4/HLE/Graphics/graphics_render.h" "src/Core/PS4/GPU/tile_manager.cpp" "src/Core/PS4/GPU/tile_manager.h" "src/version.h" "src/Emulator/HLE/Libraries/LibSystemService/system_service.cpp" "src/Emulator/HLE/Libraries/LibSystemService/system_service.h" "src/Emulator/HLE/Libraries/LibKernel/FileSystem/meta_file_system.h" "src/Emulator/HLE/Libraries/LibKernel/FileSystem/meta_file_system.cpp")
-
-find_package(OpenGL REQUIRED)
-target_link_libraries(shadps4 PUBLIC fmt mincore spdlog IMGUI SDL3-shared ${OPENGL_LIBRARY} vulkan-1 spirv-tools-opt spirv-tools)
-
-add_custom_command(TARGET shadps4 POST_BUILD
-   COMMAND ${CMAKE_COMMAND} -E copy_if_different
-     $<TARGET_FILE:SDL3-shared>
-     $<TARGET_FILE_DIR:shadps4>)
-add_custom_command(TARGET shadps4 POST_BUILD
-   COMMAND ${CMAKE_COMMAND} -E copy_if_different
-     "${PROJECT_SOURCE_DIR}/third-party/winpthread/bin/libwinpthread-1.dll" $<TARGET_FILE_DIR:shadps4>)
+# Add third party libraries and the project source files
+add_subdirectory(third-party)
+add_subdirectory(src)

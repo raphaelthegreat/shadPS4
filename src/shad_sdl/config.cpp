@@ -1,0 +1,79 @@
+#include <fstream>
+#include <string>
+#include <toml.hpp>
+
+#include "shad_sdl/config.h"
+
+Config::Config(const std::filesystem::path& path_) : path{path_} {
+    load();
+}
+
+Config::~Config() {
+    save();
+}
+
+void Config::load() {
+    // If the configuration file does not exist, create it and return
+    std::error_code error;
+    if (!std::filesystem::exists(path, error)) {
+        save();
+        return;
+    }
+
+    toml::value data;
+
+    try {
+        data = toml::parse(path);
+    } catch (std::exception& ex) {
+        printf("Got exception trying to load config file. Exception: %s\n", ex.what());
+        return;
+    }
+
+    if (data.contains("General")) {
+        auto generalResult = toml::expect<toml::value>(data.at("General"));
+        if (generalResult.is_ok()) {
+            auto general = generalResult.unwrap();
+
+            isNeo = toml::find_or<toml::boolean>(general, "isPS4Pro", false);
+            logLevel = toml::find_or<toml::integer>(general, "logLevel", false);
+        }
+    }
+    if (data.contains("GPU")) {
+        auto generalResult = toml::expect<toml::value>(data.at("GPU"));
+        if (generalResult.is_ok()) {
+            auto general = generalResult.unwrap();
+
+            screenWidth = toml::find_or<toml::integer>(general, "screenWidth", false);
+            screenHeight = toml::find_or<toml::integer>(general, "screenHeight", false);
+        }
+    }
+    int k = 0;
+}
+
+void Config::save() {
+    toml::basic_value<toml::preserve_comments> data;
+
+    std::error_code error;
+    if (std::filesystem::exists(path, error)) {
+        try {
+            data = toml::parse<toml::preserve_comments>(path);
+        } catch (const std::exception& ex) {
+            printf("Exception trying to parse config file. Exception: %s\n", ex.what());
+            return;
+        }
+    } else {
+        if (error) {
+            printf("Filesystem error accessing %s (error: %s)\n", path.string().c_str(), error.message().c_str());
+        }
+        printf("Saving new configuration file %s\n", path.string().c_str());
+    }
+
+    data["General"]["isPS4Pro"] = isNeo;
+    data["General"]["logLevel"] = logLevel;
+    data["GPU"]["screenWidth"] = screenWidth;
+    data["GPU"]["screenHeight"] = screenHeight;
+
+    std::ofstream file(path, std::ios::out);
+    file << data;
+    file.close();
+}
