@@ -1,11 +1,12 @@
 #pragma once
 
-#include <types.h>
 #include <mutex>
 #include <string>
 #include <vector>
 
-namespace HLE::Kernel::Objects {
+#include "common/types.h"
+
+namespace Core::Kernel {
 
 constexpr s16 EVFILT_READ = -1;
 constexpr s16 EVFILT_WRITE = -2;
@@ -32,8 +33,7 @@ constexpr s16 EVFILT_SYSCOUNT = 22;
 
 class EqueueInternal;
 struct EqueueEvent;
-
-using SceKernelEqueue = Kernel::Objects::EqueueInternal*;
+using SceKernelEqueue = EqueueInternal*;
 
 using TriggerFunc = void (*)(EqueueEvent* event, void* trigger_data);
 using ResetFunc = void (*)(EqueueEvent* event);
@@ -62,18 +62,20 @@ struct EqueueEvent {
 };
 
 class EqueueInternal {
-  public:  
+public:
     EqueueInternal() = default;
     virtual ~EqueueInternal();
+
     void setName(const std::string& m_name) { this->m_name = m_name; }
     int addEvent(const EqueueEvent& event);
     int waitForEvents(SceKernelEvent* ev, int num, u32 micros);
     bool triggerEvent(u64 ident, s16 filter, void* trigger_data);
     int getTriggeredEvents(SceKernelEvent* ev, int num);
-  private:
+
+private:
     std::string m_name;
     std::mutex m_mutex; 
     std::vector<EqueueEvent> m_events;
     std::condition_variable m_cond;
 };
-};  // namespace HLE::Kernel::Objects
+};  // namespace Core::Kernel

@@ -1,12 +1,11 @@
-#include "controller.h"
+#include "core/input/controller.h"
 
-namespace Emulator::Host::Controller {
-GameController::GameController() { m_states_num = 0;
+namespace Core::Input {
+
+GameController::GameController() {
     m_last_state = State();
 }
 void GameController::readState(State* state, bool* isConnected, int* connectedCount) {
-    std::scoped_lock lock{m_mutex};
-
     *isConnected = m_connected;
     *connectedCount = m_connected_count;
     *state = getLastState();
@@ -37,7 +36,6 @@ void GameController::addState(const State& state) {
 }
 
 void GameController::checKButton(int id, u32 button, bool isPressed) {
-    std::scoped_lock lock{m_mutex};
     auto state = getLastState();
     if (isPressed) {
         state.buttonsState |= button;
@@ -48,4 +46,4 @@ void GameController::checKButton(int id, u32 button, bool isPressed) {
     addState(state);
 }
 
-}  // namespace Emulator::Host::Controller
+}  // namespace Core::Input

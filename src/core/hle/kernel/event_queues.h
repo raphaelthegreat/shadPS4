@@ -1,14 +1,13 @@
 #pragma once
 
-#include <types.h>
+#include "common/types.h"
+#include "core/hle/kernel/objects/event_queue.h"
 
-#include "Objects/event_queue.h"
+namespace Core::Kernel {
 
-namespace HLE::Libs::LibKernel::EventQueues {
 using SceKernelUseconds = u32;
-using SceKernelEqueue = Kernel::Objects::EqueueInternal*;
 
-int PS4_SYSV_ABI sceKernelCreateEqueue(SceKernelEqueue* eq, const char* name);
-int PS4_SYSV_ABI sceKernelWaitEqueue(SceKernelEqueue eq, HLE::Kernel::Objects::SceKernelEvent* ev, int num, int* out, SceKernelUseconds *timo);
+s32 PS4_SYSV_ABI sceKernelCreateEqueue(SceKernelEqueue* eq, const char* name);
+s32 PS4_SYSV_ABI sceKernelWaitEqueue(SceKernelEqueue eq, SceKernelEvent* ev, int num, int* out, SceKernelUseconds *timo);
 
-};  // namespace HLE::Libs::LibKernel::EventQueues
+};  // namespace Core::Kernel

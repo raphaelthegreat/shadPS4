@@ -1,10 +1,10 @@
-#include "event_queue.h"
-#include "debug.h"
-
 #include <chrono>
+#include "common/debug.h"
+#include "core/hle/kernel/objects/event_queue.h"
 
-namespace HLE::Kernel::Objects {
-EqueueInternal::~EqueueInternal() {}
+namespace Core::Kernel {
+
+EqueueInternal::~EqueueInternal() = default;
 
 int EqueueInternal::addEvent(const EqueueEvent& event) {
     std::scoped_lock lock{m_mutex};
@@ -86,4 +86,4 @@ int EqueueInternal::getTriggeredEvents(SceKernelEvent* ev, int num) {
     return ret;
 }
 
-};  // namespace HLE::Kernel::Objects
+};  // namespace Core::Kernel

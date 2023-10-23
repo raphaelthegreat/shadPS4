@@ -1,6 +1,6 @@
-#include "meta_file_system.h"
+#include "core/file_sys/meta_file_system.h"
 
-namespace Emulator::Host::GenericFS {
+namespace Core::FileSys {
 
 void MetaFileSystem::mount(std::string prefix, AbstractFileSystem* system) {
     System x;
@@ -11,21 +11,21 @@ void MetaFileSystem::mount(std::string prefix, AbstractFileSystem* system) {
 
 void MetaFileSystem::unMount(AbstractFileSystem* system) {}
 
-void MetaFileSystem::unMountAll() { fileSystems.clear(); }
+void MetaFileSystem::unMountAll() {
+    fileSystems.clear();
+}
 
 AbstractFileSystem* MetaFileSystem::getHandleOwner(u32 handle) { 
 	for (u32 i = 0; i < fileSystems.size(); i++) {
         if (fileSystems[i].system->ownsHandle(handle)) return fileSystems[i].system;  // got it!
     }
 	return nullptr; 
-
 }
 
 bool MetaFileSystem::mapFilePath(std::string inpath, std::string* outpath, AbstractFileSystem** system) { 
-    for (unsigned int i = 0; i < fileSystems.size(); i++) {
+    for (u32 i = 0; i < fileSystems.size(); i++) {
         int prefLen = fileSystems[i].prefix.size();
-        if (fileSystems[i].prefix == inpath.substr(0, prefLen))
-        {
+        if (fileSystems[i].prefix == inpath.substr(0, prefLen)) {
             *outpath = inpath.substr(prefLen);
             *system = fileSystems[i].system;
             return true;
@@ -44,9 +44,11 @@ u32 MetaFileSystem::openFile(std::string filename, FileAccess access) {
 }
 
 void MetaFileSystem::closeFile(u32 handle) {
-    AbstractFileSystem* sys = getHandleOwner(handle);
-    if (sys) sys->closeFile(handle);
+    auto sys = getHandleOwner(handle);
+    if (sys) {
+        sys->closeFile(handle);
+    }
 }
 
 
-}  // namespace Emulator::Host::GenericFS
+}  // namespace Core::FileSys

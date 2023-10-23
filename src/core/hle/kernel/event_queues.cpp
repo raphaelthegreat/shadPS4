@@ -1,14 +1,14 @@
-#include "event_queues.h"
+#include "common/debug.h"
+#include "common/log.h"
+#include "core/hle/error_codes.h"
+#include "core/hle/kernel/event_queues.h"
+#include "core/hle/libraries/libs.h"
 
-#include <Core/PS4/HLE/ErrorCodes.h>
-#include <Core/PS4/HLE/Libs.h>
-#include <Util/log.h>
-#include <debug.h>
+namespace Core::Kernel {
 
-namespace HLE::Libs::LibKernel::EventQueues {
 constexpr bool log_file_equeues = true;  // disable it to disable logging
 
-int PS4_SYSV_ABI sceKernelCreateEqueue(SceKernelEqueue* eq, const char* name) {
+s32 PS4_SYSV_ABI sceKernelCreateEqueue(SceKernelEqueue* eq, const char* name) {
     PRINT_FUNCTION_NAME();
 
     if (eq == nullptr) {
@@ -28,7 +28,7 @@ int PS4_SYSV_ABI sceKernelCreateEqueue(SceKernelEqueue* eq, const char* name) {
         LOG_TRACE_IF(log_file_equeues, "sceKernelCreateEqueue returned SCE_KERNEL_ERROR_ENAMETOOLONG name size exceeds 32 bytes\n");
         return SCE_KERNEL_ERROR_ENAMETOOLONG;
     }
-    *eq = new Kernel::Objects::EqueueInternal;
+    *eq = new EqueueInternal;
 
     (*eq)->setName(std::string(name));
 
@@ -36,7 +36,7 @@ int PS4_SYSV_ABI sceKernelCreateEqueue(SceKernelEqueue* eq, const char* name) {
     return SCE_OK;
 }
 
-int PS4_SYSV_ABI sceKernelWaitEqueue(SceKernelEqueue eq, HLE::Kernel::Objects::SceKernelEvent* ev, int num, int* out, SceKernelUseconds* timo) {
+s32 PS4_SYSV_ABI sceKernelWaitEqueue(SceKernelEqueue eq, SceKernelEvent* ev, int num, int* out, SceKernelUseconds* timo) {
     PRINT_FUNCTION_NAME();
 
     if (eq == nullptr) {
@@ -63,4 +63,4 @@ int PS4_SYSV_ABI sceKernelWaitEqueue(SceKernelEqueue eq, HLE::Kernel::Objects::S
     return SCE_OK;
 }
 
-};  // namespace HLE::Libs::LibKernel::EventQueues
+};  // namespace Core::Kernel

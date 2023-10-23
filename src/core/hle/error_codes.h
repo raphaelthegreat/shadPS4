@@ -1,4 +1,5 @@
 #pragma once
+
 constexpr int SCE_OK = 0;
 
 constexpr int SCE_KERNEL_ERROR_EBADF = 0x80020009;

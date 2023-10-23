@@ -1,15 +1,14 @@
 #pragma once
-#include <types.h>
 
 #include <string>
+#include "common/types.h"
 
-namespace Emulator::Host::GenericFS {
+namespace Core::FileSys {
 
-enum FileAccess {
-    FILEACCESS_READ = 0,
-    FILEACCESS_WRITE = 1,
-    FILEACCESS_READWRITE = 2
-
+enum class FileAccess : u32 {
+    Read = 0,
+    Write = 1,
+    ReadWrite = 2
 };
 
 class GenericHandleAllocator {
@@ -24,4 +23,5 @@ class AbstractFileSystem {
     virtual u32 openFile(std::string filename, FileAccess access) = 0;
     virtual void closeFile(u32 handle) = 0;
 };
-}  // namespace Emulator::Host::GenericFS
+
+} // namespace Core::FileSys

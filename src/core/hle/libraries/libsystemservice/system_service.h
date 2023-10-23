@@ -1,11 +1,12 @@
 #pragma once
-#include "Core/PS4/Loader/SymbolsResolver.h"
 
-namespace Emulator::HLE::Libraries::LibSystemService {
+#include "core/loader/symbols_resolver.h"
+
+namespace Core::Libraries {
 
 //HLE functions
 s32 PS4_SYSV_ABI sceSystemServiceHideSplashScreen();
 
-void libSystemService_Register(SymbolsResolver* sym);
+void libSystemService_Register(Loader::SymbolsResolver* sym);
 
-};  // namespace Emulator::HLE::Libraries::LibUserService
+};  // namespace Core::Libraries

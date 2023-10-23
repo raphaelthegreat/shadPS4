@@ -1,11 +1,10 @@
 #pragma once
-#include <Core/PS4/HLE/Kernel/event_queues.h>
-#include <Core/PS4/Loader/SymbolsResolver.h>
-#include <types.h>
 
 #include <string>
+#include "core/loader/symbols_resolver.h"
+#include "core/hle/kernel/event_queues.h"
 
-namespace HLE::Libs::Graphics::VideoOut {
+namespace Core::Libraries {
 
 using SceUserServiceUserId = s32;  // TODO move it to proper place
 
@@ -35,11 +34,20 @@ constexpr int SCE_VIDEO_OUT_BUFFER_ATTRIBUTE_OPTION_NONE = 0;
 constexpr int SCE_VIDEO_OUT_BUFFER_ATTRIBUTE_OPTION_VR = 7;
 constexpr int SCE_VIDEO_OUT_BUFFER_ATTRIBUTE_OPTION_STRICT_COLORIMETRY = 8;
 
-enum SceVideoOutEventId : s16 { SCE_VIDEO_OUT_EVENT_FLIP = 0, SCE_VIDEO_OUT_EVENT_VBLANK = 1, SCE_VIDEO_OUT_EVENT_PRE_VBLANK_START = 2 };
+enum SceVideoOutEventId : s16 {
+    SCE_VIDEO_OUT_EVENT_FLIP = 0,
+    SCE_VIDEO_OUT_EVENT_VBLANK = 1,
+    SCE_VIDEO_OUT_EVENT_PRE_VBLANK_START = 2
+};
 
-enum SceVideoOutTilingMode : s32 { SCE_VIDEO_OUT_TILING_MODE_TILE = 0, SCE_VIDEO_OUT_TILING_MODE_LINEAR = 1 };
+enum SceVideoOutTilingMode : s32 {
+    SCE_VIDEO_OUT_TILING_MODE_TILE = 0,
+    SCE_VIDEO_OUT_TILING_MODE_LINEAR = 1
+};
 
-enum AspectRatioMode : s32 { SCE_VIDEO_OUT_ASPECT_RATIO_16_9 = 0 };
+enum AspectRatioMode : s32 {
+    SCE_VIDEO_OUT_ASPECT_RATIO_16_9 = 0
+};
 
 struct SceVideoOutBufferAttribute {
     s32 pixelFormat;
@@ -83,8 +91,8 @@ struct SceVideoOutVblankStatus {
     u64 processTime = 0;
     u64 tsc = 0;
     u64 reserved[1] = {0};
-    u08 flags = 0;
-    u08 pad1[7] = {};
+    u8 flags = 0;
+    u8 pad1[7] = {};
 };
 
 struct VideoOutBufferSetInternal {
@@ -96,12 +104,11 @@ struct VideoOutBufferSetInternal {
 
 void videoOutInit(u32 width, u32 height);
 std::string getPixelFormatString(s32 format);
-void videoOutRegisterLib(SymbolsResolver* sym);
 bool videoOutFlip(u32 micros);
 
 void PS4_SYSV_ABI sceVideoOutSetBufferAttribute(SceVideoOutBufferAttribute* attribute, u32 pixelFormat, u32 tilingMode, u32 aspectRatio, u32 width,
                                                 u32 height, u32 pitchInPixel);
-s32 PS4_SYSV_ABI sceVideoOutAddFlipEvent(LibKernel::EventQueues::SceKernelEqueue eq, s32 handle, void* udata);
+s32 PS4_SYSV_ABI sceVideoOutAddFlipEvent(Kernel::SceKernelEqueue eq, s32 handle, void* udata);
 s32 PS4_SYSV_ABI sceVideoOutRegisterBuffers(s32 handle, s32 startIndex, void* const* addresses, s32 bufferNum,
                                             const SceVideoOutBufferAttribute* attribute);
 s32 PS4_SYSV_ABI sceVideoOutSetFlipRate(s32 handle, s32 rate);
@@ -111,4 +118,7 @@ s32 PS4_SYSV_ABI sceVideoOutGetFlipStatus(s32 handle, SceVideoOutFlipStatus* sta
 s32 PS4_SYSV_ABI sceVideoOutGetResolutionStatus(s32 handle, SceVideoOutResolutionStatus* status);
 s32 PS4_SYSV_ABI sceVideoOutOpen(SceUserServiceUserId userId, s32 busType, s32 index, const void* param);
 s32 PS4_SYSV_ABI sceVideoOutClose(s32 handle);
-}  // namespace HLE::Libs::Graphics::VideoOut
+
+void videoOutRegisterLib(Loader::SymbolsResolver* sym);
+
+}  // namespace Core::Libraries

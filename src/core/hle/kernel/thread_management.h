@@ -3,10 +3,10 @@
 
 #include <pthread.h>
 #include <sched.h>
-#include "../../../../types.h"
+#include "common/types.h"
 #include <string>
 
-namespace HLE::Libs::LibKernel::ThreadManagement {
+namespace Core::Kernel {
 
 struct PthreadAttrInternal;
 
@@ -14,13 +14,13 @@ using SceKernelSchedParam  = ::sched_param;
 using ScePthreadAttr = PthreadAttrInternal*;
 
 struct PthreadInternal {
-    u08 reserved[4096];
+    u8 reserved[4096];
     std::string name;
     pthread_t pth;
     ScePthreadAttr attr;
 };
 struct PthreadAttrInternal {
-    u08 reserved[64];
+    u8 reserved[64];
     u64 affinity;
     size_t guard_size;
     int policy;
@@ -32,11 +32,10 @@ class PThreadCxt {};
 
 void Pthread_Init_Self_MainThread();
 
-    //HLE FUNCTIONS
 int scePthreadAttrInit(ScePthreadAttr* attr);
 int scePthreadAttrSetdetachstate(ScePthreadAttr* attr, int detachstate);
 int scePthreadAttrSetinheritsched(ScePthreadAttr* attr, int inheritSched);
 int scePthreadAttrSetschedparam(ScePthreadAttr* attr, const SceKernelSchedParam* param);
 int scePthreadAttrSetschedpolicy(ScePthreadAttr* attr, int policy);
 
-}  // namespace HLE::Libs::LibKernel::ThreadManagement
+} // namespace Core::Kernel

@@ -1,12 +1,9 @@
 #pragma once
-#include <types.h>
 
-#include <string>
 #include <vector>
+#include "core/file_sys/generic_file_system.h"
 
-#include "generic_file_system.h"
-
-namespace Emulator::Host::GenericFS {
+namespace Core::FileSys {
 
 class MetaFileSystem : public GenericHandleAllocator, AbstractFileSystem {
     struct System {
@@ -19,7 +16,7 @@ class MetaFileSystem : public GenericHandleAllocator, AbstractFileSystem {
     std::string currentDirectory;
     std::vector<u32> handler;
 
-  public:
+public:
     MetaFileSystem() : current(0) {}
 
     void mount(std::string prefix, AbstractFileSystem *system);
@@ -37,4 +34,5 @@ class MetaFileSystem : public GenericHandleAllocator, AbstractFileSystem {
     u32 openFile(std::string filename, FileAccess access);
     void closeFile(u32 handle);
 };
-}  // namespace Emulator::Host::GenericFS
+
+}  // namespace Core::FileSys

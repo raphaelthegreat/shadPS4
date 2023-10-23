@@ -1,9 +1,12 @@
 #pragma once
-#include "../Loader/SymbolsResolver.h"
 
-namespace HLE::Libs::LibSceGnmDriver {
+#include "core/loader/symbols_resolver.h"
 
-void LibSceGnmDriver_Register(SymbolsResolver* sym);
+namespace Core::Libraries {
+
 int32_t sceGnmSubmitDone();
 void sceGnmFlushGarlic();
-};  // namespace HLE::Libs::LibSceGnmDriver
+
+void LibSceGnmDriver_Register(Loader::SymbolsResolver* sym);
+
+};  // namespace Core::Libraries

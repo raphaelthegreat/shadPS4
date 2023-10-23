@@ -1,10 +1,12 @@
 #pragma once
-#include <types.h>
-#include <mutex>
 
-namespace Emulator::Host::Controller {
+#include <array>
+#include "common/types.h"
+
+namespace Core::Input {
+
 struct State {
-    u32 buttonsState =0;
+    u32 buttonsState{};
 };
 
 constexpr u32 MAX_STATES = 64;
@@ -21,13 +23,12 @@ class GameController {
 
 
   private:
-    std::mutex m_mutex;
-    bool m_connected = false;
+    bool m_connected{};
     State m_last_state;
-    int m_connected_count = 0;
-    u32 m_states_num = 0;
-    u32 m_first_state = 0;
-    State m_states[MAX_STATES];
+    int m_connected_count{};
+    u32 m_states_num{};
+    u32 m_first_state{};
+    std::array<State, MAX_STATES> m_states;
 };
 
-}  // namespace Emulator::HLE::Libraries::Controller
+}  // namespace Core::Input

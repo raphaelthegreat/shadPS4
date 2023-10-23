@@ -54,7 +54,6 @@ class FlipQueue {
 };
 
 class VideoOutCtx {
-
   public:
     VideoOutCtx() {}
     virtual ~VideoOutCtx() {}

@@ -1,18 +1,15 @@
-#include "video_out.h"
-
-#include <Core/PS4/GPU/gpu_memory.h>
-#include <Core/PS4/GPU/video_out_buffer.h>
-#include <Core/PS4/HLE/ErrorCodes.h>
-#include <Core/PS4/HLE/LibSceGnmDriver.h>
-#include <Core/PS4/HLE/Libs.h>
-#include <Core/PS4/HLE/UserManagement/UsrMngCodes.h>
-#include <Util/config.h>
-#include <Util/log.h>
-#include <debug.h>
-#include <stdio.h>
-
-#include <magic_enum.hpp>
 #include <string>
+#include <fmt/core.h>
+
+#include "common/debug.h"
+#include "common/log.h"
+#include "core/hle/error_codes.h"
+#include "core/hle/libraries/libs.h"
+#include "core/hle/libraries/libscegnmdriver/libscegnmdriver.h"
+#include "core/hle/libraries/libscevideoout/video_out.h"
+#include "core/hle/libraries/libscevideoout/gpu_memory.h"
+#include "core/hle/libraries/libscevideoout/video_out_buffer.h"
+#include "core/hle/libraries/libuserservice/usr_mng_codes.h"
 
 #include "Objects/video_out_ctx.h"
 #include "Emulator/Util/singleton.h"

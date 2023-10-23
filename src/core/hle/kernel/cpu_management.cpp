@@ -1,13 +1,14 @@
-#include "cpu_management.h"
+#include "common/log.h"
+#include "core/hle/kernel/cpu_management.h"
+#include "core/hle/libraries/libs.h"
 #include "Util/config.h"
-#include <Util/log.h>
-#include <Core/PS4/HLE/Libs.h>
 
-namespace HLE::Libs::LibKernel::CPUManagement {
-int PS4_SYSV_ABI sceKernelIsNeoMode() {
+namespace Core::Kernel {
+
+s32 PS4_SYSV_ABI sceKernelIsNeoMode() {
     PRINT_FUNCTION_NAME();
-    bool isNeo = Config::isNeoMode();
+    const bool isNeo = Config::isNeoMode();
     return isNeo ? 1 : 0;
 }
 
-};  // namespace HLE::Libs::LibKernel::CPUManagement
+}; // namespace Core::Kernel

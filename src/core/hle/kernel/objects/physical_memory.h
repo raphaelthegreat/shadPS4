@@ -1,14 +1,15 @@
 #pragma once
-#include <types.h>
-#include <Core/virtual_memory.h>
-#include <Core/PS4/GPU/gpu_memory.h>
+
+#include "common/types.h"
+#include "common/virtual_memory.h"
+#include "core/hle/libraries/libscevideoout/gpu_memory.h"
 #include <mutex>
 #include <vector>
 
-namespace HLE::Kernel::Objects {
+namespace Core::Kernel {
 
 class PhysicalMemory {
-  public:
+public:
     struct AllocatedBlock {
         u64 start_addr;
         u64 size;
@@ -16,17 +17,18 @@ class PhysicalMemory {
         u64 map_virtual_addr;
         u64 map_size;
         int prot;
-        VirtualMemory::MemoryMode cpu_mode;
+        Common::MemoryMode cpu_mode;
         GPU::MemoryMode gpu_mode;
     };
+
     PhysicalMemory() {}
     virtual ~PhysicalMemory() {}
 
-  public:
+public:
     bool Alloc(u64 searchStart, u64 searchEnd, u64 len, u64 alignment, u64* physAddrOut, int memoryType);
-    bool Map(u64 virtual_addr, u64 phys_addr, u64 len, int prot, VirtualMemory::MemoryMode cpu_mode, GPU::MemoryMode gpu_mode);
+    bool Map(u64 virtual_addr, u64 phys_addr, u64 len, int prot, Common::MemoryMode cpu_mode, GPU::MemoryMode gpu_mode);
 
-  private:
+private:
     std::vector<AllocatedBlock> m_allocatedBlocks;
     std::mutex m_mutex;
 };

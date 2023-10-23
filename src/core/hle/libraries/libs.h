@@ -1,10 +1,11 @@
 #pragma once
-#include "../Loader/SymbolsResolver.h"
-#include <Core/PS4/Loader/Elf.h>
+
+#include "core/loader/symbols_resolver.h"
+#include "core/loader/elf.h"
 
 #define LIB_FUNCTION(nid, lib, libversion, mod, moduleVersionMajor, moduleVersionMinor, function) \
     {\
-	SymbolRes sr{}; \
+    Loader::SymbolRes sr{}; \
 	sr.name = nid; \
 	sr.library = lib; \
 	sr.library_version = libversion;\
@@ -18,7 +19,7 @@
 
 #define LIB_OBJ(nid, lib, libversion, mod, moduleVersionMajor, moduleVersionMinor, function) \
     {                                                                                             \
-        SymbolRes sr{};                                                                           \
+    Loader::SymbolRes sr{};                                                                       \
         sr.name = nid;                                                                            \
         sr.library = lib;                                                                         \
         sr.library_version = libversion;                                                          \
@@ -38,6 +39,8 @@
 #define PRINT_DUMMY_FUNCTION_NAME() \
     { LOG_WARN_IF(true, "dummy {}()\n", __func__); }
 
-namespace HLE::Libs {
-	void Init_HLE_Libs(SymbolsResolver* sym);
-}
+namespace Core::Libraries {
+
+void Init_HLE_Libs(Loader::SymbolsResolver* sym);
+
+} // namespace Core::Libraries

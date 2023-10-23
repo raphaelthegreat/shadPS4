@@ -1,10 +1,10 @@
 #pragma once
-#include <Emulator/HLE/Libraries/LibUserService/user_service.h>
-#include <types.h>
 
-#include "Core/PS4/Loader/SymbolsResolver.h"
+#include "common/types.h"
+#include "core/loader/symbols_resolver.h"
+#include "core/hle/libraries/libuserservice/user_service.h"
 
-namespace Emulator::HLE::Libraries::LibPad {
+namespace Core::Libraries {
 
 enum class ScePadButton : u32 {
     L3 = 0x00000002,
@@ -28,17 +28,17 @@ enum class ScePadButton : u32 {
 };
 
 struct ScePadOpenParam {
-    u08 reserve[8];
+    u8 reserve[8];
 };
 
 struct ScePadAnalogStick {
-    u08 x;
-    u08 y;
+    u8 x;
+    u8 y;
 };
 struct ScePadAnalogButtons {
-    u08 l2;
-    u08 r2;
-    u08 padding[2];
+    u8 l2;
+    u8 r2;
+    u8 padding[2];
 };
 
 struct SceFQuaternion {
@@ -52,24 +52,24 @@ struct SceFVector3 {
 struct ScePadTouch {
     u16 x;
     u16 y;
-    u08 id;
-    u08 reserve[3];
+    u8 id;
+    u8 reserve[3];
 };
 
 constexpr int SCE_PAD_MAX_TOUCH_NUM = 2;
 
-typedef struct ScePadTouchData {
-    u08 touchNum;
-    u08 reserve[3];
+struct ScePadTouchData {
+    u8 touchNum;
+    u8 reserve[3];
     u32 reserve1;
     ScePadTouch touch[SCE_PAD_MAX_TOUCH_NUM];
-} ScePadTouchData;
+};
 
 struct ScePadExtensionUnitData {
     u32 extensionUnitId;
-    u08 reserve[1];
-    u08 dataLength;
-    u08 data[10];
+    u8 reserve[1];
+    u8 dataLength;
+    u8 data[10];
 };
 
 struct ScePadData {
@@ -89,11 +89,11 @@ struct ScePadData {
     uint8_t deviceUniqueDataLen;
     uint8_t deviceUniqueData[12];
 };
-// hle functions
-int PS4_SYSV_ABI scePadInit();
-int PS4_SYSV_ABI scePadOpen(Emulator::HLE::Libraries::LibUserService::SceUserServiceUserId userId, s32 type, s32 index,
-                            const ScePadOpenParam* pParam);
-int PS4_SYSV_ABI scePadReadState(int32_t handle, ScePadData* pData);
 
-void libPad_Register(SymbolsResolver* sym);
-};  // namespace Emulator::HLE::Libraries::LibPad
+int PS4_SYSV_ABI scePadInit();
+int PS4_SYSV_ABI scePadOpen(SceUserServiceUserId userId, s32 type, s32 index, const ScePadOpenParam* pParam);
+int PS4_SYSV_ABI scePadReadState(s32 handle, ScePadData* pData);
+
+void libPad_Register(Loader::SymbolsResolver* sym);
+
+};  // namespace Core::Libraries

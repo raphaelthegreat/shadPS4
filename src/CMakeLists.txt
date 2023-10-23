@@ -26,6 +26,9 @@ add_executable(shadps4
     core/aerolib/aerolib.inl
     core/aerolib/stubs.cpp
     core/aerolib/stubs.h
+    core/file_sys/generic_file_system.h
+    core/file_sys/meta_file_system.cpp
+    core/file_sys/meta_file_system.h
     core/frontend/emu_window.h
     core/hle/error_codes.h
     core/hle/kernel/cpu_management.cpp
@@ -50,13 +53,6 @@ add_executable(shadps4
     core/hle/libraries/libc/va_ctx.h
     core/hle/libraries/libkernel/libkernel.cpp
     core/hle/libraries/libkernel/libkernel.h
-    core/hle/libraries/libkernel/file_system/file_system.cpp
-    core/hle/libraries/libkernel/file_system/file_system.h
-    core/hle/libraries/libkernel/file_system/generic_file_system.h
-    core/hle/libraries/libkernel/file_system/meta_file_system.cpp
-    core/hle/libraries/libkernel/file_system/meta_file_system.h
-    core/hle/libraries/libkernel/file_system/posix_file_system.cpp
-    core/hle/libraries/libkernel/file_system/posix_file_system.h
     core/hle/libraries/libpad/pad.cpp
     core/hle/libraries/libpad/pad.h
     core/hle/libraries/libscegnmdriver/libscegnmdriver.cpp
@@ -97,7 +93,7 @@ add_executable(shadps4
 )
 
 create_target_directory_groups(shadps4)
-target_link_libraries(shadps4 PRIVATE fmt mincore spdlog imgui SDL3-shared zydis toml11::toml11)
+target_link_libraries(shadps4 PRIVATE fmt mincore winpthread spdlog imgui SDL3-shared zydis toml11::toml11)
 target_include_directories(shadps4 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_custom_command(TARGET shadps4 POST_BUILD

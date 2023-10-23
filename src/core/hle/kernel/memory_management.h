@@ -1,12 +1,10 @@
 #pragma once
 
-#include <types.h>
-
-// constants
+#include "common/types.h"
 
 constexpr u64 SCE_KERNEL_MAIN_DMEM_SIZE = 5376_MB;  // ~ 6GB
 
-namespace HLE::Libs::LibKernel::MemoryManagement {
+namespace Core::Kernel {
 
 // memory types
 
@@ -33,4 +31,5 @@ enum MemoryProtection : u32 {
 u64 PS4_SYSV_ABI sceKernelGetDirectMemorySize();
 int PS4_SYSV_ABI sceKernelAllocateDirectMemory(s64 searchStart, s64 searchEnd, u64 len, u64 alignment, int memoryType, s64* physAddrOut);
 int PS4_SYSV_ABI sceKernelMapDirectMemory(void** addr, u64 len, int prot, int flags, s64 directMemoryStart, u64 alignment);
-};  // namespace HLE::Libs::LibKernel::MemoryManagement
+
+}; // namespace Core::Kernel

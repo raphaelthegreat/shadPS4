@@ -1,9 +1,8 @@
-#include "user_service.h"
+#include "core/hle/error_codes.h"
+#include "core/hle/libraries/libs.h"
+#include "core/hle/libraries/libuserservice/user_service.h"
 
-#include <Core/PS4/HLE/ErrorCodes.h>
-#include <Core/PS4/HLE/Libs.h>
-
-namespace Emulator::HLE::Libraries::LibUserService {
+namespace Core::Libraries {
 
 s32 PS4_SYSV_ABI sceUserServiceInitialize(const SceUserServiceInitializeParams* initParams) {
     // dummy
@@ -19,8 +18,9 @@ s32 PS4_SYSV_ABI sceUserServiceGetLoginUserIdList(SceUserServiceLoginUserIdList*
 
     return SCE_OK;
 }
-void libUserService_Register(SymbolsResolver* sym) {
+void libUserService_Register(Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("j3YMu1MVNNo", "libSceUserService", 1, "libSceUserService", 1, 1, sceUserServiceInitialize);
     LIB_FUNCTION("fPhymKNvK-A", "libSceUserService", 1, "libSceUserService", 1, 1, sceUserServiceGetLoginUserIdList);
 }
+
 };  // namespace Emulator::HLE::Libraries::LibUserService

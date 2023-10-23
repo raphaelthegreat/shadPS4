@@ -1,10 +1,8 @@
-#include "ThreadManagement.h"
+#include "common/debug.h"
+#include "core/hle/error_codes.h"
+#include "core/hle/kernel/thread_management.h"
 
-#include <debug.h>
-
-#include "../ErrorCodes.h"
-
-namespace HLE::Libs::LibKernel::ThreadManagement {
+namespace Core::Kernel {
 
 thread_local PthreadInternal* g_pthread_self = nullptr;
 PThreadCxt* g_pthread_cxt = nullptr;
@@ -122,4 +120,4 @@ int scePthreadAttrSetschedpolicy(ScePthreadAttr* attr, int policy) {
     return SCE_KERNEL_ERROR_EINVAL;
 }
 
-};  // namespace HLE::Libs::LibKernel::ThreadManagement
+};  // namespace Core::Kernel
