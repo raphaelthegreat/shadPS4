@@ -19,12 +19,18 @@ add_subdirectory(SDL)
 
 # winpthreads
 add_subdirectory(winpthread)
+target_include_directories(winpthread INTERFACE winpthread/include)
 
 # toml11
+set(toml11_INSTALL OFF CACHE BOOL "")
 add_subdirectory(toml11)
 
-# vulkan
-add_subdirectory(vulkan)
+# vma
+add_library(vma INTERFACE)
+target_include_directories(vma SYSTEM INTERFACE ./vma/include)
+
+# vulkan-headers
+add_subdirectory(vulkan-headers)
 
 # zydis
 # Register Zydis dependency.

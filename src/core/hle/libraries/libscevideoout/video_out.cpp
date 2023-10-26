@@ -16,7 +16,7 @@
 #include "emulator.h"
 #include "graphics_render.h"
 
-namespace HLE::Libs::Graphics::VideoOut {
+namespace Core::Libraries {
 
 constexpr bool log_file_videoout = true;  // disable it to disable logging
 
@@ -210,18 +210,21 @@ s32 PS4_SYSV_ABI sceVideoOutRegisterBuffers(s32 handle, s32 startIndex, void* co
 
     return registration_index;
 }
+
 s32 PS4_SYSV_ABI sceVideoOutSetFlipRate(s32 handle, s32 rate) {
     PRINT_FUNCTION_NAME();
     auto* videoOut = singleton<HLE::Graphics::Objects::VideoOutCtx>::instance();
     videoOut->getCtx(handle)->m_flip_rate = rate;
     return SCE_OK;
 }
+
 s32 PS4_SYSV_ABI sceVideoOutIsFlipPending(s32 handle) {
     PRINT_FUNCTION_NAME();
     auto* videoOut = singleton<HLE::Graphics::Objects::VideoOutCtx>::instance();
     s32 pending = videoOut->getCtx(handle)->m_flip_status.flipPendingNum;
     return pending;
 }
+
 s32 PS4_SYSV_ABI sceVideoOutSubmitFlip(s32 handle, s32 bufferIndex, s32 flipMode, s64 flipArg) {
     PRINT_FUNCTION_NAME();
     auto* videoOut = singleton<HLE::Graphics::Objects::VideoOutCtx>::instance();
@@ -246,9 +249,10 @@ s32 PS4_SYSV_ABI sceVideoOutSubmitFlip(s32 handle, s32 bufferIndex, s32 flipMode
         LOG_TRACE_IF(log_file_videoout, "sceVideoOutSubmitFlip flip queue is full\n");
         return SCE_VIDEO_OUT_ERROR_FLIP_QUEUE_FULL;
     }
-    HLE::Libs::LibSceGnmDriver::sceGnmFlushGarlic();  // hackish should be done that neccesary for niko's homebrew
+    sceGnmFlushGarlic();  // hackish should be done that neccesary for niko's homebrew
     return SCE_OK;
 }
+
 s32 PS4_SYSV_ABI sceVideoOutGetFlipStatus(s32 handle, SceVideoOutFlipStatus* status) {
     PRINT_FUNCTION_NAME();
     auto* videoOut = singleton<HLE::Graphics::Objects::VideoOutCtx>::instance();
@@ -265,12 +269,14 @@ s32 PS4_SYSV_ABI sceVideoOutGetFlipStatus(s32 handle, SceVideoOutFlipStatus* sta
     LOG_INFO_IF(log_file_videoout, "currentBuffer = {}\n", status->currentBuffer);
     return 0;
 }
+
 s32 PS4_SYSV_ABI sceVideoOutGetResolutionStatus(s32 handle, SceVideoOutResolutionStatus* status) {
     PRINT_FUNCTION_NAME();
     auto* videoOut = singleton<HLE::Graphics::Objects::VideoOutCtx>::instance();
     *status = videoOut->getCtx(handle)->m_resolution;
     return SCE_OK;
 }
+
 s32 PS4_SYSV_ABI sceVideoOutOpen(SceUserServiceUserId userId, s32 busType, s32 index, const void* param) {
     PRINT_FUNCTION_NAME();
     if (userId != SCE_USER_SERVICE_USER_ID_SYSTEM && userId != 0) {
@@ -296,14 +302,18 @@ s32 PS4_SYSV_ABI sceVideoOutOpen(SceUserServiceUserId userId, s32 busType, s32 i
 
     return handle;
 }
+
 s32 PS4_SYSV_ABI sceVideoOutClose(s32 handle) {
     auto* videoOut = singleton<HLE::Graphics::Objects::VideoOutCtx>::instance();
     videoOut->Close(handle);
     return SCE_OK;
 }
-s32 PS4_SYSV_ABI sceVideoOutUnregisterBuffers(s32 handle, s32 attributeIndex) { BREAKPOINT(); }
 
-void videoOutRegisterLib(SymbolsResolver* sym) {
+s32 PS4_SYSV_ABI sceVideoOutUnregisterBuffers(s32 handle, s32 attributeIndex) {
+    BREAKPOINT();
+}
+
+void videoOutRegisterLib(Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("SbU3dwp80lQ", "libSceVideoOut", 1, "libSceVideoOut", 0, 0, sceVideoOutGetFlipStatus);
     LIB_FUNCTION("U46NwOiJpys", "libSceVideoOut", 1, "libSceVideoOut", 0, 0, sceVideoOutSubmitFlip);
     LIB_FUNCTION("w3BY+tAEiQY", "libSceVideoOut", 1, "libSceVideoOut", 0, 0, sceVideoOutRegisterBuffers);
@@ -316,4 +326,5 @@ void videoOutRegisterLib(SymbolsResolver* sym) {
     LIB_FUNCTION("N5KDtkIjjJ4", "libSceVideoOut", 1, "libSceVideoOut", 0, 0, sceVideoOutUnregisterBuffers);
     LIB_FUNCTION("uquVH4-Du78", "libSceVideoOut", 1, "libSceVideoOut", 0, 0, sceVideoOutClose);
 }
-}  // namespace HLE::Libs::Graphics::VideoOut
+
+}  // namespace Core::Libraries

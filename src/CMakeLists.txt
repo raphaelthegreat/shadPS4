@@ -11,6 +11,7 @@ add_executable(shadps4
     common/fs_file.h
     common/log.cpp
     common/log.h
+    common/singleton.h
     common/string_util.cpp
     common/string_util.h
     common/types.h
@@ -74,6 +75,23 @@ add_executable(shadps4
     core/loader/elf.h
     core/loader/symbols_resolver.cpp
     core/loader/symbols_resolver.h
+    graphics/graphics_ctx.h
+    graphics/tile_manager.cpp
+    graphics/tile_manager.h
+    graphics/video_out_ctx.cpp
+    graphics/video_out_ctx.h
+    graphics/vk_common.cpp
+    graphics/vk_common.h
+    graphics/vk_instance.cpp
+    graphics/vk_instance.h
+    graphics/vk_platform.cpp
+    graphics/vk_platform.h
+    graphics/vk_scheduler.cpp
+    graphics/vk_scheduler.h
+    graphics/vk_swapchain.cpp
+    graphics/vk_swapchain.h
+    graphics/vulkan_util.cpp
+    graphics/vulkan_util.h
     shad_sdl/config.cpp
     shad_sdl/config.h
     shad_sdl/elf_viewer.cpp
@@ -81,19 +99,10 @@ add_executable(shadps4
     shad_sdl/emu_window_sdl.cpp
     shad_sdl/emu_window_sdl.h
     shad_sdl/main.cpp
-    video_core/graphics_ctx.h
-    video_core/graphics_render.cpp
-    video_core/graphics_render.h
-    video_core/tile_manager.cpp
-    video_core/tile_manager.h
-    video_core/video_out_ctx.cpp
-    video_core/video_out_ctx.h
-    video_core/vulkan_util.cpp
-    video_core/vulkan_util.h
 )
 
 create_target_directory_groups(shadps4)
-target_link_libraries(shadps4 PRIVATE fmt mincore winpthread spdlog imgui SDL3-shared zydis toml11::toml11)
+target_link_libraries(shadps4 PRIVATE fmt mincore winpthread spdlog imgui SDL3-shared zydis toml11::toml11 Vulkan::Headers vma)
 target_include_directories(shadps4 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_custom_command(TARGET shadps4 POST_BUILD

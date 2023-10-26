@@ -1,9 +1,8 @@
-#include "video_out_ctx.h"
+#include "common/debug.h"
+#include "core/hle/libraries/libkernel/libkernel.h"
+#include "graphics/video_out_ctx.h"
 
-#include <Core/PS4/HLE/LibKernel.h>
-#include <debug.h>
-
-namespace HLE::Graphics::Objects {
+namespace Core::Libraries {
 
 void VideoOutCtx::Init(u32 width, u32 height) {
     m_video_out_ctx.m_resolution.fullWidth = width;
@@ -89,22 +88,19 @@ bool FlipQueue::submitFlip(VideoConfigInternal* cfg, s32 index, s64 flip_arg) {
     return true;
 }
 
-bool FlipQueue::flip(u32 micros) { 
-    const auto request = [&]() -> Request* {
+bool FlipQueue::flip(u32 micros) {
+    Request* request;
+    {
         std::unique_lock lock{m_mutex};
         m_submit_cond.wait_for(lock, std::chrono::microseconds(micros),
                                [&] { return !m_requests.empty(); });
         if (m_requests.empty()) {
-            return nullptr;
+            return false;
         }
-        return &m_requests.at(0);  // Process first request
-    }();
-    
-    if (!request) {
-        return false;
+        request = &m_requests.at(0);  // Process first request
     }
 
-   const auto buffer = request->cfg->buffers[request->index].buffer_render;
+    const auto buffer = request->cfg->buffers[request->index].buffer_render;
     Emu::DrawBuffer(buffer);
 
     std::scoped_lock lock{m_mutex};
@@ -113,7 +109,7 @@ bool FlipQueue::flip(u32 micros) {
         std::scoped_lock cfg_lock{request->cfg->m_mutex};
         for (auto& flip_eq : request->cfg->m_flip_evtEq) {
             if (flip_eq != nullptr) {
-                flip_eq->triggerEvent(SCE_VIDEO_OUT_EVENT_FLIP, HLE::Kernel::Objects::EVFILT_VIDEO_OUT,
+                flip_eq->triggerEvent(SCE_VIDEO_OUT_EVENT_FLIP, Kernel::EVFILT_VIDEO_OUT,
                                       reinterpret_cast<void*>(request->flip_arg));
             }
         }
@@ -124,7 +120,7 @@ bool FlipQueue::flip(u32 micros) {
 
     request->cfg->m_flip_status.count++;
     //TODO request.cfg->m_flip_status.processTime = LibKernel::KernelGetProcessTime();
-    request->cfg->m_flip_status.tsc = HLE::Libs::LibKernel::sceKernelReadTsc();
+    request->cfg->m_flip_status.tsc = sceKernelReadTsc();
     request->cfg->m_flip_status.submitTsc = request->submit_tsc;
     request->cfg->m_flip_status.flipArg = request->flip_arg;
     request->cfg->m_flip_status.currentBuffer = request->index;
@@ -133,4 +129,4 @@ bool FlipQueue::flip(u32 micros) {
     return false; 
 }
 
-}; // namespace HLE::Graphics::Objects
+}; // namespace Core::Libraries

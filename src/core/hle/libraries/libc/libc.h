@@ -1,10 +1,10 @@
 #pragma once
 
-#include <types.h>
+#include "common/types.h"
+#include "core/loader/symbols_resolver.h"
+#include "core/hle/libraries/libc/printf.h"
 
-#include "printf.h"
-
-namespace Emulator::HLE::Libraries::LibC {
+namespace Core::Libraries::LibC {
 
 // HLE functions
 PS4_SYSV_ABI int printf(VA_ARGS);
@@ -29,4 +29,10 @@ float PS4_SYSV_ABI asinf(float num);
 double PS4_SYSV_ABI pow(double base, double exponent);
 double PS4_SYSV_ABI _Sin(double x);
 
-}  // namespace Emulator::HLE::Libraries::LibC
+PS4_SYSV_ABI void init_env();
+PS4_SYSV_ABI void _Assert();
+PS4_SYSV_ABI void catchReturnFromMain(int status);
+
+void libC_Register(Loader::SymbolsResolver* sym);
+
+}  // namespace Core::Libraries::LibC

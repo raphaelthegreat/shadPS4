@@ -50,16 +50,16 @@
 
 #pragma once
 
-#include <stdio.h>
-
+#include <cstdio>
 #include <cstdarg>
 #include <cstdbool>
 #include <cstddef>
 #include <cstdint>
 #include <string>
-#include "va_ctx.h"
 
-namespace Emulator::HLE::Libraries::LibC {
+#include "core/hle/libraries/libc/va_ctx.h"
+
+namespace Core::Libraries {
 // ntoa conversion buffer size, this must be big enough to hold
 // one converted numeric number including padded zeros (dynamically created on stack)
 // 32 byte is a good default
@@ -578,7 +578,7 @@ static inline int _vsnprintf(out_fct_type out, char* buffer, const char* format,
                     } else {
                         // const unsigned int value = (flags & FLAGS_CHAR) ? (unsigned char)va.next<unsigned int>(cpu, mem) : (flags & FLAGS_SHORT) ?
                         //     (unsigned short int)va.next<unsigned int>(cpu, mem) : va.next<unsigned int>(cpu, mem);
-                        const unsigned int value = (flags & FLAGS_CHAR)    ? static_cast<u08>(vaArgInteger(va_list))
+                        const unsigned int value = (flags & FLAGS_CHAR)    ? static_cast<u8>(vaArgInteger(va_list))
                                                    : (flags & FLAGS_SHORT) ? static_cast<u16>(vaArgInteger(va_list))
                                                                            : static_cast<u32>(vaArgInteger(va_list));
                         idx = _ntoa_long(out, buffer, idx, maxlen, value, false, base, precision, width, flags);

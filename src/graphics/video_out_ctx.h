@@ -2,17 +2,17 @@
 
 #include <condition_variable>
 #include <mutex>
-#include <Core/PS4/HLE/Graphics/video_out.h>
-#include <Core/PS4/HLE/Graphics/graphics_ctx.h>
-#include <emulator.h>
 
-using namespace HLE::Libs::Graphics::VideoOut;
+#include "common/types.h"
+#include "core/emulator.h"
+#include "core/hle/kernel/event_queues.h"
+#include "core/hle/libraries/libscevideoout/video_out.h"
 
-namespace HLE::Graphics::Objects {
+namespace Core::Libraries {
 
 struct VideoOutBufferInfo {
     const void* buffer = nullptr;
-    HLE::Libs::Graphics::VideoOutVulkanImage* buffer_render = nullptr;
+    void* buffer_render = nullptr;
     u64 buffer_size = 0;
     u64 buffer_pitch = 0;
     int set_id = 0;
@@ -24,7 +24,7 @@ struct VideoConfigInternal {
     bool isOpened = false;
     SceVideoOutFlipStatus m_flip_status;
     SceVideoOutVblankStatus m_vblank_status;
-    std::vector<HLE::Libs::LibKernel::EventQueues::SceKernelEqueue> m_flip_evtEq;
+    std::vector<Kernel::SceKernelEqueue> m_flip_evtEq;
     int m_flip_rate = 0;
     VideoOutBufferInfo buffers[16];
     std::vector<VideoOutBufferSetInternal> buffers_sets;
@@ -32,19 +32,20 @@ struct VideoConfigInternal {
 };
 
 class FlipQueue {
-  public:
-    FlipQueue() {}
-    virtual ~FlipQueue() {}
+public:
+    FlipQueue() = default;
+    virtual ~FlipQueue() = default;
 
     void getFlipStatus(VideoConfigInternal* cfg, SceVideoOutFlipStatus* out);
     bool submitFlip(VideoConfigInternal* cfg, s32 index, s64 flip_arg);
     bool flip(u32 micros);
-  private:
+
+private:
     struct Request {
         VideoConfigInternal* cfg;
         int index;
-        int64_t flip_arg;
-        uint64_t submit_tsc;
+        s64 flip_arg;
+        u64 submit_tsc;
     };
 
     std::mutex m_mutex;
@@ -77,4 +78,4 @@ class VideoOutCtx {
     FlipQueue m_flip_queue;
     HLE::Libs::Graphics::GraphicCtx* m_graphic_ctx = nullptr;
 };
-};  // namespace HLE::Graphics::Objects
+};  // namespace Core::Libraries

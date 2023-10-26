@@ -1,111 +1,25 @@
-#include "emulator.h"
-
-#include <Core/PS4/HLE/Graphics/graphics_render.h>
-#include <Emulator/Host/controller.h>
-#include "Emulator/Util/singleton.h"
-#include <vulkan_util.h>
-#include <SDL.h>
-#include <Util/config.h>
 #include <fmt/core.h>
+#include <SDL.h>
 
-#include "Core/PS4/HLE/Graphics/video_out.h"
-#include "Emulator/HLE/Libraries/LibPad/pad.h"
-#include "version.h"
+#include "core/emulator.h"
+#include "core/hle/libraries/libpad/pad.h"
+#include "core/hle/libraries/libscevideoout/video_out.h"
+#include "core/input/controller.h"
+#include "shad_sdl/config.h"
+#include "shad_sdl/emu_window_sdl.h"
 
 namespace Core {
 
-WindowSDL::WindowSDL(::Emulator::Host::Controller::GameController& controller_, s32 width_, s32 height_)
-    : Window(width_, height_), controller{controller_} {
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK) < 0) {
-        fmt::print("{}\n", SDL_GetError());
-        std::exit(0);
-    }
-
-    const std::string title = fmt::format("shadps4 v {}", ::Emulator::VERSION);
-    sdl_window = SDL_CreateWindowWithPosition(title.c_str(), SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                                              width, height, SDL_WINDOW_HIDDEN | SDL_WINDOW_VULKAN);
-
-    if (!sdl_window) [[unlikely]] {
-        fmt::print("{}\n", SDL_GetError());
-        std::exit(0);
-    }
-    SDL_SetWindowResizable(sdl_window, SDL_FALSE);
-    is_running = true;
-}
-
-WindowSDL::~WindowSDL() {
-    SDL_DestroyWindow(sdl_window);
-}
-
-void WindowSDL::pollEvents() {
-    SDL_Event event;
-    while (SDL_PollEvent(&event)) {
-        switch (event.type) {
-            case SDL_EVENT_QUIT:
-            case SDL_EVENT_TERMINATING:
-                is_running = false;
-                break;
-            case SDL_EVENT_WINDOW_RESIZED:
-            case SDL_EVENT_WINDOW_MINIMIZED:
-            case SDL_EVENT_WINDOW_MAXIMIZED:
-            case SDL_EVENT_WINDOW_RESTORED:
-                resizeEvent();
-                break;
-            case SDL_EVENT_KEY_DOWN:
-            case SDL_EVENT_KEY_UP:
-                keyboardEvent(&event);
-                break;
-        }
-    }
-}
-
-void WindowSDL::keyboardEvent(SDL_Event* event) {
-    using ::Emulator::HLE::Libraries::LibPad::ScePadButton;
-
-    const ScePadButton button = [event] {
-        switch (event->key.keysym.sym) {
-            case SDLK_UP:
-                return ScePadButton::UP;
-            case SDLK_DOWN:
-                return ScePadButton::DOWN;
-            case SDLK_LEFT:
-                return ScePadButton::LEFT;
-            case SDLK_RIGHT:
-                return ScePadButton::RIGHT;
-            case SDLK_KP_8:
-                return ScePadButton::TRIANGLE;
-            case SDLK_KP_6:
-                return ScePadButton::CIRCLE;
-            case SDLK_KP_2:
-                return ScePadButton::CROSS;
-            case SDLK_KP_4:
-                return ScePadButton::SQUARE;
-            case SDLK_RETURN:
-                return ScePadButton::OPTIONS;
-            default:
-                return ScePadButton::NONE;
-        }
-    }();
-
-    if (button != ScePadButton::NONE) {
-        controller.checKButton(0, static_cast<u32>(button), event->type == SDL_EVENT_KEY_DOWN);
-    }
-}
-
-void WindowSDL::resizeEvent() {
-    SDL_GetWindowSizeInPixels(sdl_window, &width, &height);
-}
-
-Emulator::Emulator() {
-    auto& controller = *singleton<::Emulator::Host::Controller::GameController>::instance();
-    window = std::make_unique<WindowSDL>(controller, Config::getScreenWidth(), Config::getScreenHeight());
+Emulator::Emulator(const Config& config_) : config{config_} {
+    controller = std::make_unique<Input::GameController>();
+    window = std::make_unique<EmuWindowSDL>(*controller, config.getScreenWidth(), config.getScreenHeight());
     //Graphics::Vulkan::vulkanCreate(window_ctx);
 }
 
 void Emulator::run() {
     while (window->isRunning()) {
         window->pollEvents();
-        HLE::Libs::Graphics::VideoOut::videoOutFlip(100000);  // flip every 0.1 sec
+        Core::Libraries::videoOutFlip(100000);  // flip every 0.1 sec
     }
 }
 

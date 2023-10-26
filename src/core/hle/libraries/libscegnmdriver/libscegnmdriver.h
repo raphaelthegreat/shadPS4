@@ -7,6 +7,6 @@ namespace Core::Libraries {
 int32_t sceGnmSubmitDone();
 void sceGnmFlushGarlic();
 
-void LibSceGnmDriver_Register(Loader::SymbolsResolver* sym);
+void libSceGnmDriver_Register(Loader::SymbolsResolver* sym);
 
 };  // namespace Core::Libraries

@@ -1,10 +1,10 @@
-#include "libc_cxa.h"
-#include "debug.h"
-#include "Util/log.h"
+#include "common/log.h"
+#include "core/hle/libraries/libc/libc_cxa.h"
 
 // adapted from https://opensource.apple.com/source/libcppabi/libcppabi-14/src/cxa_guard.cxx.auto.html
 
-namespace Emulator::HLE::Libraries::LibC::Cxa {
+namespace Core::Libraries::LibC {
+
 constexpr bool log_file_cxa = true;  // disable it to disable logging
 
 // This file implements the __cxa_guard_* functions as defined at:
@@ -53,15 +53,15 @@ __attribute__((noinline)) static pthread_mutex_t* guard_mutex() {
 }
 
 // helper functions for getting/setting flags in guard_object
-static bool initializerHasRun(u64* guard_object) { return (*((u08*)guard_object) != 0); }
+static bool initializerHasRun(u64* guard_object) { return (*((u8*)guard_object) != 0); }
 
-static void setInitializerHasRun(u64* guard_object) { *((u08*)guard_object) = 1; }
+static void setInitializerHasRun(u64* guard_object) { *((u8*)guard_object) = 1; }
 
-static bool inUse(u64* guard_object) { return (((u08*)guard_object)[1] != 0); }
+static bool inUse(u64* guard_object) { return (((u8*)guard_object)[1] != 0); }
 
-static void setInUse(u64* guard_object) { ((u08*)guard_object)[1] = 1; }
+static void setInUse(u64* guard_object) { ((u8*)guard_object)[1] = 1; }
 
-static void setNotInUse(u64* guard_object) { ((u08*)guard_object)[1] = 0; }
+static void setNotInUse(u64* guard_object) { ((u8*)guard_object)[1] = 0; }
 
 //
 // Returns 1 if the caller needs to run the initializer and then either
@@ -144,4 +144,4 @@ void PS4_SYSV_ABI __cxa_guard_abort(u64* guard_object) {
     setNotInUse(guard_object);
 }
 
-}  // namespace Emulator::HLE::Libraries::LibC::Cxa
+} // namespace Core::Libraries::LibC

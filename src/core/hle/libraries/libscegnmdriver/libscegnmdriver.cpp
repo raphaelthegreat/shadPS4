@@ -18,9 +18,9 @@ void sceGnmFlushGarlic() {
     GPU::flushGarlic(Emu::getGraphicCtx());
 }
 
-void LibSceGnmDriver_Register(Loader::SymbolsResolver* sym) {
+void libSceGnmDriver_Register(Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("yvZ73uQUqrk", "libSceGnmDriver", 1, "libSceGnmDriver", 1, 1, sceGnmSubmitDone);
     LIB_FUNCTION("iBt3Oe00Kvc", "libSceGnmDriver", 1, "libSceGnmDriver", 1, 1, sceGnmFlushGarlic);
 }
     
-};
+}; // namespace Core::Libraries

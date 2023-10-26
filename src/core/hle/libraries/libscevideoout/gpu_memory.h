@@ -1,16 +1,25 @@
 #pragma once
 
-#include <Core/PS4/HLE/Graphics/graphics_ctx.h>
-#include <types.h>
 #include <mutex>
 #include <vector>
+
+#include "common/types.h"
 
 namespace GPU {
 
 class GPUObject;
 
-enum class MemoryMode : u32 { NoAccess = 0, Read = 1, Write = 2, ReadWrite = 3 };
-enum class MemoryObjectType : u64 { InvalidObj, VideoOutBufferObj };
+enum class MemoryMode : u32 {
+    NoAccess = 0,
+    Read = 1,
+    Write = 2,
+    ReadWrite = 3,
+};
+
+enum class MemoryObjectType : u64 {
+    InvalidObj,
+    VideoOutBufferObj,
+};
 
 struct GpuMemoryObject {
     MemoryObjectType objectType = MemoryObjectType::InvalidObj;

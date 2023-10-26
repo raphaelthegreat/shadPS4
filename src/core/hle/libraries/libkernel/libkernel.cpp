@@ -51,7 +51,7 @@ int PS4_SYSV_ABI open(const char* path, int flags, /* SceKernelMode*/ u16 mode) 
     return result;
 }
 
-void LibKernel_Register(Loader::SymbolsResolver* sym) {
+void libKernel_Register(Loader::SymbolsResolver* sym) {
     // obj
     LIB_OBJ("f7uOxY9mM1U", "libkernel", 1, "libkernel", 1, 1, &g_stack_chk_guard);
     // memory

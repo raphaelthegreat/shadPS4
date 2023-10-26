@@ -1,4 +1,4 @@
-#include <types.h>
+#include "common/types.h"
 #include <xmmintrin.h>
 
 #define VA_ARGS                                                                                                                             \
@@ -26,7 +26,7 @@
     (ctx).va_list.fp_offset = offsetof(VaRegSave, fp);  \
     (ctx).va_list.overflow_arg_area = &overflow_arg_area;
 
-namespace Emulator::HLE::Libraries::LibC {
+namespace Core::Libraries {
 
 // https://stackoverflow.com/questions/4958384/what-is-the-format-of-the-x86-64-va-list-structure
 
@@ -49,7 +49,7 @@ struct VaCtx {
 
 template <class T, uint32_t Size>
 T vaArgRegSaveAreaGp(VaList* l) {
-    auto* addr = reinterpret_cast<T*>(static_cast<u08*>(l->reg_save_area) + l->gp_offset);
+    auto* addr = reinterpret_cast<T*>(static_cast<u8*>(l->reg_save_area) + l->gp_offset);
     l->gp_offset += Size;
     return *addr;
 }
@@ -63,7 +63,7 @@ T vaArgOverflowArgArea(VaList* l) {
 
 template <class T, uint32_t Size>
 T vaArgRegSaveAreaFp(VaList* l) {
-    auto* addr = reinterpret_cast<T*>(static_cast<u08*>(l->reg_save_area) + l->fp_offset);
+    auto* addr = reinterpret_cast<T*>(static_cast<u8*>(l->reg_save_area) + l->fp_offset);
     l->fp_offset += Size;
     return *addr;
 }
