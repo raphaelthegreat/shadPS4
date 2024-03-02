@@ -6,7 +6,7 @@
 #include <thread>
 
 #include <fmt/format.h>
-#include "Util/config.h"
+#include "common/config.h"
 
 #ifdef _WIN32
 #include <windows.h> // For OutputDebugStringW
@@ -175,7 +175,7 @@ public:
         using std::chrono::microseconds;
         using std::chrono::steady_clock;
 
-        message_queue.EmplaceWait(Entry{
+        const Entry entry = {
             .timestamp = duration_cast<microseconds>(steady_clock::now() - time_origin),
             .log_class = log_class,
             .log_level = log_level,
@@ -183,7 +183,9 @@ public:
             .line_num = line_num,
             .function = function,
             .message = std::move(message),
-        });
+        };
+        ForEachBackend([&entry](auto& backend) { backend.Write(entry); });
+        // message_queue.EmplaceWait(entry);
     }
 
 private:

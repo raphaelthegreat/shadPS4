@@ -85,49 +85,66 @@ add_subdirectory(externals)
 add_subdirectory(third-party)
 include_directories(src)
 
-set(LIBRARIES src/core/libraries/library_common.h
-              src/core/libraries/error_codes.h
-              src/core/libraries/libscegnmdriver.cpp
-              src/core/libraries/libscegnmdriver.h
+set(LIBRARIES src/core/libraries/error_codes.h
+              src/core/libraries/gnmdriver/libscegnmdriver_new.cpp
+              src/core/libraries/gnmdriver/libscegnmdriver_new.h
 )
-set(LIBC_SOURCES src/core/hle/libraries/libc/libc.cpp
-                 src/core/hle/libraries/libc/libc.h
-                 src/core/hle/libraries/libc/printf.h
-                 src/core/hle/libraries/libc/va_ctx.h
-                 src/core/hle/libraries/libc/libc_cxa.cpp
-                 src/core/hle/libraries/libc/libc_cxa.h
-                 src/core/hle/libraries/libc/libc_stdio.cpp
-                 src/core/hle/libraries/libc/libc_stdio.h
-                 src/core/hle/libraries/libc/libc_math.cpp
-                 src/core/hle/libraries/libc/libc_math.h
-                 src/core/hle/libraries/libc/libc_string.cpp
-                 src/core/hle/libraries/libc/libc_string.h
-                 src/core/hle/libraries/libc/libc_stdlib.cpp
-                 src/core/hle/libraries/libc/libc_stdlib.h
+set(LIBC_SOURCES src/core/libraries/libc/libc.cpp
+                 src/core/libraries/libc/libc.h
+                 src/core/libraries/libc/printf.h
+                 src/core/libraries/libc/va_ctx.h
+                 src/core/libraries/libc/libc_cxa.cpp
+                 src/core/libraries/libc/libc_cxa.h
+                 src/core/libraries/libc/libc_stdio.cpp
+                 src/core/libraries/libc/libc_stdio.h
+                 src/core/libraries/libc/libc_math.cpp
+                 src/core/libraries/libc/libc_math.h
+                 src/core/libraries/libc/libc_string.cpp
+                 src/core/libraries/libc/libc_string.h
+                 src/core/libraries/libc/libc_stdlib.cpp
+                 src/core/libraries/libc/libc_stdlib.h
 )
-set(USERSERVICE_SOURCES src/core/hle/libraries/libuserservice/libuserservice.cpp
-                        src/core/hle/libraries/libuserservice/libuserservice.h
-)
-
-set(PAD_SOURCES src/core/hle/libraries/libpad/pad.cpp
-                src/core/hle/libraries/libpad/pad.h
+set(USERSERVICE_SOURCES src/core/libraries/userservice/libuserservice.cpp
+                        src/core/libraries/userservice/libuserservice.h
 )
 
-set(SYSTEMSERVICE_SOURCES src/core/hle/libraries/libsystemservice/system_service.cpp
-                          src/core/hle/libraries/libsystemservice/system_service.h
+set(PAD_SOURCES src/core/libraries/pad/pad.cpp
+                src/core/libraries/pad/pad.h
 )
 
-set(FILESYSTEM_SOURCES src/core/hle/libraries/libkernel/file_system.cpp
-                       src/core/hle/libraries/libkernel/file_system.h
+set(SYSTEMSERVICE_SOURCES src/core/libraries/systemservice/system_service.cpp
+                          src/core/libraries/systemservice/system_service.h
+)
+
+set(FILESYSTEM_SOURCES src/core/libraries/kernel/file_system.cpp
+                       src/core/libraries/kernel/file_system.h
                        src/core/file_sys/fs.cpp
                        src/core/file_sys/fs.h
 )
 
-set(HOST_SOURCES src/Emulator/Host/controller.cpp
-                 src/Emulator/Host/controller.h
-)
+set(RENDERER_VULKAN src/video_core/renderer_vulkan/vk_common.cpp
+                    src/video_core/renderer_vulkan/vk_common.h
+                    src/video_core/renderer_vulkan/vk_descriptor_update_queue.cpp
+                    src/video_core/renderer_vulkan/vk_descriptor_update_queue.h
+                    src/video_core/renderer_vulkan/vk_instance.cpp
+                    src/video_core/renderer_vulkan/vk_instance.h
+                    src/video_core/renderer_vulkan/vk_master_semaphore.cpp
+                    src/video_core/renderer_vulkan/vk_master_semaphore.h
+                    src/video_core/renderer_vulkan/vk_platform.cpp
+                    src/video_core/renderer_vulkan/vk_platform.h
+                    src/video_core/renderer_vulkan/vk_resource_pool.cpp
+                    src/video_core/renderer_vulkan/vk_resource_pool.h
+                    src/video_core/renderer_vulkan/vk_scheduler.cpp
+                    src/video_core/renderer_vulkan/vk_scheduler.h
+                    src/video_core/renderer_vulkan/vk_shader_util.cpp
+                    src/video_core/renderer_vulkan/vk_shader_util.h
+                    src/video_core/renderer_vulkan/vk_stream_buffer.cpp
+                    src/video_core/renderer_vulkan/vk_stream_buffer.h
+                    src/video_core/renderer_vulkan/vk_swapchain.cpp
+                    src/video_core/renderer_vulkan/vk_swapchain.h)
 
 add_executable(shadps4
+    src/common/alignment.h
     src/common/assert.cpp
     src/common/assert.h
     src/common/bounded_threadsafe_queue.h
@@ -139,6 +156,8 @@ add_executable(shadps4
     src/common/discord.h
     src/common/error.cpp
     src/common/error.h
+    #src/common/host_memory.cpp
+    src/common/host_memory.h
     src/common/io_file.cpp
     src/common/io_file.h
     src/common/path_util.cpp
@@ -157,6 +176,7 @@ add_executable(shadps4
     src/common/native_clock.h
     src/common/rdtsc.cpp
     src/common/rdtsc.h
+    src/common/scope_exit.h
     src/common/singleton.h
     src/common/string_util.cpp
     src/common/string_util.h
@@ -165,18 +185,22 @@ add_executable(shadps4
     src/common/types.h
     src/common/uint128.h
     src/common/version.h
+    src/common/virtual_buffer.cpp
+    src/common/virtual_buffer.h
     ${LIBC_SOURCES}
     ${USERSERVICE_SOURCES}
     ${PAD_SOURCES}
     ${SYSTEMSERVICE_SOURCES}
     ${FILESYSTEM_SOURCES}
-    ${HOST_SOURCES}
     ${LIBRARIES}
+    ${RENDERER_VULKAN}
+    src/input/controller.cpp
+    src/input/controller.h
     src/main.cpp
     src/core/loader/elf.cpp
     src/core/loader/elf.h
-    src/Util/config.cpp
-    src/Util/config.h
+    src/common/config.cpp
+    src/common/config.h
     src/core/virtual_memory.cpp
     src/core/virtual_memory.h
     src/core/linker.cpp
@@ -185,66 +209,71 @@ add_executable(shadps4
     src/core/aerolib/stubs.h
     src/core/aerolib/aerolib.cpp
     src/core/aerolib/aerolib.h
-    src/core/hle/kernel/Objects/physical_memory.h
-    src/core/hle/kernel/Objects/physical_memory.cpp
-    src/core/PS4/HLE/Graphics/video_out.cpp
-    src/core/PS4/HLE/Graphics/video_out.h
-    src/core/hle/kernel/event_queues.cpp
-    src/core/hle/kernel/event_queues.h
-    src/core/hle/kernel/cpu_management.cpp
-    src/core/hle/kernel/cpu_management.h
+    src/core/libraries/kernel/physical_memory.h
+    src/core/libraries/kernel/physical_memory.cpp
+    src/core/libraries/kernel/event_queues.cpp
+    src/core/libraries/kernel/event_queues.h
+    src/core/libraries/kernel/cpu_management.cpp
+    src/core/libraries/kernel/cpu_management.h
     src/core/loader/symbols_resolver.h
     src/core/loader/symbols_resolver.cpp
-    src/core/hle/libraries/libs.cpp
-    src/core/hle/libraries/libs.h
-    src/core/hle/libraries/libkernel/libkernel.cpp
-    src/core/hle/libraries/libkernel/libkernel.h
-    src/core/hle/libraries/libscegnmdriver/libscegnmdriver.cpp
-    src/core/hle/libraries/libscegnmdriver/libscegnmdriver.h
-    src/core/hle/libraries/libkernel/thread_management.cpp
-    src/core/hle/libraries/libkernel/thread_management.h
-    src/core/hle/kernel/memory_management.cpp
-    src/core/hle/kernel/memory_management.h
-    src/core/hle/error_codes.h
-    src/core/PS4/GPU/gpu_memory.cpp
-    src/core/PS4/GPU/gpu_memory.h
+    src/core/libraries/libs.cpp
+    src/core/libraries/libs.h
+    src/core/libraries/kernel/libkernel.cpp
+    src/core/libraries/kernel/libkernel.h
+    src/core/libraries/gnmdriver/libscegnmdriver.cpp
+    src/core/libraries/gnmdriver/libscegnmdriver.h
+    src/core/libraries/videoout/buffer.h
+    src/core/libraries/videoout/driver.cpp
+    src/core/libraries/videoout/driver.h
+    src/core/libraries/videoout/video_out.cpp
+    src/core/libraries/videoout/video_out.h
+    src/core/libraries/kernel/thread_management.cpp
+    src/core/libraries/kernel/thread_management.h
+    src/core/libraries/kernel/memory_management.cpp
+    src/core/libraries/kernel/memory_management.h
+    src/core/libraries/error_codes.h
     src/emulator.cpp
     src/emulator.h
-    src/core/hle/kernel/Objects/event_queue.h
-    src/core/hle/kernel/Objects/event_queue.cpp
-    src/core/PS4/HLE/Graphics/Objects/video_out_ctx.cpp
-    src/core/PS4/HLE/Graphics/Objects/video_out_ctx.h
-    src/core/PS4/HLE/Graphics/graphics_ctx.h
-    src/vulkan_util.cpp
-    src/vulkan_util.h
-    src/core/PS4/GPU/video_out_buffer.cpp
-    src/core/PS4/GPU/video_out_buffer.h
-    src/core/PS4/HLE/Graphics/graphics_render.cpp
-    src/core/PS4/HLE/Graphics/graphics_render.h
-    src/core/PS4/GPU/tile_manager.cpp
-    src/core/PS4/GPU/tile_manager.h
-    src/core/hle/libraries/libkernel/time_management.cpp
-    src/core/hle/libraries/libkernel/time_management.h
+    src/core/libraries/kernel/event_queue.h
+    src/core/libraries/kernel/event_queue.cpp
+    src/video_core/texture_cache/slot_vector.h
+    src/video_core/texture_cache/tile_manager.cpp
+    src/video_core/texture_cache/tile_manager.h
+    src/core/libraries/kernel/time_management.cpp
+    src/core/libraries/kernel/time_management.h
     src/core/tls.cpp
     src/core/tls.h
+    src/sdl_window.cpp
+    src/sdl_window.h
+    src/video_core/texture_cache/image.cpp
+    src/video_core/texture_cache/image.h
+    src/video_core/pixel_format.h
+    src/video_core/texture_cache/types.h
+    src/video_core/texture_cache/texture_cache.cpp
+    src/video_core/texture_cache/texture_cache.h
+    src/video_core/texture_cache/image_view.cpp
+    src/video_core/texture_cache/image_view.h
+    src/common/enum.h
+    src/video_core/renderer_vulkan/renderer_vulkan.h src/video_core/renderer_vulkan/renderer_vulkan.cpp
 )
 
 create_target_directory_groups(shadps4)
 
-target_link_libraries(shadps4 PRIVATE magic_enum::magic_enum fmt::fmt toml11::toml11)
-target_link_libraries(shadps4 PRIVATE discord-rpc SDL3-shared vulkan-1 xxhash Zydis)
+target_link_libraries(shadps4 PRIVATE magic_enum::magic_enum fmt::fmt toml11::toml11 tsl::robin_map)
+target_link_libraries(shadps4 PRIVATE discord-rpc boost SDL3-static vma vulkan-headers xxhash Zydis SPIRV glslang)
 if (WIN32)
     target_link_libraries(shadps4 PRIVATE mincore winpthread clang_rt.builtins-x86_64.lib)
     add_definitions(-D_CRT_SECURE_NO_WARNINGS -D_CRT_NONSTDC_NO_DEPRECATE -D_SCL_SECURE_NO_WARNINGS)
     add_definitions(-DNOMINMAX -DWIN32_LEAN_AND_MEAN)
 endif()
 
-add_custom_command(TARGET shadps4 POST_BUILD
-   COMMAND ${CMAKE_COMMAND} -E copy_if_different
-     $<TARGET_FILE:SDL3-shared>
-     $<TARGET_FILE_DIR:shadps4>)
 if (WIN32)
- add_custom_command(TARGET shadps4 POST_BUILD
-   COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    add_custom_command(TARGET shadps4 POST_BUILD
+       COMMAND ${CMAKE_COMMAND} -E copy_if_different
+         $<TARGET_FILE:SDL3-shared>
+         $<TARGET_FILE_DIR:shadps4>)
+    add_custom_command(TARGET shadps4 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
      "${PROJECT_SOURCE_DIR}/third-party/winpthread/bin/libwinpthread-1.dll" $<TARGET_FILE_DIR:shadps4>)
 endif()

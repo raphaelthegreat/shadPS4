@@ -8,10 +8,9 @@
 namespace Core::Loader {
 
 void SymbolsResolver::AddSymbol(const SymbolRes& s, u64 virtual_addr) {
-    SymbolRecord r{};
+    SymbolRecord& r = m_symbols.emplace_back();
     r.name = GenerateName(s);
     r.virtual_address = virtual_addr;
-    m_symbols.push_back(r);
 }
 
 std::string SymbolsResolver::GenerateName(const SymbolRes& s) {
@@ -22,7 +21,7 @@ std::string SymbolsResolver::GenerateName(const SymbolRes& s) {
 const SymbolRecord* SymbolsResolver::FindSymbol(const SymbolRes& s) const {
     const std::string name = GenerateName(s);
     for (u32 i = 0; i < m_symbols.size(); i++) {
-        if (m_symbols[i].name.compare(name) == 0) {
+        if (m_symbols[i].name == name) {
             return &m_symbols[i];
         }
     }

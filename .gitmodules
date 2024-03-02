@@ -30,10 +30,25 @@
 	path = externals/ps4libdoc
 	url = https://github.com/idc/ps4libdoc.git
 	branch = 9.00
-[submodule "third-party/vulkan"]
-	path = third-party/vulkan
-	url = https://github.com/GPUCode/vulkan
 [submodule "externals/discord-rpc"]
 	path = externals/discord-rpc
 	url = https://github.com/shadps4-emu/ext-discord-rpc.git
 	branch = master
+[submodule "externals/vulkan-headers"]
+	path = externals/vulkan-headers
+	url = https://github.com/KhronosGroup/Vulkan-Headers
+[submodule "externals/vma"]
+	path = externals/vma
+	url = https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator
+[submodule "externals/glslang"]
+	path = externals/glslang
+	url = https://github.com/KhronosGroup/glslang
+[submodule "externals/robin-map"]
+	path = externals/robin-map
+	url = https://github.com/Tessil/robin-map
+[submodule "externals/SDL"]
+	path = externals/SDL
+	url = https://github.com/libsdl-org/SDL
+[submodule "externals/boost"]
+	path = externals/boost
+	url = https://github.com/GPUCode/ext-boost

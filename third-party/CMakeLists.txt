@@ -12,14 +12,8 @@ add_subdirectory(fmt EXCLUDE_FROM_ALL)
 # MagicEnum
 add_subdirectory(magic_enum EXCLUDE_FROM_ALL)
 
-# SDL3
-add_subdirectory(SDL EXCLUDE_FROM_ALL)
-
 # Toml11
 add_subdirectory(toml11 EXCLUDE_FROM_ALL)
-
-# Vulkan
-add_subdirectory(vulkan EXCLUDE_FROM_ALL)
 
 # Winpthreads
 if (WIN32)

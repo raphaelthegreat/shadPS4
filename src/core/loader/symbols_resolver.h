@@ -29,7 +29,7 @@ struct SymbolRes {
 class SymbolsResolver {
 public:
     SymbolsResolver() = default;
-    virtual ~SymbolsResolver() = default;
+    ~SymbolsResolver() = default;
 
     void AddSymbol(const SymbolRes& s, u64 virtual_addr);
     const SymbolRecord* FindSymbol(const SymbolRes& s) const;
