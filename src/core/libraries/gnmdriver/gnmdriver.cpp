@@ -1,12 +1,16 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include "common/assert.h"
 #include "common/logging/log.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/gnmdriver/gnmdriver.h"
 #include "core/libraries/libs.h"
+#include "video_core/amdgpu/pm4_cmds.h"
 
 namespace Libraries::GnmDriver {
+
+using namespace AmdGpu;
 
 int PS4_SYSV_ABI sceGnmAddEqEvent() {
     LOG_ERROR(Lib_GnmDriver, "(STUBBED) called");
@@ -133,14 +137,32 @@ int PS4_SYSV_ABI sceGnmDispatchInitDefaultHardwareState() {
     return ORBIS_OK;
 }
 
-s32 PS4_SYSV_ABI sceGnmDrawIndex(u32* cmd, u64 size, u32 index_count, const void* index_addr,
+s32 PS4_SYSV_ABI sceGnmDrawIndex(u32* cmdbuf, u64 size, u32 index_count, uintptr_t index_addr,
                                  u32 flags, u32 type) {
     LOG_INFO(Lib_GnmDriver,
              "(STUBBED) called cmd_buffer  = 0x{:x} size = {} index_count = {} index_addr = 0x{:x} "
              "flags = 0x{:x} type = {}",
-             reinterpret_cast<uint64_t>(cmd), size, index_count,
-             reinterpret_cast<uint64_t>(index_addr), flags, type);
-    return 0;
+             reinterpret_cast<uint64_t>(cmdbuf), size, index_count,
+             index_addr, flags, type);
+
+    if (cmdbuf && (size == 10) && (index_addr != 0) && (index_addr & 1) == 0 && (flags & 0x1ffffffe) == 0) {
+        const auto predicate = flags & 1 ? PM4Predicate::PredEnable : PM4Predicate::PredDisable;
+        auto* draw_index = reinterpret_cast<PM4CmdDrawIndex2*>(cmdbuf);
+
+        draw_index->header = PM4Type3Header{PM4ItOpcode::DrawIndex2, 4,
+                                            PM4ShaderType::ShaderGraphics,
+                                            predicate};
+        draw_index->maxSize = index_count;
+        draw_index->indexBaseLo = u32(index_addr);
+        draw_index->indexBaseHi = u32(index_addr >> 32);
+        draw_index->indexCount = index_count;
+        draw_index->drawInitiator = 0;
+
+        cmdbuf[6] = 0xc0021000;
+        cmdbuf[7] = 0;
+        return ORBIS_OK;
+    }
+    return -1;
 }
 
 int PS4_SYSV_ABI sceGnmDrawIndexAuto() {
@@ -653,8 +675,32 @@ int PS4_SYSV_ABI sceGnmSetPsShader() {
     return ORBIS_OK;
 }
 
-int PS4_SYSV_ABI sceGnmSetPsShader350() {
-    LOG_ERROR(Lib_GnmDriver, "(STUBBED) called");
+int PS4_SYSV_ABI sceGnmSetPsShader350(u32* cmdBuffer, u32 numDwords, const u32* psRegs) {
+    if (!cmdBuffer || numDwords <= 0x27) {
+        return -1;
+    }
+    if (!psRegs) {
+        cmdBuffer = PM4CmdSetData::SetShReg(cmdBuffer, 8u, 0u, 0u);
+        cmdBuffer = PM4CmdSetData::SetContextReg(cmdBuffer, 0x203u, 0u);
+        cmdBuffer = PM4CmdSetData::SetContextReg(cmdBuffer, 0x8fu, 0xfu);
+        *(u64*)cmdBuffer = 0xc01c1000;
+    } else {
+        if (psRegs[1] != 0) {
+            LOG_ERROR(Lib_GnmDriver, "Invalid shader address.");
+            return -1;
+        }
+
+        u32* start = cmdBuffer;
+        cmdBuffer = PM4CmdSetData::SetShReg(cmdBuffer, 8u, psRegs[0], 0u);
+        cmdBuffer = PM4CmdSetData::SetShReg(cmdBuffer, 10u, psRegs[2], psRegs[3]);
+        cmdBuffer = PM4CmdSetData::SetContextReg(cmdBuffer, 0x1c4u, psRegs[4], psRegs[5]);
+        cmdBuffer = PM4CmdSetData::SetContextReg(cmdBuffer, 0x1b3u, psRegs[6], psRegs[7]);
+        cmdBuffer = PM4CmdSetData::SetContextReg(cmdBuffer, 0x1b6u, psRegs[8]);
+        cmdBuffer = PM4CmdSetData::SetContextReg(cmdBuffer, 0x1b8u, psRegs[9]);
+        cmdBuffer = PM4CmdSetData::SetContextReg(cmdBuffer, 0x203u, psRegs[10]);
+        cmdBuffer = PM4CmdSetData::SetContextReg(cmdBuffer, 0x8fu, psRegs[11]);
+        *(u64*)cmdBuffer = 0xc00a1000;
+    }
     return ORBIS_OK;
 }
 
@@ -688,14 +734,42 @@ int PS4_SYSV_ABI sceGnmSetVgtControl() {
     return ORBIS_OK;
 }
 
-int PS4_SYSV_ABI sceGnmSetVsShader(u32* cmd, u64 size, const u32* vs_regs, u32 shader_modifier) {
+int PS4_SYSV_ABI sceGnmSetVsShader(u32* cmdbuf, u64 size, const u32* vs_regs, u32 shader_modifier) {
     LOG_INFO(Lib_GnmDriver,
-             "(STUBBED) called cmd_buffer  = 0x{:x} size = {} shader_modifier = {} vs_reg0 = "
+             "(STUBBED) called cmd_buffer = 0x{:x} size = {} shader_modifier = {} vs_reg0 = "
              "0x{:x} vs_reg1 = 0x{:x} vs_reg2 = 0x{:x} vs_reg3 = 0x{:x} vs_reg4 = 0x{:x} vs_reg5 = "
              "0x{:x} vs_reg6 = 0x{:x}",
-             reinterpret_cast<uint64_t>(cmd), size, shader_modifier, vs_regs[0], vs_regs[1],
+             reinterpret_cast<uint64_t>(cmdbuf), size, shader_modifier, vs_regs[0], vs_regs[1],
              vs_regs[2], vs_regs[3], vs_regs[4], vs_regs[5], vs_regs[6]);
-    return 0;
+
+    if (!cmdbuf || size <= 0x1c) {
+        return -1;
+    }
+
+    if (!vs_regs) {
+        LOG_ERROR(Lib_GnmDriver, "Null pointer passed as argument");
+        return -1;
+    }
+
+    if (shader_modifier & 0xfcfffc3f) {
+        LOG_ERROR(Lib_GnmDriver, "Invalid modifier mask");
+        return -1;
+    }
+
+    if (vs_regs[1] != 0) {
+        LOG_ERROR(Lib_GnmDriver, "Invalid shader address");
+        return -1;
+    }
+
+    const u32 var = shader_modifier == 0 ? vs_regs[2] : (vs_regs[2] & 0xfcfffc3f | shader_modifier);
+    cmdbuf = PM4CmdSetData::SetShReg(cmdbuf, 0x48u, vs_regs[0], 0u); // SPI_SHADER_PGM_LO_VS
+    cmdbuf = PM4CmdSetData::SetShReg(cmdbuf, 0x4au, var, vs_regs[3]); // SPI_SHADER_PGM_RSRC1_VS
+    cmdbuf = PM4CmdSetData::SetContextReg(cmdbuf, 0x207u, vs_regs[6]); // PA_CL_VS_OUT_CNTL
+    cmdbuf = PM4CmdSetData::SetContextReg(cmdbuf, 0x1b1u, vs_regs[4]); // SPI_VS_OUT_CONFIG
+    cmdbuf = PM4CmdSetData::SetContextReg(cmdbuf, 0x1c3u, vs_regs[5]); // SPI_SHADER_POS_FORMAT
+    *(u64*)cmdbuf = 0xc00a1000;
+
+    return ORBIS_OK;
 }
 
 int PS4_SYSV_ABI sceGnmSetWaveLimitMultiplier() {
@@ -903,8 +977,76 @@ int PS4_SYSV_ABI sceGnmSubmitAndFlipCommandBuffersForWorkload() {
     return ORBIS_OK;
 }
 
-int PS4_SYSV_ABI sceGnmSubmitCommandBuffers() {
+int PS4_SYSV_ABI sceGnmSubmitCommandBuffers(u32 count, void* dcbGpuAddrs[], u32* dcbSizesInBytes,
+                                            void* ccbGpuAddrs[], u32* ccbSizesInBytes) {
     LOG_ERROR(Lib_GnmDriver, "(STUBBED) called");
+    ASSERT_MSG(count == 1, "Multiple command buffer submission is unsupported!");
+
+    if (!dcbGpuAddrs || !dcbSizesInBytes) {
+        LOG_ERROR(Lib_GnmDriver, "dcbGpuAddrs and dcbSizesInBytes must not be NULL");
+        return 0x80d11000;
+    }
+    if (!ccbGpuAddrs || !ccbSizesInBytes) {
+        LOG_ERROR(Lib_GnmDriver, "ccbGpuAddrs and ccbSizesInBytes must not be NULL");
+        return 0x80d11000;
+    }
+
+    for (u32 i = 0; i < count; i++) {
+        if (dcbSizesInBytes[i] == 0) {
+            LOG_ERROR(Lib_GnmDriver, "Submitting a null DCB {}", i);
+            return 0x80d11000;
+        }
+        if (dcbSizesInBytes[i] > 0x3ffffc) {
+            LOG_ERROR(Lib_GnmDriver, "dcbSizesInBytes[%d] (%d) is limited to (2*20)-1 DWORDS",
+                      i, dcbSizesInBytes[i]);
+            return 0x80d11000;
+        }
+        if (ccbSizesInBytes && ccbSizesInBytes[i] > 0x3ffffc) {
+            LOG_ERROR(Lib_GnmDriver, "ccbSizesInBytes[%d] (%d) is limited to (2*20)-1 DWORDS",
+                      i, ccbSizesInBytes[i]);
+            return 0x80d11000;
+        }
+    }
+
+    auto* header = reinterpret_cast<PM4Header*>(dcbGpuAddrs[0]);
+    u32 processedCmdSize = 0;
+
+    while (processedCmdSize < dcbSizesInBytes[0]) {
+        const u32 type = header->type;
+        switch (type) {
+        case 3: {
+            const PM4ItOpcode opcode = header->type3.opcode;
+            const u32 count = header->type3.count;
+            switch (opcode) {
+            case PM4ItOpcode::Nop:
+                break;
+            default:
+                UNREACHABLE_MSG("Unknown PM4 type 3 opcode {:#x}", static_cast<u32>(opcode));
+            }
+
+        }
+        default:
+            UNREACHABLE_MSG("Invalid PM4 type {}", type);
+        }
+
+        auto* next_header = header + header->type3.count.Value() + 2;
+        processedCmdSize += uintptr_t(next_header) - uintptr_t(header);
+        header = next_header;
+
+        /*uint32_t processedPm4Count = 1;
+
+        if (m_skipPm4Count != 0)
+        {
+            processedPm4Count += m_skipPm4Count;
+            m_skipPm4Count = 0;
+        }
+
+        const PM4_HEADER* nextPm4Hdr      = getNextNPm4(pm4Hdr, processedPm4Count);
+        uint32_t          processedLength = reinterpret_cast<uintptr_t>(nextPm4Hdr) - reinterpret_cast<uintptr_t>(pm4Hdr);
+        pm4Hdr                            = nextPm4Hdr;
+        processedCmdSize += processedLength;*/
+    }
+
     return ORBIS_OK;
 }
 
