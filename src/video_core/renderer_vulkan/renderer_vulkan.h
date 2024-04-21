@@ -13,7 +13,13 @@ namespace Frontend {
 class WindowSDL;
 }
 
+namespace AmdGpu {
+struct Liverpool;
+}
+
 namespace Vulkan {
+
+class Rasterizer;
 
 struct Frame {
     u32 width;
@@ -28,7 +34,7 @@ struct Frame {
 
 class RendererVulkan {
 public:
-    explicit RendererVulkan(Frontend::WindowSDL& window);
+    explicit RendererVulkan(Frontend::WindowSDL& window, AmdGpu::Liverpool* liverpool);
     ~RendererVulkan();
 
     Frame* PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& attribute,
@@ -46,6 +52,7 @@ private:
     Scheduler scheduler;
     Swapchain swapchain;
     VideoCore::TextureCache texture_cache;
+    std::unique_ptr<Rasterizer> rasterizer;
     vk::UniqueCommandPool command_pool;
     std::vector<Frame> present_frames;
     std::queue<Frame*> free_queue;

@@ -175,15 +175,11 @@ bool Instance::CreateDevice() {
                 .shaderClipDistance = features.shaderClipDistance,
             },
         },
-        vk::PhysicalDeviceTimelineSemaphoreFeaturesKHR{
+        vk::PhysicalDeviceVulkan12Features{
             .timelineSemaphore = true,
         },
-        vk::PhysicalDeviceExtendedDynamicStateFeaturesEXT{
-            .extendedDynamicState = true,
-        },
-        vk::PhysicalDeviceExtendedDynamicState2FeaturesEXT{
-            .extendedDynamicState2 = true,
-            .extendedDynamicState2LogicOp = true,
+        vk::PhysicalDeviceVulkan13Features{
+            .dynamicRendering = true,
         },
         vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT{},
         vk::PhysicalDeviceCustomBorderColorFeaturesEXT{

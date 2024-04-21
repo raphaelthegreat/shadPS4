@@ -52,6 +52,15 @@ TextureCache::TextureCache(const Vulkan::Instance& instance_, Vulkan::Scheduler&
     sigaction(SIGSEGV, &guest_access_fault, nullptr);
 #endif
     g_texture_cache = this;
+
+    ImageInfo info;
+    info.pixel_format = vk::Format::eR8G8B8A8Unorm;
+    info.type = vk::ImageType::e2D;
+    const ImageId null_id = slot_images.insert(instance, scheduler, info, 0);
+    ASSERT(null_id.index == 0);
+
+    ImageViewInfo view_info;
+    void(slot_image_views.insert(instance, scheduler, view_info, slot_images[null_id].image));
 }
 
 TextureCache::~TextureCache() = default;
@@ -94,15 +103,38 @@ Image& TextureCache::FindDisplayBuffer(const Libraries::VideoOut::BufferAttribut
     return image;
 }
 
+ImageView& TextureCache::RenderTarget(VAddr cpu_address, u32 pitch) {
+    boost::container::small_vector<ImageId, 2> image_ids;
+    ForEachImageInRegion(cpu_address, pitch * 4, [&](ImageId image_id, Image& image) {
+        if (image.cpu_addr == cpu_address) {
+            image_ids.push_back(image_id);
+        }
+    });
+
+    ASSERT_MSG(image_ids.size() <= 1, "Overlapping framebuffers not allowed!");
+    auto* image = &slot_images[image_ids.empty() ? ImageId{0} : image_ids.back()];
+
+    ImageViewInfo info;
+    info.format = vk::Format::eB8G8R8A8Srgb;
+    if (const ImageViewId view_id = image->FindView(info); view_id) {
+        return slot_image_views[view_id];
+    }
+
+    const ImageViewId view_id = slot_image_views.insert(instance, scheduler, info, image->image);
+    image->image_view_infos.emplace_back(info);
+    image->image_view_ids.emplace_back(view_id);
+    return slot_image_views[view_id];
+}
+
 void TextureCache::RefreshImage(Image& image) {
     // Mark image as validated.
     image.flags &= ~ImageFlagBits::CpuModified;
 
     // Upload data to the staging buffer.
-    const auto [data, offset, _] = staging.Map(image.guest_size_bytes, 0);
+    const auto [data, offset, _] = staging.Map(image.info.guest_size_bytes, 0);
     ConvertTileToLinear(data, reinterpret_cast<const u8*>(image.cpu_addr), image.info.size.width,
                         image.info.size.height, Config::isNeoMode());
-    staging.Commit(image.guest_size_bytes);
+    staging.Commit(image.info.guest_size_bytes);
 
     // Copy to the image.
     const vk::BufferImageCopy image_copy = {
@@ -119,11 +151,10 @@ void TextureCache::RefreshImage(Image& image) {
         .imageExtent = {image.info.size.width, image.info.size.height, 1},
     };
 
+    const auto cmdbuf = scheduler.CommandBuffer();
     const vk::Buffer src_buffer = staging.Handle();
     const vk::Image dst_image = image.image;
-    scheduler.Record([src_buffer, dst_image, image_copy](vk::CommandBuffer cmdbuf) {
-        cmdbuf.copyBufferToImage(src_buffer, dst_image, vk::ImageLayout::eGeneral, image_copy);
-    });
+    cmdbuf.copyBufferToImage(src_buffer, dst_image, vk::ImageLayout::eGeneral, image_copy);
 }
 
 void TextureCache::RegisterImage(ImageId image_id) {
@@ -131,7 +162,7 @@ void TextureCache::RegisterImage(ImageId image_id) {
     ASSERT_MSG(False(image.flags & ImageFlagBits::Registered),
                "Trying to register an already registered image");
     image.flags |= ImageFlagBits::Registered;
-    ForEachPage(image.cpu_addr, image.guest_size_bytes,
+    ForEachPage(image.cpu_addr, image.info.guest_size_bytes,
                 [this, image_id](u64 page) { page_table[page].push_back(image_id); });
 }
 
@@ -140,7 +171,7 @@ void TextureCache::UnregisterImage(ImageId image_id) {
     ASSERT_MSG(True(image.flags & ImageFlagBits::Registered),
                "Trying to unregister an already registered image");
     image.flags &= ~ImageFlagBits::Registered;
-    ForEachPage(image.cpu_addr, image.guest_size_bytes, [this, image_id](u64 page) {
+    ForEachPage(image.cpu_addr, image.info.guest_size_bytes, [this, image_id](u64 page) {
         const auto page_it = page_table.find(page);
         if (page_it == page_table.end()) {
             ASSERT_MSG(false, "Unregistering unregistered page=0x{:x}", page << PageBits);
@@ -162,7 +193,7 @@ void TextureCache::TrackImage(Image& image, ImageId image_id) {
         return;
     }
     image.flags |= ImageFlagBits::Tracked;
-    UpdatePagesCachedCount(image.cpu_addr, image.guest_size_bytes, 1);
+    UpdatePagesCachedCount(image.cpu_addr, image.info.guest_size_bytes, 1);
 }
 
 void TextureCache::UntrackImage(Image& image, ImageId image_id) {
@@ -170,7 +201,7 @@ void TextureCache::UntrackImage(Image& image, ImageId image_id) {
         return;
     }
     image.flags &= ~ImageFlagBits::Tracked;
-    UpdatePagesCachedCount(image.cpu_addr, image.guest_size_bytes, -1);
+    UpdatePagesCachedCount(image.cpu_addr, image.info.guest_size_bytes, -1);
 }
 
 void TextureCache::UpdatePagesCachedCount(VAddr addr, u64 size, s32 delta) {

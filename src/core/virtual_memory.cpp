@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <random>
 #include "common/assert.h"
 #include "common/error.h"
 #include "common/logging/log.h"
@@ -146,6 +147,8 @@ static u64 AlignUp(u64 pos, u64 align) {
     return (align != 0 ? (pos + (align - 1)) & ~(align - 1) : pos);
 }
 
+static VAddr hint_start = USER_MIN;
+
 u64 memory_alloc_aligned(u64 address, u64 size, MemoryMode mode, u64 alignment) {
 #ifdef _WIN64
     // try allocate aligned address inside user area
@@ -170,10 +173,19 @@ u64 memory_alloc_aligned(u64 address, u64 size, MemoryMode mode, u64 alignment) 
     }
     return ptr;
 #else
-    void* hint_address = address == 0 ? reinterpret_cast<void*>(USER_MIN)
-                                      : reinterpret_cast<void*>(AlignUp(address, alignment));
+    // When a hint is provided by the guest we can use that.
+    if (address != 0) {
+        void* hint_address = reinterpret_cast<void*>(AlignUp(address, alignment));
+        void* ptr =
+            mmap(hint_address, size, convertMemoryMode(mode), MAP_ANON | MAP_PRIVATE, -1, 0);
+        ASSERT(ptr != MAP_FAILED && ptr == hint_address);
+        return reinterpret_cast<u64>(ptr);
+    }
+
+    void* hint_address = reinterpret_cast<void*>(hint_start);
     void* ptr = mmap(hint_address, size, convertMemoryMode(mode), MAP_ANON | MAP_PRIVATE, -1, 0);
-    ASSERT(ptr != MAP_FAILED);
+    ASSERT(ptr != MAP_FAILED && ptr == hint_address);
+    hint_start += size;
     return reinterpret_cast<u64>(ptr);
 #endif
 }

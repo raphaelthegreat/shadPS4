@@ -38,7 +38,7 @@ using Libraries::VideoOut::TilingMode;
     if (false /*&& IsDepthStencilFormat(format)*/) {
         usage |= vk::ImageUsageFlagBits::eDepthStencilAttachment;
     } else {
-        // usage |= vk::ImageUsageFlagBits::eColorAttachment | vk::ImageUsageFlagBits::eStorage;
+        usage |= vk::ImageUsageFlagBits::eColorAttachment;
     }
     return usage;
 }
@@ -51,6 +51,14 @@ ImageInfo::ImageInfo(const Libraries::VideoOut::BufferAttributeGroup& group) noe
     size.width = attrib.width;
     size.height = attrib.height;
     pitch = attrib.tiling_mode == TilingMode::Linear ? size.width : (size.width + 127) >> 7;
+    const bool is_32bpp = pixel_format == vk::Format::eB8G8R8A8Srgb ||
+                          pixel_format == vk::Format::eA8B8G8R8SrgbPack32;
+    ASSERT(is_tiled && is_32bpp);
+    if (Config::isNeoMode()) {
+        guest_size_bytes = pitch * 128 * ((size.height + 127) & (~127)) * 4;
+    } else {
+        guest_size_bytes = pitch * 128 * ((size.height + 63) & (~63)) * 4;
+    }
 }
 
 UniqueImage::UniqueImage(vk::Device device_, VmaAllocator allocator_)
@@ -84,7 +92,8 @@ void UniqueImage::Create(const vk::ImageCreateInfo& image_ci) {
 Image::Image(const Vulkan::Instance& instance_, Vulkan::Scheduler& scheduler_,
              const ImageInfo& info_, VAddr cpu_addr)
     : instance{&instance_}, scheduler{&scheduler_}, info{info_},
-      image{instance->GetDevice(), instance->GetAllocator()}, cpu_addr{cpu_addr} {
+      image{instance->GetDevice(), instance->GetAllocator()}, cpu_addr{cpu_addr},
+      cpu_addr_end{cpu_addr + info.guest_size_bytes} {
     vk::ImageCreateFlags flags{};
     if (info.type == vk::ImageType::e2D && info.resources.layers >= 6 &&
         info.size.width == info.size.height) {
@@ -111,39 +120,26 @@ Image::Image(const Vulkan::Instance& instance_, Vulkan::Scheduler& scheduler_,
 
     image.Create(image_ci);
 
-    const vk::Image handle = image;
-    scheduler->Record([handle](vk::CommandBuffer cmdbuf) {
-        const vk::ImageMemoryBarrier init_barrier = {
-            .srcAccessMask = vk::AccessFlagBits::eNone,
-            .dstAccessMask = vk::AccessFlagBits::eNone,
-            .oldLayout = vk::ImageLayout::eUndefined,
-            .newLayout = vk::ImageLayout::eGeneral,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image = handle,
-            .subresourceRange{
-                .aspectMask = vk::ImageAspectFlagBits::eColor,
-                .baseMipLevel = 0,
-                .levelCount = VK_REMAINING_MIP_LEVELS,
-                .baseArrayLayer = 0,
-                .layerCount = VK_REMAINING_ARRAY_LAYERS,
-            },
-        };
-        cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe,
-                               vk::PipelineStageFlagBits::eTopOfPipe,
-                               vk::DependencyFlagBits::eByRegion, {}, {}, init_barrier);
-    });
-
-    const bool is_32bpp = info.pixel_format == vk::Format::eB8G8R8A8Srgb ||
-                          info.pixel_format == vk::Format::eA8B8G8R8SrgbPack32;
-    ASSERT(info.is_tiled && is_32bpp);
-
-    if (Config::isNeoMode()) {
-        guest_size_bytes = info.pitch * 128 * ((info.size.height + 127) & (~127)) * 4;
-    } else {
-        guest_size_bytes = info.pitch * 128 * ((info.size.height + 63) & (~63)) * 4;
-    }
-    cpu_addr_end = cpu_addr + guest_size_bytes;
+    const auto cmdbuf = scheduler->CommandBuffer();
+    const vk::ImageMemoryBarrier init_barrier = {
+        .srcAccessMask = vk::AccessFlagBits::eNone,
+        .dstAccessMask = vk::AccessFlagBits::eNone,
+        .oldLayout = vk::ImageLayout::eUndefined,
+        .newLayout = vk::ImageLayout::eGeneral,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = image,
+        .subresourceRange{
+            .aspectMask = vk::ImageAspectFlagBits::eColor,
+            .baseMipLevel = 0,
+            .levelCount = VK_REMAINING_MIP_LEVELS,
+            .baseArrayLayer = 0,
+            .layerCount = VK_REMAINING_ARRAY_LAYERS,
+        },
+    };
+    cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe,
+                           vk::PipelineStageFlagBits::eTopOfPipe,
+                           vk::DependencyFlagBits::eByRegion, {}, {}, init_barrier);
 }
 
 Image::~Image() = default;

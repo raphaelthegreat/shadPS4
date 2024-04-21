@@ -3,6 +3,7 @@
 
 #include "sdl_window.h"
 #include "video_core/renderer_vulkan/renderer_vulkan.h"
+#include "video_core/renderer_vulkan/vk_rasterizer.h"
 
 #include <vk_mem_alloc.h>
 
@@ -56,9 +57,11 @@ bool CanBlitToSwapchain(const vk::PhysicalDevice physical_device, vk::Format for
     };
 }
 
-RendererVulkan::RendererVulkan(Frontend::WindowSDL& window_)
+RendererVulkan::RendererVulkan(Frontend::WindowSDL& window_, AmdGpu::Liverpool* liverpool)
     : window{window_}, instance{window, 0}, scheduler{instance}, swapchain{instance, window},
       texture_cache{instance, scheduler} {
+    rasterizer = std::make_unique<Rasterizer>(instance, scheduler, texture_cache, liverpool);
+
     const u32 num_images = swapchain.GetImageCount();
     const vk::Device device = instance.GetDevice();
 
@@ -165,37 +168,35 @@ Frame* RendererVulkan::PrepareFrame(const Libraries::VideoOut::BufferAttributeGr
     Frame* frame = GetRenderFrame();
 
     // Post-processing (Anti-aliasing, FSR etc) goes here. For now just blit to the frame image.
-    scheduler.Record([frame, vk_image = vk::Image(image.image),
-                      size = image.info.size](vk::CommandBuffer cmdbuf) {
-        const vk::ImageMemoryBarrier pre_barrier{
-            .srcAccessMask = vk::AccessFlagBits::eTransferRead,
-            .dstAccessMask = vk::AccessFlagBits::eTransferWrite,
-            .oldLayout = vk::ImageLayout::eUndefined,
-            .newLayout = vk::ImageLayout::eGeneral,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image = frame->image,
-            .subresourceRange{
-                .aspectMask = vk::ImageAspectFlagBits::eColor,
-                .baseMipLevel = 0,
-                .levelCount = 1,
-                .baseArrayLayer = 0,
-                .layerCount = VK_REMAINING_ARRAY_LAYERS,
-            },
-        };
+    const auto cmdbuf = scheduler.CommandBuffer();
+    const vk::ImageMemoryBarrier pre_barrier{
+        .srcAccessMask = vk::AccessFlagBits::eTransferRead,
+        .dstAccessMask = vk::AccessFlagBits::eTransferWrite,
+        .oldLayout = vk::ImageLayout::eUndefined,
+        .newLayout = vk::ImageLayout::eGeneral,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .image = frame->image,
+        .subresourceRange{
+            .aspectMask = vk::ImageAspectFlagBits::eColor,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = VK_REMAINING_ARRAY_LAYERS,
+        },
+    };
 
-        cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
-                               vk::PipelineStageFlagBits::eTransfer,
-                               vk::DependencyFlagBits::eByRegion, {}, {}, pre_barrier);
-        cmdbuf.blitImage(vk_image, vk::ImageLayout::eGeneral, frame->image,
-                         vk::ImageLayout::eGeneral,
-                         MakeImageBlit(size.width, size.height, frame->width, frame->height),
-                         vk::Filter::eLinear);
-    });
+    cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+                           vk::PipelineStageFlagBits::eTransfer,
+                           vk::DependencyFlagBits::eByRegion, {}, {}, pre_barrier);
+    cmdbuf.blitImage(image.image, vk::ImageLayout::eGeneral, frame->image,
+                     vk::ImageLayout::eGeneral,
+                     MakeImageBlit(image.info.size.width, image.info.size.height,
+                                   frame->width, frame->height),
+                     vk::Filter::eLinear);
 
     // Flush pending vulkan operations.
     scheduler.Flush(frame->render_ready);
-    scheduler.WaitWorker();
     return frame;
 }
 

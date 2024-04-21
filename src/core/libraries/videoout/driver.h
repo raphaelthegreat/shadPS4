@@ -75,7 +75,6 @@ private:
     std::condition_variable_any submit_cond;
     std::condition_variable done_cond;
     std::queue<Request> requests;
-    std::unique_ptr<Vulkan::RendererVulkan> renderer;
     bool is_neo{};
 };
 

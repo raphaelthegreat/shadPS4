@@ -195,6 +195,7 @@ set(COMMON src/common/logging/backend.cpp
            src/common/alignment.h
            src/common/assert.cpp
            src/common/assert.h
+           src/common/bit_field.h
            src/common/bounded_threadsafe_queue.h
            src/common/concepts.h
            src/common/config.cpp
@@ -216,6 +217,7 @@ set(COMMON src/common/logging/backend.cpp
            src/common/path_util.h
            src/common/rdtsc.cpp
            src/common/rdtsc.h
+           src/common/scope_exit.h
            src/common/singleton.h
            src/common/string_util.cpp
            src/common/string_util.h
@@ -267,19 +269,87 @@ set(CORE src/core/aerolib/stubs.cpp
          src/core/virtual_memory.h
 )
 
+set(SHADER_RECOMPILER   src/shader_recompiler/control_flow/gcn_control_flow_graph.cpp
+                        src/shader_recompiler/control_flow/gcn_control_flow_graph.h
+                        src/shader_recompiler/control_flow/gcn_divergent_flow.cpp
+                        src/shader_recompiler/control_flow/gcn_divergent_flow.h
+                        src/shader_recompiler/control_flow/gcn_dominator_tree.cpp
+                        src/shader_recompiler/control_flow/gcn_dominator_tree.h
+                        src/shader_recompiler/control_flow/gcn_loop_info.cpp
+                        src/shader_recompiler/control_flow/gcn_loop_info.h
+                        src/shader_recompiler/control_flow/gcn_stackifier.cpp
+                        src/shader_recompiler/control_flow/gcn_stackifier.h
+                        src/shader_recompiler/control_flow/gcn_token_list.cpp
+                        src/shader_recompiler/control_flow/gcn_token_list.h
+                        src/shader_recompiler/gcn_analysis.cpp
+                        src/shader_recompiler/gcn_analysis.h
+                        src/shader_recompiler/gcn_common.h
+                        src/shader_recompiler/gcn_compiler.cpp
+                        src/shader_recompiler/gcn_compiler_data_share.cpp
+                        src/shader_recompiler/gcn_compiler_debug.cpp
+                        src/shader_recompiler/gcn_compiler_defs.h
+                        src/shader_recompiler/gcn_compiler_export.cpp
+                        src/shader_recompiler/gcn_compiler_flow_control.cpp
+                        src/shader_recompiler/gcn_compiler.h
+                        src/shader_recompiler/gcn_compiler_scalar_alu.cpp
+                        src/shader_recompiler/gcn_compiler_scalar_memory.cpp
+                        src/shader_recompiler/gcn_compiler_vector_alu.cpp
+                        src/shader_recompiler/gcn_compiler_vector_interpolation.cpp
+                        src/shader_recompiler/gcn_compiler_vector_memory.cpp
+                        src/shader_recompiler/gcn_constants.h
+                        src/shader_recompiler/gcn_decoder.cpp
+                        src/shader_recompiler/gcn_decoder.h
+                        src/shader_recompiler/gcn_enum.h
+                        src/shader_recompiler/gcn_fetch_shader.cpp
+                        src/shader_recompiler/gcn_fetch_shader.h
+                        src/shader_recompiler/gcn_header.cpp
+                        src/shader_recompiler/gcn_header.h
+                        src/shader_recompiler/gcn_instruction.cpp
+                        src/shader_recompiler/gcn_instruction.h
+                        src/shader_recompiler/gcn_instruction_iterator.cpp
+                        src/shader_recompiler/gcn_instruction_iterator.h
+                        src/shader_recompiler/gcn_instruction_util.cpp
+                        src/shader_recompiler/gcn_instruction_util.h
+                        src/shader_recompiler/gcn_mod_info.h
+                        src/shader_recompiler/gcn_module.cpp
+                        src/shader_recompiler/gcn_module.h
+                        src/shader_recompiler/gcn_program_info.cpp
+                        src/shader_recompiler/gcn_program_info.h
+                        src/shader_recompiler/gcn_shader_binary.h
+                        src/shader_recompiler/gcn_shader_key.h
+                        src/shader_recompiler/gcn_shader_meta.h
+                        src/shader_recompiler/gcn_shader_reg_field.h
+                        src/shader_recompiler/gcn_shader_register.h
+                        src/shader_recompiler/gcn_state_register.cpp
+                        src/shader_recompiler/gcn_state_register.h
+                        src/shader_recompiler/gcn_util.h
+)
+
 set(VIDEO_CORE src/video_core/pixel_format.h
+               src/video_core/amdgpu/liverpool.cpp
+               src/video_core/amdgpu/liverpool.h
+               src/video_core/amdgpu/pm4_cmds.h
+               src/video_core/amdgpu/pm4_opcodes.h
+               src/video_core/renderer_vulkan/liverpool_to_vk.cpp
+               src/video_core/renderer_vulkan/liverpool_to_vk.h
+               src/video_core/renderer_vulkan/pipeline_key.cpp
+               src/video_core/renderer_vulkan/pipeline_key.h
                src/video_core/renderer_vulkan/renderer_vulkan.cpp
                src/video_core/renderer_vulkan/renderer_vulkan.h
                src/video_core/renderer_vulkan/vk_common.cpp
                src/video_core/renderer_vulkan/vk_common.h
                src/video_core/renderer_vulkan/vk_descriptor_update_queue.cpp
                src/video_core/renderer_vulkan/vk_descriptor_update_queue.h
+               src/video_core/renderer_vulkan/vk_graphics_pipeline.cpp
+               src/video_core/renderer_vulkan/vk_graphics_pipeline.h
                src/video_core/renderer_vulkan/vk_instance.cpp
                src/video_core/renderer_vulkan/vk_instance.h
                src/video_core/renderer_vulkan/vk_master_semaphore.cpp
                src/video_core/renderer_vulkan/vk_master_semaphore.h
                src/video_core/renderer_vulkan/vk_platform.cpp
                src/video_core/renderer_vulkan/vk_platform.h
+               src/video_core/renderer_vulkan/vk_rasterizer.cpp
+               src/video_core/renderer_vulkan/vk_rasterizer.h
                src/video_core/renderer_vulkan/vk_resource_pool.cpp
                src/video_core/renderer_vulkan/vk_resource_pool.h
                src/video_core/renderer_vulkan/vk_scheduler.cpp
@@ -355,6 +425,7 @@ add_executable(shadps4
     ${INPUT}
     ${COMMON}
     ${CORE}
+    #${SHADER_RECOMPILER}
     ${VIDEO_CORE}
     src/main.cpp
     src/sdl_window.h

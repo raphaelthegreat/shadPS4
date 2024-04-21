@@ -12,7 +12,7 @@ enum class PM4ItOpcode : u32 {
     SetBase = 0x11,
     ClearState = 0x12,
     IndexBufferSize = 0x13,
-    DispatchDirect  = 0x15,
+    DispatchDirect = 0x15,
     DispatchIndirect = 0x16,
     AtomicGds = 0x1D,
     Atomic = 0x1E,
@@ -55,6 +55,7 @@ enum class PM4ItOpcode : u32 {
     SetContextRegIndirect = 0x73,
     SetShReg = 0x76,
     SetShRegOffset = 0x77,
+    SetUconfigReg = 0x79
 };
 
 } // namespace AmdGpu

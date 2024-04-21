@@ -3,11 +3,11 @@
 
 #pragma once
 
+#include <utility>
 #include "common/enum.h"
 #include "common/types.h"
 #include "core/libraries/videoout/buffer.h"
-#include "video_core/pixel_format.h"
-#include "video_core/renderer_vulkan/vk_common.h"
+#include "video_core/texture_cache/image_view.h"
 #include "video_core/texture_cache/types.h"
 
 namespace Vulkan {
@@ -39,6 +39,7 @@ struct ImageInfo {
     SubresourceExtent resources;
     Extent3D size{1, 1, 1};
     u32 pitch;
+    u32 guest_size_bytes;
 };
 
 struct Handle {
@@ -100,17 +101,24 @@ struct Image {
         return cpu_addr < overlap_end && overlap_cpu_addr < cpu_addr_end;
     }
 
+    ImageViewId FindView(const ImageViewInfo& info) const {
+        const auto it = std::ranges::find(image_view_infos, info);
+        if (it == image_view_infos.end()) {
+            return {};
+        }
+        return image_view_ids[std::distance(it, image_view_infos.begin())];
+    }
+
     const Vulkan::Instance* instance;
     Vulkan::Scheduler* scheduler;
     ImageInfo info;
     UniqueImage image;
     vk::ImageAspectFlags aspect_mask;
-    u32 guest_size_bytes = 0;
-    size_t channel = 0;
     ImageFlagBits flags = ImageFlagBits::CpuModified;
     VAddr cpu_addr = 0;
     VAddr cpu_addr_end = 0;
-    u64 modification_tick = 0;
+    std::vector<ImageViewInfo> image_view_infos;
+    std::vector<ImageViewId> image_view_ids;
 };
 
 } // namespace VideoCore
