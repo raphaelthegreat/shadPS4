@@ -22,8 +22,7 @@ class GraphicsPipeline;
 class Rasterizer {
 public:
     explicit Rasterizer(const Instance& instance, Scheduler& scheduler,
-                        VideoCore::TextureCache& texture_cache,
-                        AmdGpu::Liverpool* liverpool);
+                        VideoCore::TextureCache& texture_cache, AmdGpu::Liverpool* liverpool);
     ~Rasterizer();
 
     /// Performs a draw call with an index buffer.

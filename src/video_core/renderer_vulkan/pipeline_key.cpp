@@ -3,4 +3,3 @@
 
 #include "common/assert.h"
 #include "video_core/renderer_vulkan/pipeline_key.h"
-

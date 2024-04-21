@@ -269,60 +269,73 @@ set(CORE src/core/aerolib/stubs.cpp
          src/core/virtual_memory.h
 )
 
-set(SHADER_RECOMPILER   src/shader_recompiler/control_flow/gcn_control_flow_graph.cpp
-                        src/shader_recompiler/control_flow/gcn_control_flow_graph.h
-                        src/shader_recompiler/control_flow/gcn_divergent_flow.cpp
-                        src/shader_recompiler/control_flow/gcn_divergent_flow.h
-                        src/shader_recompiler/control_flow/gcn_dominator_tree.cpp
-                        src/shader_recompiler/control_flow/gcn_dominator_tree.h
-                        src/shader_recompiler/control_flow/gcn_loop_info.cpp
-                        src/shader_recompiler/control_flow/gcn_loop_info.h
-                        src/shader_recompiler/control_flow/gcn_stackifier.cpp
-                        src/shader_recompiler/control_flow/gcn_stackifier.h
-                        src/shader_recompiler/control_flow/gcn_token_list.cpp
-                        src/shader_recompiler/control_flow/gcn_token_list.h
-                        src/shader_recompiler/gcn_analysis.cpp
-                        src/shader_recompiler/gcn_analysis.h
-                        src/shader_recompiler/gcn_common.h
-                        src/shader_recompiler/gcn_compiler.cpp
-                        src/shader_recompiler/gcn_compiler_data_share.cpp
-                        src/shader_recompiler/gcn_compiler_debug.cpp
-                        src/shader_recompiler/gcn_compiler_defs.h
-                        src/shader_recompiler/gcn_compiler_export.cpp
-                        src/shader_recompiler/gcn_compiler_flow_control.cpp
-                        src/shader_recompiler/gcn_compiler.h
-                        src/shader_recompiler/gcn_compiler_scalar_alu.cpp
-                        src/shader_recompiler/gcn_compiler_scalar_memory.cpp
-                        src/shader_recompiler/gcn_compiler_vector_alu.cpp
-                        src/shader_recompiler/gcn_compiler_vector_interpolation.cpp
-                        src/shader_recompiler/gcn_compiler_vector_memory.cpp
-                        src/shader_recompiler/gcn_constants.h
-                        src/shader_recompiler/gcn_decoder.cpp
-                        src/shader_recompiler/gcn_decoder.h
-                        src/shader_recompiler/gcn_enum.h
-                        src/shader_recompiler/gcn_fetch_shader.cpp
-                        src/shader_recompiler/gcn_fetch_shader.h
-                        src/shader_recompiler/gcn_header.cpp
-                        src/shader_recompiler/gcn_header.h
-                        src/shader_recompiler/gcn_instruction.cpp
-                        src/shader_recompiler/gcn_instruction.h
-                        src/shader_recompiler/gcn_instruction_iterator.cpp
-                        src/shader_recompiler/gcn_instruction_iterator.h
-                        src/shader_recompiler/gcn_instruction_util.cpp
-                        src/shader_recompiler/gcn_instruction_util.h
-                        src/shader_recompiler/gcn_mod_info.h
-                        src/shader_recompiler/gcn_module.cpp
-                        src/shader_recompiler/gcn_module.h
-                        src/shader_recompiler/gcn_program_info.cpp
-                        src/shader_recompiler/gcn_program_info.h
-                        src/shader_recompiler/gcn_shader_binary.h
-                        src/shader_recompiler/gcn_shader_key.h
-                        src/shader_recompiler/gcn_shader_meta.h
-                        src/shader_recompiler/gcn_shader_reg_field.h
-                        src/shader_recompiler/gcn_shader_register.h
-                        src/shader_recompiler/gcn_state_register.cpp
-                        src/shader_recompiler/gcn_state_register.h
-                        src/shader_recompiler/gcn_util.h
+set(SHADER_RECOMPILER src/shader_recompiler/control_flow/control_flow_graph.cpp
+                      src/shader_recompiler/control_flow/control_flow_graph.h
+                      src/shader_recompiler/control_flow/divergent_flow.cpp
+                      src/shader_recompiler/control_flow/divergent_flow.h
+                      src/shader_recompiler/control_flow/dominator_tree.cpp
+                      src/shader_recompiler/control_flow/dominator_tree.h
+                      src/shader_recompiler/control_flow/loop_info.cpp
+                      src/shader_recompiler/control_flow/loop_info.h
+                      src/shader_recompiler/control_flow/stackifier.cpp
+                      src/shader_recompiler/control_flow/stackifier.h
+                      src/shader_recompiler/control_flow/token_list.cpp
+                      src/shader_recompiler/control_flow/token_list.h
+                      src/shader_recompiler/spirv/GLSL.std.450.h
+                      src/shader_recompiler/spirv/GLSL.std.450.hpp
+                      src/shader_recompiler/spirv/NonSemanticDebugPrintf.hpp
+                      src/shader_recompiler/spirv/spirv_code_buffer.cpp
+                      src/shader_recompiler/spirv/spirv_code_buffer.h
+                      src/shader_recompiler/spirv/spirv.hpp
+                      src/shader_recompiler/spirv/spirv_instruction.h
+                      src/shader_recompiler/spirv/spirv_module.cpp
+                      src/shader_recompiler/spirv/spirv_module.h
+                      src/shader_recompiler/analysis.cpp
+                      src/shader_recompiler/analysis.h
+                      src/shader_recompiler/common.h
+                      src/shader_recompiler/compiler_control_flow.cpp
+                      src/shader_recompiler/compiler.cpp
+                      src/shader_recompiler/compiler_data_share.cpp
+                      src/shader_recompiler/compiler_debug_profile.cpp
+                      src/shader_recompiler/compiler_defs.h
+                      src/shader_recompiler/compiler_export.cpp
+                      src/shader_recompiler/compiler.h
+                      src/shader_recompiler/compiler_scalar_alu.cpp
+                      src/shader_recompiler/compiler_scalar_memory.cpp
+                      src/shader_recompiler/compiler_vector_alu.cpp
+                      src/shader_recompiler/compiler_vector_interpolation.cpp
+                      src/shader_recompiler/compiler_vector_memory.cpp
+                      src/shader_recompiler/decoder.cpp
+                      src/shader_recompiler/decoder.h
+                      src/shader_recompiler/fetch_shader.cpp
+                      src/shader_recompiler/fetch_shader.h
+                      src/shader_recompiler/gcn_constants.h
+                      src/shader_recompiler/gcn_enum.h
+                      src/shader_recompiler/gcn_mod_info.h
+                      src/shader_recompiler/header.cpp
+                      src/shader_recompiler/header.h
+                      src/shader_recompiler/instruction.cpp
+                      src/shader_recompiler/instruction.h
+                      src/shader_recompiler/instruction_iterator.cpp
+                      src/shader_recompiler/instruction_iterator.h
+                      src/shader_recompiler/instruction_util.cpp
+                      src/shader_recompiler/instruction_util.h
+                      src/shader_recompiler/module.cpp
+                      src/shader_recompiler/module.h
+                      src/shader_recompiler/program_info.cpp
+                      src/shader_recompiler/program_info.h
+                      src/shader_recompiler/shader_binary.h
+                      src/shader_recompiler/shader_key.h
+                      src/shader_recompiler/shader_meta.h
+                      src/shader_recompiler/shader_reg_field.h
+                      src/shader_recompiler/shader_register.h
+                      src/shader_recompiler/state_register.cpp
+                      src/shader_recompiler/state_register.h
+                      src/shader_recompiler/util.h
+
+                      src/shader_recompiler/Allocator/UtilObjectBank.h
+                      src/shader_recompiler/Allocator/UtilStructBank.cpp
+                      src/shader_recompiler/Allocator/UtilStructBank.h
 )
 
 set(VIDEO_CORE src/video_core/pixel_format.h
@@ -425,7 +438,7 @@ add_executable(shadps4
     ${INPUT}
     ${COMMON}
     ${CORE}
-    #${SHADER_RECOMPILER}
+    ${SHADER_RECOMPILER}
     ${VIDEO_CORE}
     src/main.cpp
     src/sdl_window.h

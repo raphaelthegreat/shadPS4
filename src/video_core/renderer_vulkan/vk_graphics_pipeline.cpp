@@ -36,9 +36,8 @@ void main() {
 }
 )";
 
-GraphicsPipeline::GraphicsPipeline(const Instance& instance_,
-                                   const PipelineKey& key_, vk::PipelineCache pipeline_cache_,
-                                   vk::PipelineLayout layout_)
+GraphicsPipeline::GraphicsPipeline(const Instance& instance_, const PipelineKey& key_,
+                                   vk::PipelineCache pipeline_cache_, vk::PipelineLayout layout_)
     : instance{instance_}, pipeline_layout{layout_}, pipeline_cache{pipeline_cache_}, key{key_} {
     Build();
 }
@@ -111,7 +110,8 @@ bool GraphicsPipeline::Build(bool fail_on_compile_required) {
     };
 
     boost::container::static_vector<vk::DynamicState, 14> dynamic_states = {
-        vk::DynamicState::eViewport,           vk::DynamicState::eScissor,
+        vk::DynamicState::eViewport,
+        vk::DynamicState::eScissor,
     };
 
     const vk::PipelineDynamicStateCreateInfo dynamic_info = {

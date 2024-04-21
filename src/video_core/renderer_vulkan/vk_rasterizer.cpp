@@ -2,23 +2,23 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "video_core/amdgpu/liverpool.h"
+#include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
-#include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
-#include "video_core/texture_cache/texture_cache.h"
 #include "video_core/texture_cache/image_view.h"
+#include "video_core/texture_cache/texture_cache.h"
 
 namespace Vulkan {
 
-static constexpr vk::BufferUsageFlags VertexIndexFlags =
-    vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eIndexBuffer |
-    vk::BufferUsageFlagBits::eTransferDst;
+static constexpr vk::BufferUsageFlags VertexIndexFlags = vk::BufferUsageFlagBits::eVertexBuffer |
+                                                         vk::BufferUsageFlagBits::eIndexBuffer |
+                                                         vk::BufferUsageFlagBits::eTransferDst;
 
 Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_,
                        VideoCore::TextureCache& texture_cache_, AmdGpu::Liverpool* liverpool_)
-    : instance{instance_}, scheduler{scheduler_}, texture_cache{texture_cache_}, liverpool{liverpool_},
-      vertex_index_buffer{instance, scheduler, VertexIndexFlags, 64_MB} {
+    : instance{instance_}, scheduler{scheduler_}, texture_cache{texture_cache_},
+      liverpool{liverpool_}, vertex_index_buffer{instance, scheduler, VertexIndexFlags, 64_MB} {
     liverpool->BindRasterizer(this);
     const vk::PipelineLayoutCreateInfo layout_info = {
         .setLayoutCount = 0U,
@@ -73,7 +73,7 @@ void Rasterizer::DrawIndex() {
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->Handle());
     cmdbuf.bindIndexBuffer(vertex_index_buffer.Handle(), 0, vk::IndexType::eUint32);
     cmdbuf.bindVertexBuffers(0, vertex_index_buffer.Handle(), vk::DeviceSize(0));
-    //cmdbuf.drawIndexed(regs.num_indices, regs.num_instances.NumInstances(), 0, 0, 0);
+    // cmdbuf.drawIndexed(regs.num_indices, regs.num_instances.NumInstances(), 0, 0, 0);
     cmdbuf.draw(regs.num_indices, regs.num_instances.NumInstances(), 0, 0);
     cmdbuf.endRendering();
 }

@@ -96,6 +96,7 @@ bool ParseFilterRule(Filter& instance, Iterator begin, Iterator end) {
     SUB(Lib, Http)                                                                                 \
     SUB(Lib, Ssl)                                                                                  \
     SUB(Lib, SysModule)                                                                            \
+    CLS(Shader_Gcn)                                                                                \
     CLS(Frontend)                                                                                  \
     CLS(Render)                                                                                    \
     SUB(Render, Vulkan)                                                                            \

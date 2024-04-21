@@ -187,13 +187,12 @@ Frame* RendererVulkan::PrepareFrame(const Libraries::VideoOut::BufferAttributeGr
     };
 
     cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
-                           vk::PipelineStageFlagBits::eTransfer,
-                           vk::DependencyFlagBits::eByRegion, {}, {}, pre_barrier);
-    cmdbuf.blitImage(image.image, vk::ImageLayout::eGeneral, frame->image,
-                     vk::ImageLayout::eGeneral,
-                     MakeImageBlit(image.info.size.width, image.info.size.height,
-                                   frame->width, frame->height),
-                     vk::Filter::eLinear);
+                           vk::PipelineStageFlagBits::eTransfer, vk::DependencyFlagBits::eByRegion,
+                           {}, {}, pre_barrier);
+    cmdbuf.blitImage(
+        image.image, vk::ImageLayout::eGeneral, frame->image, vk::ImageLayout::eGeneral,
+        MakeImageBlit(image.info.size.width, image.info.size.height, frame->width, frame->height),
+        vk::Filter::eLinear);
 
     // Flush pending vulkan operations.
     scheduler.Flush(frame->render_ready);

@@ -64,6 +64,7 @@ enum class Class : u8 {
     Lib_Http,           ///< The LibSceHttp implementation.
     Lib_SysModule,      ///< The LibSceSysModule implementation
     Frontend,           ///< Emulator UI
+    Shader_Gcn,         ///< Gcn shader recompiler
     Render,             ///< Video Core
     Render_Vulkan,      ///< Vulkan backend
     Loader,             ///< ROM loader

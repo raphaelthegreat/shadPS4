@@ -91,9 +91,9 @@ void UniqueImage::Create(const vk::ImageCreateInfo& image_ci) {
 
 Image::Image(const Vulkan::Instance& instance_, Vulkan::Scheduler& scheduler_,
              const ImageInfo& info_, VAddr cpu_addr)
-    : instance{&instance_}, scheduler{&scheduler_}, info{info_},
-      image{instance->GetDevice(), instance->GetAllocator()}, cpu_addr{cpu_addr},
-      cpu_addr_end{cpu_addr + info.guest_size_bytes} {
+    : instance{&instance_}, scheduler{&scheduler_}, info{info_}, image{instance->GetDevice(),
+                                                                       instance->GetAllocator()},
+      cpu_addr{cpu_addr}, cpu_addr_end{cpu_addr + info.guest_size_bytes} {
     vk::ImageCreateFlags flags{};
     if (info.type == vk::ImageType::e2D && info.resources.layers >= 6 &&
         info.size.width == info.size.height) {
@@ -138,8 +138,8 @@ Image::Image(const Vulkan::Instance& instance_, Vulkan::Scheduler& scheduler_,
         },
     };
     cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eTopOfPipe,
-                           vk::PipelineStageFlagBits::eTopOfPipe,
-                           vk::DependencyFlagBits::eByRegion, {}, {}, init_barrier);
+                           vk::PipelineStageFlagBits::eTopOfPipe, vk::DependencyFlagBits::eByRegion,
+                           {}, {}, init_barrier);
 }
 
 Image::~Image() = default;
