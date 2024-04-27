@@ -30,6 +30,24 @@ struct Liverpool {
     static constexpr u32 ShRegWordOffset = 0x2C00;
     static constexpr u32 NumRegs = 0xD000;
 
+    using UserData = std::array<u32, NumWordsShaderUserData>;
+
+    struct ShaderProgram {
+        u32 address_lo;
+        u32 address_hi;
+        union {
+            BitField<0, 6, u64> num_vgprs;
+            BitField<6, 4, u64> num_sgprs;
+            BitField<33, 5, u64> num_user_regs;
+        } settings;
+        UserData user_data;
+
+        const u8* Address() const {
+            const uintptr_t addr = uintptr_t(address_hi) << 40 | uintptr_t(address_lo) << 8;
+            return reinterpret_cast<const u8*>(addr);
+        }
+    };
+
     enum class ShaderExportComp : u32 {
         None = 0,
         OneComp = 1,
@@ -527,17 +545,9 @@ struct Liverpool {
     union Regs {
         struct {
             INSERT_PADDING_WORDS(0x2C08);
-            u32 ps_shader_pgm_lo;
-            u32 ps_shader_pgm_hi;
-            u32 ps_program_settings_lo;
-            u32 ps_program_settings_hi;
-            std::array<u32, NumWordsShaderUserData> ps_user_data;
+            ShaderProgram ps_program;
             INSERT_PADDING_WORDS(0x2C);
-            u32 vs_shader_pgm_lo;
-            u32 vs_shader_pgm_hi;
-            u32 vs_program_settings_lo;
-            u32 vs_program_settings_hi;
-            std::array<u32, NumWordsShaderUserData> vs_user_data;
+            ShaderProgram vs_program;
             INSERT_PADDING_WORDS(0xA008 - 0x2C4C - 16);
             u32 depth_bounds_min;
             u32 depth_bounds_max;
@@ -613,9 +623,9 @@ public:
     }
 };
 
-static_assert(GFX6_3D_REG_INDEX(ps_shader_pgm_lo) == 0x2C08);
-static_assert(GFX6_3D_REG_INDEX(vs_shader_pgm_lo) == 0x2C48);
-static_assert(GFX6_3D_REG_INDEX(vs_user_data) == 0x2C4C);
+static_assert(GFX6_3D_REG_INDEX(ps_program) == 0x2C08);
+static_assert(GFX6_3D_REG_INDEX(vs_program) == 0x2C48);
+static_assert(GFX6_3D_REG_INDEX(vs_program.user_data) == 0x2C4C);
 static_assert(GFX6_3D_REG_INDEX(screen_scissor) == 0xA00C);
 static_assert(GFX6_3D_REG_INDEX(depth_slice) == 0xA017);
 static_assert(GFX6_3D_REG_INDEX(color_target_mask) == 0xA08E);

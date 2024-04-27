@@ -25,7 +25,8 @@ enum PosixPageProtection {
 #endif
 
 namespace VirtualMemory {
-static u32 convertMemoryMode(MemoryMode mode) {
+
+u32 convertMemoryMode(MemoryMode mode) {
     switch (mode) {
     case MemoryMode::Read:
         return PAGE_READONLY;
@@ -47,7 +48,8 @@ static u32 convertMemoryMode(MemoryMode mode) {
         return PAGE_NOACCESS;
     }
 }
-static MemoryMode convertMemoryMode(u32 mode) {
+
+MemoryMode convertMemoryMode(u32 mode) {
     switch (mode) {
     case PAGE_NOACCESS:
         return MemoryMode::NoAccess;

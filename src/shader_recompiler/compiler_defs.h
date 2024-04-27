@@ -1,7 +1,7 @@
 #pragma once
 
-#include <string>
 #include <numbers>
+#include <string>
 #include "shader_recompiler/gcn_enum.h"
 #include "shader_recompiler/instruction.h"
 #include "shader_recompiler/shader_meta.h"
@@ -335,8 +335,7 @@ private:
 /**
  * \brief Component mask
  *
- * Enables access to certain
- * subset of vector components.
+ * Enables access to certain subset of vector components.
  */
 class GcnRegMask {
 

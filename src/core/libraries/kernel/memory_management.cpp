@@ -8,8 +8,10 @@
 #include "common/singleton.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/kernel/memory_management.h"
-#include "core/libraries/kernel/physical_memory.h"
 #include "core/virtual_memory.h"
+#include "video_core/renderer_vulkan/renderer_vulkan.h"
+
+extern std::unique_ptr<Vulkan::RendererVulkan> renderer;
 
 namespace Libraries::Kernel {
 
@@ -44,9 +46,9 @@ int PS4_SYSV_ABI sceKernelAllocateDirectMemory(s64 searchStart, s64 searchEnd, u
     }
 
     u64 physical_addr = 0;
-    auto* physical_memory = Common::Singleton<PhysicalMemory>::Instance();
-    if (!physical_memory->Alloc(searchStart, searchEnd, len, alignment, &physical_addr,
-                                memoryType)) {
+    auto& memory_manager = renderer->MemoryManager();
+    if (!memory_manager.Alloc(searchStart, searchEnd, len, alignment, &physical_addr,
+                              memoryType)) {
         LOG_CRITICAL(Kernel_Vmm, "Unable to allocate physical memory");
         return SCE_KERNEL_ERROR_EAGAIN;
     }
@@ -91,26 +93,33 @@ int PS4_SYSV_ABI sceKernelMapDirectMemory(void** addr, u64 len, int prot, int fl
         UNREACHABLE();
     }
 
+    auto& memory_manager = renderer->MemoryManager();
+
     auto in_addr = reinterpret_cast<u64>(*addr);
-    u64 out_addr = 0;
+    void* out_addr = memory_manager.Map(in_addr, directMemoryStart, len, alignment, prot, cpu_mode);
+    ASSERT(out_addr != nullptr);
 
-    if (flags == 0) {
-        out_addr = VirtualMemory::memory_alloc_aligned(in_addr, len, cpu_mode, alignment);
-    }
-    LOG_INFO(Kernel_Vmm, "in_addr = {:#x}, out_addr = {:#x}", in_addr, out_addr);
-
+    LOG_INFO(Kernel_Vmm, "in_addr = {:#x}, out_addr = {}", in_addr, fmt::ptr(out_addr));
     *addr = reinterpret_cast<void*>(out_addr); // return out_addr to first functions parameter
 
     if (out_addr == 0) {
         return SCE_KERNEL_ERROR_ENOMEM;
     }
 
-    auto* physical_memory = Common::Singleton<PhysicalMemory>::Instance();
-    if (!physical_memory->Map(out_addr, directMemoryStart, len, prot, cpu_mode)) {
-        UNREACHABLE();
-    }
-
     return SCE_OK;
+}
+
+int PS4_SYSV_ABI sceKernelQueryMemoryProtection(void* addr, void** start, void** end, u32* prot) {
+    auto& memory_manager = renderer->MemoryManager();
+    auto* block = memory_manager.FindBlock(reinterpret_cast<VAddr>(addr));
+    *prot = SCE_KERNEL_PROT_GPU_READ | SCE_KERNEL_PROT_GPU_WRITE;
+    *start = reinterpret_cast<void*>(block->map_virtual_addr);
+    *end = reinterpret_cast<void*>(block->map_virtual_addr + block->map_size);
+    return SCE_OK;
+    //*prot = SCE_KERNEL_PROT_GPU_READ | SCE_KERNEL_PROT_GPU_WRITE;
+    //*start = addr;
+    //*end = (void*)(uintptr_t(addr) + 0x1000);
+    //return SCE_OK;
 }
 
 } // namespace Libraries::Kernel

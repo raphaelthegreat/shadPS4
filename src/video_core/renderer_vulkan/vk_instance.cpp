@@ -129,6 +129,9 @@ bool Instance::CreateDevice() {
     shader_stencil_export = add_extension(VK_EXT_SHADER_STENCIL_EXPORT_EXTENSION_NAME);
     external_memory_host = add_extension(VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME);
     tooling_info = add_extension(VK_EXT_TOOLING_INFO_EXTENSION_NAME);
+    add_extension(VK_KHR_EXTERNAL_MEMORY_FD_EXTENSION_NAME);
+    add_extension(VK_KHR_MAINTENANCE_5_EXTENSION_NAME);
+    add_extension(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
 
     const auto family_properties = physical_device.getQueueFamilyProperties();
     if (family_properties.empty()) {
@@ -175,6 +178,9 @@ bool Instance::CreateDevice() {
                 .shaderClipDistance = features.shaderClipDistance,
             },
         },
+        vk::PhysicalDeviceVulkan11Features{
+            .shaderDrawParameters = true,
+        },
         vk::PhysicalDeviceVulkan12Features{
             .timelineSemaphore = true,
         },
@@ -189,6 +195,9 @@ bool Instance::CreateDevice() {
         vk::PhysicalDeviceIndexTypeUint8FeaturesEXT{
             .indexTypeUint8 = true,
         },
+        vk::PhysicalDeviceMaintenance5FeaturesKHR{
+            .maintenance5 = true,
+        }
     };
 
     try {

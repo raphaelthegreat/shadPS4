@@ -119,8 +119,6 @@ set(KERNEL_LIB src/core/libraries/kernel/cpu_management.cpp
                src/core/libraries/kernel/libkernel.h
                src/core/libraries/kernel/memory_management.cpp
                src/core/libraries/kernel/memory_management.h
-               src/core/libraries/kernel/physical_memory.cpp
-               src/core/libraries/kernel/physical_memory.h
                src/core/libraries/kernel/thread_management.cpp
                src/core/libraries/kernel/thread_management.h
                src/core/libraries/kernel/time_management.cpp
@@ -338,11 +336,15 @@ set(SHADER_RECOMPILER src/shader_recompiler/control_flow/control_flow_graph.cpp
                       src/shader_recompiler/Allocator/UtilStructBank.h
 )
 
-set(VIDEO_CORE src/video_core/pixel_format.h
+set(VIDEO_CORE src/video_core/memory_manager.cpp
+               src/video_core/memory_manager.h
                src/video_core/amdgpu/liverpool.cpp
                src/video_core/amdgpu/liverpool.h
+               src/video_core/amdgpu/pixel_format.cpp
+               src/video_core/amdgpu/pixel_format.h
                src/video_core/amdgpu/pm4_cmds.h
                src/video_core/amdgpu/pm4_opcodes.h
+               src/video_core/amdgpu/sharp_buffer.h
                src/video_core/renderer_vulkan/liverpool_to_vk.cpp
                src/video_core/renderer_vulkan/liverpool_to_vk.h
                src/video_core/renderer_vulkan/pipeline_key.cpp
@@ -359,6 +361,8 @@ set(VIDEO_CORE src/video_core/pixel_format.h
                src/video_core/renderer_vulkan/vk_instance.h
                src/video_core/renderer_vulkan/vk_master_semaphore.cpp
                src/video_core/renderer_vulkan/vk_master_semaphore.h
+               src/video_core/renderer_vulkan/vk_pipeline_cache.cpp
+               src/video_core/renderer_vulkan/vk_pipeline_cache.h
                src/video_core/renderer_vulkan/vk_platform.cpp
                src/video_core/renderer_vulkan/vk_platform.h
                src/video_core/renderer_vulkan/vk_rasterizer.cpp

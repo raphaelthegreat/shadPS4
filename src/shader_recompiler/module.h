@@ -28,7 +28,7 @@ public:
     /**
      * \brief Get resources bound to the shader
      */
-    const GcnShaderResourceTable& getResourceTable() const {
+    const ShaderResourceTable& getResourceTable() const {
         return m_header.getShaderResourceTable();
     }
 
@@ -59,11 +59,11 @@ private:
     void dumpShader() const;
 
 private:
-    GcnHeader m_header;
+    Header m_header;
     GcnProgramInfo m_programInfo;
     const u8* m_code;
 
-    GcnShaderResourceTable m_resourceTable;
+    ShaderResourceTable m_resourceTable;
 };
 
 } // namespace Shader::Gcn

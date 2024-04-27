@@ -126,4 +126,4 @@ void SpirvCodeBuffer::store(std::ostream& stream) const {
     stream.write(reinterpret_cast<const char*>(m_code.data()), sizeof(uint32_t) * m_code.size());
 }
 
-} // namespace sce::gcn
+} // namespace Shader::Gcn

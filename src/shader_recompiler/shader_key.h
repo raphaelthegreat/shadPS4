@@ -10,13 +10,13 @@ namespace Shader::Gcn {
     return seed ^ (hash + 0x9e3779b9 + (seed << 6) + (seed >> 2));
 }
 
-class GcnShaderKey {
+class ShaderKey {
 public:
-    GcnShaderKey(u32 hash, u32 crc) {
+    ShaderKey(u32 hash, u32 crc) {
         m_key = HashCombine(hash, crc);
     }
 
-    ~GcnShaderKey() = default;
+    ~ShaderKey() = default;
 
     u64 key() const {
         return m_key;
@@ -26,7 +26,7 @@ public:
         return fmt::format("SHDR_{:X}", m_key);
     }
 
-    bool operator==(const GcnShaderKey& other) const {
+    bool operator==(const ShaderKey& other) const {
         return m_key == other.m_key;
     }
 
@@ -35,3 +35,12 @@ private:
 };
 
 } // namespace Shader::Gcn
+
+namespace std {
+template <>
+struct hash<Shader::Gcn::ShaderKey> {
+    std::size_t operator()(const Shader::Gcn::ShaderKey& k) const noexcept {
+        return k.key();
+    }
+};
+} // namespace std

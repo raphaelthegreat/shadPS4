@@ -1,7 +1,7 @@
 
 #include <fmt/format.h>
-#include "common/logging/log.h"
 #include "common/io_file.h"
+#include "common/logging/log.h"
 #include "shader_recompiler/analysis.h"
 #include "shader_recompiler/compiler.h"
 #include "shader_recompiler/control_flow/stackifier.h"
@@ -72,7 +72,7 @@ void GcnModule::runCompiler(GcnCompiler& compiler, const GcnInstructionList& ins
 }
 
 void GcnModule::dumpShader() const {
-    const auto dump_name = fmt::format("shaders/{}.bin", this->name());
+    const auto dump_name = fmt::format("{}.bin", this->name());
     Common::FS::IOFile file{dump_name, Common::FS::FileAccessMode::Write};
     file.WriteRaw<u8>(m_code, m_header.length());
 }

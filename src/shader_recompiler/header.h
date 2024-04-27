@@ -15,7 +15,7 @@ enum class GcnProgramType : u16;
 /**
  * \brief Represent a resource bound to a GCN shader
  */
-struct GcnShaderResource {
+struct ShaderResource {
     vk::DescriptorType type;
 
     // ShaderInputUsageType
@@ -37,17 +37,17 @@ struct GcnShaderResource {
     bool isSampled;
 };
 
-using GcnShaderResourceTable = std::vector<GcnShaderResource>;
+using ShaderResourceTable = std::vector<ShaderResource>;
 
 /**
  * \brief Light weight binary information parser
  *
  * Data in this class is not persistent, will become invalid when shader code released.
  */
-class GcnBinaryInfo {
+class BinaryInfo {
 public:
-    GcnBinaryInfo(const void* shaderCode);
-    ~GcnBinaryInfo();
+    BinaryInfo(const void* shaderCode);
+    ~BinaryInfo();
 
     /**
      * \brief Code length
@@ -63,8 +63,8 @@ public:
      *
      * Used to identify the shader
      */
-    GcnShaderKey key() const {
-        return GcnShaderKey(m_binInfo->m_shaderHash0, m_binInfo->m_crc32);
+    ShaderKey key() const {
+        return ShaderKey(m_binInfo->m_shaderHash0, m_binInfo->m_crc32);
     }
 
     /**
@@ -88,20 +88,20 @@ private:
  *
  * Stores header for a shader binary sent to graphics driver.
  */
-class GcnHeader {
+class Header {
     using ResourceTypeInfo = std::unordered_map<u32, bool>;
 
 public:
-    GcnHeader(const u8* shaderCode);
-    ~GcnHeader();
+    explicit Header(const u8* shaderCode);
+    ~Header();
 
     GcnProgramType type() const;
 
     /**
      * \brief Unique id of the shader
      */
-    GcnShaderKey key() const {
-        return GcnShaderKey(m_binInfo.m_shaderHash0, m_binInfo.m_crc32);
+    ShaderKey key() const {
+        return ShaderKey(m_binInfo.m_shaderHash0, m_binInfo.m_crc32);
     }
 
     /**
@@ -115,7 +115,7 @@ public:
         return m_inputUsageSlotTable;
     }
 
-    const GcnShaderResourceTable& getShaderResourceTable() const {
+    const ShaderResourceTable& getShaderResourceTable() const {
         return m_resourceTable;
     }
 
@@ -129,7 +129,7 @@ private:
 private:
     ShaderBinaryInfo m_binInfo = {};
     InputUsageSlotTable m_inputUsageSlotTable;
-    GcnShaderResourceTable m_resourceTable;
+    ShaderResourceTable m_resourceTable;
 };
 
 } // namespace Shader::Gcn

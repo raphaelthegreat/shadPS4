@@ -7,17 +7,14 @@
 
 namespace Vulkan {
 
-static constexpr u32 MaxShaderStages = 5;
-
 class Instance;
 
 class GraphicsPipeline {
 public:
     explicit GraphicsPipeline(const Instance& instance, const PipelineKey& key,
-                              vk::PipelineCache pipeline_cache, vk::PipelineLayout layout);
+                              vk::PipelineCache pipeline_cache, vk::PipelineLayout layout,
+                              std::span<const u32> vs_code, std::span<const u32> fs_code);
     ~GraphicsPipeline();
-
-    bool Build(bool fail_on_compile_required = false);
 
     [[nodiscard]] vk::Pipeline Handle() const noexcept {
         return *pipeline;
@@ -27,7 +24,6 @@ private:
     const Instance& instance;
     vk::UniquePipeline pipeline;
     vk::PipelineLayout pipeline_layout;
-    vk::PipelineCache pipeline_cache;
     PipelineKey key;
 };
 

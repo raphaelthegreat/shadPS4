@@ -16,11 +16,11 @@ namespace Shader::Gcn {
 
 class GcnToken;
 class GcnTokenList;
-class GcnHeader;
+class Header;
 struct GcnTokenCondition;
 struct GcnShaderInstruction;
 struct GcnAnalysisInfo;
-struct GcnShaderResource;
+struct ShaderResource;
 
 struct VltInterfaceSlots {
     u32 inputSlots = 0;
@@ -48,8 +48,8 @@ class GcnCompiler : public GcnInstructionIterator {
 
 public:
     GcnCompiler(const std::string& fileName, const GcnModuleInfo& moduleInfo,
-                const GcnProgramInfo& programInfo, const GcnHeader& header,
-                const GcnShaderMeta& meta, const GcnAnalysisInfo& analysis);
+                const GcnProgramInfo& programInfo, const Header& header, const GcnShaderMeta& meta,
+                const GcnAnalysisInfo& analysis);
     virtual ~GcnCompiler();
 
     /**
@@ -254,9 +254,9 @@ private:
     void emitDclExport();
     void emitDclOutput(u32 regIdx, GcnExportTarget target);
 
-    void emitDclBuffer(const GcnShaderResource& res);
-    void emitDclTexture(const GcnShaderResource& res);
-    void emitDclSampler(const GcnShaderResource& res);
+    void emitDclBuffer(const ShaderResource& res);
+    void emitDclTexture(const ShaderResource& res);
+    void emitDclSampler(const ShaderResource& res);
 
     void emitDclStateRegister();
     void emitDclInputSlots();
@@ -545,7 +545,7 @@ private:
 private:
     GcnModuleInfo m_moduleInfo;
     GcnProgramInfo m_programInfo;
-    const GcnHeader* m_header;
+    const Header* m_header;
     GcnShaderMeta m_meta;
     const GcnAnalysisInfo* m_analysis;
     SpirvModule m_module;

@@ -29,7 +29,7 @@ public:
         return m_ptr == m_end;
     }
 
-private:
+public:
     const u32* m_ptr = nullptr;
     const u32* m_end = nullptr;
 };

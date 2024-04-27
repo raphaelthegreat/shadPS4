@@ -794,9 +794,8 @@ GcnRegisterValue GcnCompiler::emitCalcQueryLod(const GcnRegisterValue& lod) {
 GcnRegisterValue GcnCompiler::emitApplyTexOffset(const GcnShaderInstruction& ins,
                                                  const GcnRegisterValue& coord,
                                                  const GcnRegisterValue& lod) {
-    // Spir-v doesn't allow non-constant texture offset for OpImageSample*,
+    // SPIR-V doesn't allow non-constant texture offset for OpImageSample*,
     // so we need to calculate the coordinate manually.
-
     GcnRegisterValue result;
 
     // Calculate lod used to query image size
@@ -824,7 +823,7 @@ GcnRegisterValue GcnCompiler::emitApplyTexOffset(const GcnShaderInstruction& ins
 }
 
 GcnRegisterValue GcnCompiler::emitRecoverCubeCoord(const GcnRegisterValue& coord) {
-    ASSERT_MSG(coord.type.ccount == 3, "cube coordinate must be vec3.");
+    ASSERT_MSG(coord.type.ccount == 3, "Cube coordinate must be vec3.");
     auto s = emitRegisterExtract(coord, GcnRegMask::select(0));
     auto t = emitRegisterExtract(coord, GcnRegMask::select(1));
     auto z = emitRegisterExtract(coord, GcnRegMask::select(2));
@@ -944,7 +943,7 @@ GcnImageInfo GcnCompiler::getImageType(TextureType textureType, bool isUav, bool
         case kTextureType2dArrayMsaa:
             return {spv::Dim2D, depth, 1, 1, sampled, vk::ImageViewType::e2DArray};
         default:
-            UNREACHABLE_MSG("GcnCompiler: Unsupported resource type: ", textureType);
+            UNREACHABLE_MSG("GcnCompiler: Unsupported resource type: ", (u32)textureType);
         }
     }();
 
@@ -1005,80 +1004,78 @@ u32 GcnCompiler::calcAddrComponentIndex(GcnImageAddrComponent component,
     auto msaa = imageInfo.ms;
     bool noSampling = isImageAccessNoSampling(ins);
 
-    // clang-format off
-		switch (component)
-		{
-			case GcnImageAddrComponent::Clamp:
-				if (flags.test(GcnMimgModifier::LodClamp)) ++index;
-				[[fallthrough]];
-			case GcnImageAddrComponent::Lod:
-				if (flags.test(GcnMimgModifier::Lod)) ++index;
-				[[fallthrough]];
-			case GcnImageAddrComponent::FragId:
-				if (noSampling &&
-					dim == spv::Dim2D &&
-					msaa != 0) ++index;
-				[[fallthrough]];
-			case GcnImageAddrComponent::FaceId:
-				if (dim == spv::DimCube) ++index;
-				[[fallthrough]];
-			case GcnImageAddrComponent::Slice:
-				if (ins.control.mimg.da != 0 &&
-					dim != spv::DimCube) ++index;
-				[[fallthrough]];
-			case GcnImageAddrComponent::Z:
-				if (dim == spv::Dim3D) ++index;
-				[[fallthrough]];
-			case GcnImageAddrComponent::Y:
-				if (dim == spv::Dim2D ||
-					dim == spv::Dim3D ||
-					dim == spv::DimCube) ++index;
-				[[fallthrough]];
-			case GcnImageAddrComponent::X:
-				++index;
-				[[fallthrough]];
-			case GcnImageAddrComponent::DzDv:
-				if (flags.any(GcnMimgModifier::Derivative, 
-							  GcnMimgModifier::CoarseDerivative) &&
-					dim == spv::Dim3D) ++index;
-				[[fallthrough]];
-			case GcnImageAddrComponent::DyDv:
-				if (flags.any(GcnMimgModifier::Derivative, 
-							  GcnMimgModifier::CoarseDerivative) &&
-				    (dim == spv::Dim2D ||
-					 dim == spv::Dim3D ||
-					 dim == spv::DimCube)) ++index;
-				[[fallthrough]];
-			case GcnImageAddrComponent::DxDv:
-				if (flags.any(GcnMimgModifier::Derivative, 
-							  GcnMimgModifier::CoarseDerivative)) ++index;
-				[[fallthrough]];
-			case GcnImageAddrComponent::DzDh:
-				if (flags.any(GcnMimgModifier::Derivative, 
-							  GcnMimgModifier::CoarseDerivative) &&
-					dim == spv::Dim3D) ++index;
-				[[fallthrough]];
-			case GcnImageAddrComponent::DyDh:
-				if (flags.any(GcnMimgModifier::Derivative, 
-							  GcnMimgModifier::CoarseDerivative) &&
-				    (dim == spv::Dim2D ||
-					 dim == spv::Dim3D ||
-					 dim == spv::DimCube)) ++index;
-				[[fallthrough]];
-			case GcnImageAddrComponent::DxDh:
-				if (flags.any(GcnMimgModifier::Derivative, 
-							  GcnMimgModifier::CoarseDerivative)) ++index;
-				[[fallthrough]];
-			case GcnImageAddrComponent::Zpcf:
-				if (flags.test(GcnMimgModifier::Pcf)) ++index;
-				[[fallthrough]];
-			case GcnImageAddrComponent::Bias:
-				if (flags.test(GcnMimgModifier::LodBias)) ++index;
-				[[fallthrough]];
-			case GcnImageAddrComponent::Offsets:
-				if (flags.test(GcnMimgModifier::Offset)) ++index;
-		}
-    // clang-format on
+    switch (component) {
+    case GcnImageAddrComponent::Clamp:
+        if (flags.test(GcnMimgModifier::LodClamp))
+            ++index;
+        [[fallthrough]];
+    case GcnImageAddrComponent::Lod:
+        if (flags.test(GcnMimgModifier::Lod))
+            ++index;
+        [[fallthrough]];
+    case GcnImageAddrComponent::FragId:
+        if (noSampling && dim == spv::Dim2D && msaa != 0)
+            ++index;
+        [[fallthrough]];
+    case GcnImageAddrComponent::FaceId:
+        if (dim == spv::DimCube)
+            ++index;
+        [[fallthrough]];
+    case GcnImageAddrComponent::Slice:
+        if (ins.control.mimg.da != 0 && dim != spv::DimCube)
+            ++index;
+        [[fallthrough]];
+    case GcnImageAddrComponent::Z:
+        if (dim == spv::Dim3D)
+            ++index;
+        [[fallthrough]];
+    case GcnImageAddrComponent::Y:
+        if (dim == spv::Dim2D || dim == spv::Dim3D || dim == spv::DimCube)
+            ++index;
+        [[fallthrough]];
+    case GcnImageAddrComponent::X:
+        ++index;
+        [[fallthrough]];
+    case GcnImageAddrComponent::DzDv:
+        if (flags.any(GcnMimgModifier::Derivative, GcnMimgModifier::CoarseDerivative) &&
+            dim == spv::Dim3D)
+            ++index;
+        [[fallthrough]];
+    case GcnImageAddrComponent::DyDv:
+        if (flags.any(GcnMimgModifier::Derivative, GcnMimgModifier::CoarseDerivative) &&
+            (dim == spv::Dim2D || dim == spv::Dim3D || dim == spv::DimCube))
+            ++index;
+        [[fallthrough]];
+    case GcnImageAddrComponent::DxDv:
+        if (flags.any(GcnMimgModifier::Derivative, GcnMimgModifier::CoarseDerivative))
+            ++index;
+        [[fallthrough]];
+    case GcnImageAddrComponent::DzDh:
+        if (flags.any(GcnMimgModifier::Derivative, GcnMimgModifier::CoarseDerivative) &&
+            dim == spv::Dim3D)
+            ++index;
+        [[fallthrough]];
+    case GcnImageAddrComponent::DyDh:
+        if (flags.any(GcnMimgModifier::Derivative, GcnMimgModifier::CoarseDerivative) &&
+            (dim == spv::Dim2D || dim == spv::Dim3D || dim == spv::DimCube))
+            ++index;
+        [[fallthrough]];
+    case GcnImageAddrComponent::DxDh:
+        if (flags.any(GcnMimgModifier::Derivative, GcnMimgModifier::CoarseDerivative))
+            ++index;
+        [[fallthrough]];
+    case GcnImageAddrComponent::Zpcf:
+        if (flags.test(GcnMimgModifier::Pcf))
+            ++index;
+        [[fallthrough]];
+    case GcnImageAddrComponent::Bias:
+        if (flags.test(GcnMimgModifier::LodBias))
+            ++index;
+        [[fallthrough]];
+    case GcnImageAddrComponent::Offsets:
+        if (flags.test(GcnMimgModifier::Offset))
+            ++index;
+    }
 
     ASSERT_MSG(index != -1, "Get vaddr component failed.");
     return static_cast<u32>(index);

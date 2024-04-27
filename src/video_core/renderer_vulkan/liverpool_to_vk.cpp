@@ -74,6 +74,9 @@ vk::PrimitiveTopology PrimitiveType(Liverpool::PrimitiveType type) {
         return vk::PrimitiveTopology::eTriangleListWithAdjacency;
     case Liverpool::PrimitiveType::AdjTriangleStrip:
         return vk::PrimitiveTopology::eTriangleStripWithAdjacency;
+    case Liverpool::PrimitiveType::QuadList:
+        // TODO: Hack
+        return vk::PrimitiveTopology::eTriangleFan;
     default:
         UNREACHABLE();
         return vk::PrimitiveTopology::eTriangleList;
@@ -108,6 +111,19 @@ vk::CullModeFlags CullMode(Liverpool::CullMode mode) {
         UNREACHABLE();
         return vk::CullModeFlagBits::eNone;
     }
+}
+
+vk::Format SurfaceFormat(AmdGpu::DataFormat data_format, AmdGpu::NumberFormat num_format) {
+    if (data_format == AmdGpu::DataFormat::Format32_32_32_32 && num_format == AmdGpu::NumberFormat::Float) {
+        return vk::Format::eR32G32B32A32Sfloat;
+    }
+    if (data_format == AmdGpu::DataFormat::Format32_32_32 && num_format == AmdGpu::NumberFormat::Uint) {
+        return vk::Format::eR32G32B32Uint;
+    }
+    if (data_format == AmdGpu::DataFormat::Format8_8_8_8 && num_format == AmdGpu::NumberFormat::Unorm) {
+        return vk::Format::eR8G8B8A8Unorm;
+    }
+    UNREACHABLE();
 }
 
 } // namespace Vulkan::LiverpoolToVK

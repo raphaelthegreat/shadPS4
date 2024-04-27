@@ -16,23 +16,12 @@ static constexpr vk::BufferUsageFlags VertexIndexFlags = vk::BufferUsageFlagBits
                                                          vk::BufferUsageFlagBits::eTransferDst;
 
 Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_,
-                       VideoCore::TextureCache& texture_cache_, AmdGpu::Liverpool* liverpool_)
+                       VideoCore::TextureCache& texture_cache_, VideoCore::MemoryManager& memory_manager,
+                       AmdGpu::Liverpool* liverpool_)
     : instance{instance_}, scheduler{scheduler_}, texture_cache{texture_cache_},
-      liverpool{liverpool_}, vertex_index_buffer{instance, scheduler, VertexIndexFlags, 64_MB} {
+      pipeline_cache{instance, scheduler, memory_manager, liverpool_}, liverpool{liverpool_},
+      vertex_index_buffer{instance, scheduler, VertexIndexFlags, 64_MB} {
     liverpool->BindRasterizer(this);
-    const vk::PipelineLayoutCreateInfo layout_info = {
-        .setLayoutCount = 0U,
-        .pSetLayouts = nullptr,
-        .pushConstantRangeCount = 0,
-        .pPushConstantRanges = nullptr,
-    };
-    auto layout = instance.GetDevice().createPipelineLayout(layout_info);
-
-    PipelineKey key{};
-    key.cull_mode = Liverpool::CullMode::None;
-    key.polygon_mode = Liverpool::PolygonMode::Fill;
-    key.prim_type = Liverpool::PrimitiveType::TriangleList;
-    pipeline = std::make_unique<GraphicsPipeline>(instance, key, VK_NULL_HANDLE, layout);
 }
 
 Rasterizer::~Rasterizer() = default;
@@ -48,6 +37,8 @@ void Rasterizer::DrawIndex() {
     }
 
     UpdateDynamicState();
+
+    pipeline_cache.BindPipeline();
 
     const u32 pitch = regs.color_buffers[0].Pitch();
     const u32 height = regs.color_buffers[0].Height();
@@ -70,13 +61,11 @@ void Rasterizer::DrawIndex() {
     };
 
     cmdbuf.beginRendering(rendering_info);
-    cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->Handle());
-    cmdbuf.bindIndexBuffer(vertex_index_buffer.Handle(), 0, vk::IndexType::eUint32);
-    cmdbuf.bindVertexBuffers(0, vertex_index_buffer.Handle(), vk::DeviceSize(0));
-    // cmdbuf.drawIndexed(regs.num_indices, regs.num_instances.NumInstances(), 0, 0, 0);
     cmdbuf.draw(regs.num_indices, regs.num_instances.NumInstances(), 0, 0);
     cmdbuf.endRendering();
 }
+
+void Rasterizer::PrepareDraw() {}
 
 void Rasterizer::UpdateDynamicState() {
     UpdateViewportScissorState();

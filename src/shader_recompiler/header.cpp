@@ -1,48 +1,17 @@
 #include "common/assert.h"
-#include "shader_recompiler/gcn_constants.h"
 #include "shader_recompiler/decoder.h"
+#include "shader_recompiler/gcn_constants.h"
 #include "shader_recompiler/header.h"
 #include "shader_recompiler/instruction_util.h"
 #include "shader_recompiler/program_info.h"
 
 namespace Shader::Gcn {
 
-typedef enum ShaderInputUsageType
-{
-    kShaderInputUsageImmResource                = 0x00, ///< Immediate read-only buffer/texture descriptor.
-    kShaderInputUsageImmSampler			        = 0x01, ///< Immediate sampler descriptor.
-    kShaderInputUsageImmConstBuffer             = 0x02, ///< Immediate constant buffer descriptor.
-    kShaderInputUsageImmVertexBuffer            = 0x03, ///< Immediate vertex buffer descriptor.
-    kShaderInputUsageImmRwResource				= 0x04, ///< Immediate read/write buffer/texture descriptor.
-    kShaderInputUsageImmAluFloatConst		    = 0x05, ///< Immediate float const (scalar or vector).
-    kShaderInputUsageImmAluBool32Const		    = 0x06, ///< 32 immediate Booleans packed into one UINT.
-    kShaderInputUsageImmGdsCounterRange	        = 0x07, ///< Immediate UINT with GDS address range for counters (used for append/consume buffers).
-    kShaderInputUsageImmGdsMemoryRange		    = 0x08, ///< Immediate UINT with GDS address range for storage.
-    kShaderInputUsageImmGwsBase                 = 0x09, ///< Immediate UINT with GWS resource base offset.
-    kShaderInputUsageImmShaderResourceTable     = 0x0A, ///< Pointer to read/write resource indirection table.
-    kShaderInputUsageImmLdsEsGsSize             = 0x0D, ///< Immediate LDS ESGS size used in on-chip GS
-                                            // Skipped several items here...
-    kShaderInputUsageSubPtrFetchShader		    = 0x12, ///< Immediate fetch shader subroutine pointer.
-    kShaderInputUsagePtrResourceTable           = 0x13, ///< Flat resource table pointer.
-    kShaderInputUsagePtrInternalResourceTable   = 0x14, ///< Flat internal resource table pointer.
-    kShaderInputUsagePtrSamplerTable		    = 0x15, ///< Flat sampler table pointer.
-    kShaderInputUsagePtrConstBufferTable	    = 0x16, ///< Flat const buffer table pointer.
-    kShaderInputUsagePtrVertexBufferTable       = 0x17, ///< Flat vertex buffer table pointer.
-    kShaderInputUsagePtrSoBufferTable		    = 0x18, ///< Flat stream-out buffer table pointer.
-    kShaderInputUsagePtrRwResourceTable		    = 0x19, ///< Flat read/write resource table pointer.
-    kShaderInputUsagePtrInternalGlobalTable     = 0x1A, ///< Internal driver table pointer.
-    kShaderInputUsagePtrExtendedUserData        = 0x1B, ///< Extended user data pointer.
-    kShaderInputUsagePtrIndirectResourceTable   = 0x1C, ///< Pointer to resource indirection table.
-    kShaderInputUsagePtrIndirectInternalResourceTable = 0x1D, ///< Pointer to internal resource indirection table.
-    kShaderInputUsagePtrIndirectRwResourceTable = 0x1E, ///< Pointer to read/write resource indirection table.
-} ShaderInputUsageType;
-
-GcnBinaryInfo::GcnBinaryInfo(const void* shaderCode) {
+BinaryInfo::BinaryInfo(const void* shaderCode) {
     const u32* token = reinterpret_cast<const u32*>(shaderCode);
     constexpr u32 tokenMovVccHi = 0xBEEB03FF;
 
-    // First instruction should be
-    // s_mov_b32 vcc_hi, sizeInWords
+    // First instruction should be s_mov_b32 vcc_hi, sizeInWords
     // currently I didn't meet other cases,
     // but if it is, we can still search for the header magic 'OrbShdr'
     ASSERT_MSG(token[0] == tokenMovVccHi, "First instruction is not s_mov_b32 vcc_hi, #imm");
@@ -50,20 +19,20 @@ GcnBinaryInfo::GcnBinaryInfo(const void* shaderCode) {
     m_binInfo = reinterpret_cast<const ShaderBinaryInfo*>(token + (token[1] + 1) * 2);
 }
 
-GcnBinaryInfo::~GcnBinaryInfo() = default;
+BinaryInfo::~BinaryInfo() = default;
 
-ShaderBinaryType GcnBinaryInfo::stage() const {
+ShaderBinaryType BinaryInfo::stage() const {
     return static_cast<ShaderBinaryType>(m_binInfo->m_type);
 }
 
-GcnHeader::GcnHeader(const u8* shaderCode) {
+Header::Header(const u8* shaderCode) {
     parseHeader(shaderCode);
     extractResourceTable(shaderCode);
 }
 
-GcnHeader::~GcnHeader() = default;
+Header::~Header() = default;
 
-GcnProgramType GcnHeader::type() const {
+GcnProgramType Header::type() const {
     GcnProgramType result = GcnProgramType::VertexShader;
     ShaderBinaryType binType = static_cast<ShaderBinaryType>(m_binInfo.m_type);
     switch (binType) {
@@ -95,8 +64,8 @@ GcnProgramType GcnHeader::type() const {
     return result;
 }
 
-void GcnHeader::parseHeader(const u8* shaderCode) {
-    GcnBinaryInfo info(shaderCode);
+void Header::parseHeader(const u8* shaderCode) {
+    BinaryInfo info(shaderCode);
     const ShaderBinaryInfo* binaryInfo = info.info();
     std::memcpy(&m_binInfo, binaryInfo, sizeof(ShaderBinaryInfo));
 
@@ -113,19 +82,17 @@ void GcnHeader::parseHeader(const u8* shaderCode) {
     }
 }
 
-void GcnHeader::extractResourceTable(const u8* code) {
-    // We can't distinguish some of the resource type without iterate
-    // through all shader instructions.
-    // For example, a T# in an ImmResource slot
-    // may be either a sampled image or a storage image.
-    // If it is accessed via an IMAGE_LOAD_XXX instruction,
-    // then we can say it is a storage image.
+void Header::extractResourceTable(const u8* code) {
+    // We can't distinguish some of the resource type without iterate through all shader
+    // instructions. For example, a T# in an ImmResource slot may be either a sampled image or a
+    // storage image. If it is accessed via an IMAGE_LOAD_XXX instruction, then we can say it is a
+    // storage image.
     auto typeInfo = analyzeResourceType(code);
 
     m_resourceTable.reserve(m_inputUsageSlotTable.size());
 
     for (const auto& slot : m_inputUsageSlotTable) {
-        GcnShaderResource res = {};
+        ShaderResource res = {};
 
         res.usage = slot.m_usageType;
         res.inEud = (slot.m_startRegister >= kMaxUserDataCount);
@@ -138,8 +105,8 @@ void GcnHeader::extractResourceTable(const u8* code) {
         bool isVSharp = (slot.m_resourceType == 0);
 
         switch (slot.m_usageType) {
-        case kShaderInputUsageImmResource:
-        case kShaderInputUsageImmRwResource: {
+        case ShaderInputUsageType::ImmResource:
+        case ShaderInputUsageType::ImmRwResource: {
             if (isVSharp) {
                 // We use ssbo instead of ubo no matter
                 // it is read-only or read-write,
@@ -151,18 +118,15 @@ void GcnHeader::extractResourceTable(const u8* code) {
                 if (!isUav) {
                     res.type = vk::DescriptorType::eSampledImage;
                 } else {
-                    // It's annoying to translate image_load_mip
-                    // instruction.
+                    // It's annoying to translate image_load_mip instruction.
                     // Normally, we should use OpImageRead/Write,
-                    // to access UAVs, but these two opcodes doesn't
-                    // support LOD operands.
+                    // to access UAVs, but these two opcodes doesn't support LOD operands.
                     // On AMD GPU, we have SPV_AMD_shader_image_load_store_lod to ease things,
                     // but no identical method for Nvidia GPU.
                     // So we need to use OpImageFetch to replace OpImageRead,
                     // thus to declare the image as sampled.
                     // (Well OpImageFetch will be translated back to image_load_mip
-                    // eventually on AMD GPU, tested on RadeonGPUAnalyzer,
-                    // not sure for Nvidia.)
+                    // eventually on AMD GPU, tested on RadeonGPUAnalyzer, not sure for Nvidia.)
                     // For image_store_mip, I don't have a good idea as of now.
                     bool isUavRead = iter->second;
                     if (isUavRead) {
@@ -176,19 +140,19 @@ void GcnHeader::extractResourceTable(const u8* code) {
             res.sizeInDwords = slot.m_registerCount == 0 ? 4 : 8;
             break;
         }
-        case kShaderInputUsageImmConstBuffer: {
+        case ShaderInputUsageType::ImmConstBuffer: {
             res.type = vk::DescriptorType::eUniformBuffer;
             res.sizeInDwords = kDwordSizeConstantBuffer;
             break;
         }
-        case kShaderInputUsageImmSampler: {
+        case ShaderInputUsageType::ImmSampler: {
             res.type = vk::DescriptorType::eSampler;
             res.sizeInDwords = kDwordSizeSampler;
             break;
         }
-        case kShaderInputUsagePtrExtendedUserData:
-        case kShaderInputUsageSubPtrFetchShader:
-        case kShaderInputUsagePtrVertexBufferTable: {
+        case ShaderInputUsageType::PtrExtendedUserData:
+        case ShaderInputUsageType::SubPtrFetchShader:
+        case ShaderInputUsageType::PtrVertexBufferTable: {
             // This is not really a resource
             res.type = vk::DescriptorType{VK_DESCRIPTOR_TYPE_MAX_ENUM};
             res.sizeInDwords = 2;
@@ -203,13 +167,13 @@ void GcnHeader::extractResourceTable(const u8* code) {
     }
 }
 
-GcnHeader::ResourceTypeInfo GcnHeader::analyzeResourceType(const u8* code) {
+Header::ResourceTypeInfo Header::analyzeResourceType(const u8* code) {
     const u32* start = reinterpret_cast<const u32*>(code);
     const u32* end = reinterpret_cast<const u32*>(code + m_binInfo.m_length);
     GcnCodeSlice slice(start, end);
 
     GcnDecodeContext decoder;
-    GcnHeader::ResourceTypeInfo result;
+    Header::ResourceTypeInfo result;
     while (!slice.atEnd()) {
         decoder.decodeInstruction(slice);
         auto& ins = decoder.getInstruction();

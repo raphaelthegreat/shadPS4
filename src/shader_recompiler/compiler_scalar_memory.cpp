@@ -62,7 +62,7 @@ void GcnCompiler::mapEudResource(const GcnShaderInstruction& ins) {
 
     const auto& resouceTable = m_header->getShaderResourceTable();
     auto iter =
-        std::find_if(resouceTable.cbegin(), resouceTable.cend(), [](const GcnShaderResource& res) {
+        std::find_if(resouceTable.cbegin(), resouceTable.cend(), [](const ShaderResource& res) {
             return res.usage == kShaderInputUsagePtrExtendedUserData;
         });
 
@@ -78,7 +78,7 @@ void GcnCompiler::mapEudResource(const GcnShaderInstruction& ins) {
 
         auto resIt = std::find_if(
             resouceTable.cbegin(), resouceTable.cend(),
-            [eudReg](const GcnShaderResource& res) { return res.startRegister == eudReg; });
+            [eudReg](const ShaderResource& res) { return res.startRegister == eudReg; });
 
         auto& res = *resIt;
         switch (res.type) {

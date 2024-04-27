@@ -22,8 +22,7 @@ if (WIN32)
 endif()
 
 # xxHash
-add_library(xxhash INTERFACE)
-target_include_directories(xxhash INTERFACE xxhash)
+add_subdirectory(xxHash/cmake_unofficial)
 
 # Zydis
 option(ZYDIS_BUILD_TOOLS "" OFF)

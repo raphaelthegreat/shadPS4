@@ -38,28 +38,15 @@ enum class PM4Predicate : u32 {
     PredEnable = 1   ///< Predicate enabled
 };
 
-// PM4 type 3 header macro for creating a PM4 type 3 header
-#define PM4_TYPE_3_HDR(opCode, count, shaderType, predicate)                                       \
-    ((unsigned int)(predicate << PM4_PREDICATE_SHIFT) | (shaderType << PM4_SHADERTYPE_SHIFT) |     \
-     (PM4_TYPE_3 << PM4_TYPE_SHIFT) | ((count - 2) << PM4_COUNT_SHIFT) | (opCode << PM4_OP_SHIFT))
-
-// PM4 type 0 header macros
-#define PM4_TYPE_0_HDR(Reg0, nWrites)                                                              \
-    ((((unsigned int)(nWrites)-1) << PM4_COUNT_SHIFT) | ((Reg0) << PM4_T0_INDX_SHIFT))
-
-// RJVR: This macro needs to be modified to use Type 3 ONE_REG_WRITE.
-#define PM4_TYPE_0_HDR_NO_INCR(Reg0, nWrites)                                                      \
-    ((((unsigned int)(nWrites)-1) << PM4_COUNT_SHIFT) | ((Reg0) << PM4_T0_INDX_SHIFT) |            \
-     PM4_T0_NO_INCR)
-
-// PM4 type 2 NOP
-#define PM4_TYPE_2_NOP (PM4_TYPE_2 << PM4_TYPE_SHIFT)
-
 union PM4Type0Header {
     u32 raw;
     BitField<0, 16, u32> base;   ///< DWORD Memory-mapped address
     BitField<16, 14, u32> count; ///< Count of DWORDs in the *information* body (N - 1 for N dwords)
     BitField<30, 2, u32> type;   ///< Packet identifier. It should be 0 for type 0 packets.
+
+    u32 NumWords() const {
+        return count + 1;
+    }
 };
 
 union PM4Type3Header {
@@ -266,6 +253,12 @@ struct PM4CmdDrawIndexType {
     };
 };
 
+struct PM4CmdDrawIndexAuto {
+    PM4Type3Header header;
+    u32 index_count;
+    u32 draw_initiator;
+};
+
 enum class DataSelect : u32 {
     None = 0,
     Data32Low = 1,
@@ -304,6 +297,48 @@ struct PM4CmdEventWriteEop {
     u64 DataQWord() const {
         return dataLo | u64(dataHi) << 32;
     }
+};
+
+struct PM4DmaData {
+    PM4Type3Header header;
+    union {
+        BitField<0, 1, u32> engine;
+        BitField<12, 1, u32> src_atc;
+        BitField<13, 2, u32> src_cache_policy;
+        BitField<15, 1, u32> src_volatile;
+        BitField<20, 2, u32> dst_sel;
+        BitField<24, 1, u32> dst_atc;
+        BitField<25, 2, u32> dst_cache_policy;
+        BitField<27, 1, u32> dst_volatile;
+        BitField<29, 2, u32> src_sel;
+        BitField<31, 1, u32> cp_sync;
+    };
+    union {
+        u32 src_addr_lo;
+        u32 data;
+    };
+    u32 src_addr_hi;
+    u32 dst_addr_lo;
+    u32 dst_addr_hi;
+    union
+    {
+        struct
+        {
+            unsigned int  byteCount : 21;
+            unsigned int  disWC     :  1;
+            unsigned int  srcSwap   :  2;
+            unsigned int  dstSwap   :  2;
+            unsigned int  sas       :  1;
+            unsigned int  das       :  1;
+            unsigned int  saic      :  1;
+            unsigned int  daic      :  1;
+            unsigned int  rawWait   :  1;
+            unsigned int  reserved5 :  1;
+        };
+
+        unsigned int  command;
+        unsigned int  ordinal7;
+    };
 };
 
 } // namespace AmdGpu

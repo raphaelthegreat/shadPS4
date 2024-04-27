@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "common/assert.h"
+#include "common/io_file.h"
 #include "video_core/amdgpu/liverpool.h"
 #include "video_core/amdgpu/pm4_cmds.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
@@ -14,7 +15,12 @@ void Liverpool::ProcessCmdList(u32* cmdbuf, u32 size_in_bytes) {
     auto* header = reinterpret_cast<PM4Header*>(cmdbuf);
     u32 processed_cmd_size = 0;
 
+    Common::FS::IOFile file(std::string_view("pm4_list.bin"), Common::FS::FileAccessMode::Write);
+    file.WriteRaw<u8>(cmdbuf, size_in_bytes);
+    file.Close();
+
     while (processed_cmd_size < size_in_bytes) {
+        PM4Header* next_header{};
         const u32 type = header->type;
         switch (type) {
         case 3: {
@@ -26,19 +32,19 @@ void Liverpool::ProcessCmdList(u32* cmdbuf, u32 size_in_bytes) {
             case PM4ItOpcode::SetContextReg: {
                 auto* set_data = reinterpret_cast<PM4CmdSetData*>(header);
                 std::memcpy(&regs.reg_array[ContextRegWordOffset + set_data->regOffset], header + 2,
-                            count * sizeof(u32));
+                            (count - 1) * sizeof(u32));
                 break;
             }
             case PM4ItOpcode::SetShReg: {
                 auto* set_data = reinterpret_cast<PM4CmdSetData*>(header);
                 std::memcpy(&regs.reg_array[ShRegWordOffset + set_data->regOffset], header + 2,
-                            count * sizeof(u32));
+                            (count - 1) * sizeof(u32));
                 break;
             }
             case PM4ItOpcode::SetUconfigReg: {
                 auto* set_data = reinterpret_cast<PM4CmdSetData*>(header);
                 std::memcpy(&regs.reg_array[UconfigRegWordOffset + set_data->regOffset], header + 2,
-                            count * sizeof(u32));
+                            (count - 1) * sizeof(u32));
                 break;
             }
             case PM4ItOpcode::IndexType: {
@@ -56,6 +62,13 @@ void Liverpool::ProcessCmdList(u32* cmdbuf, u32 size_in_bytes) {
                 rasterizer->DrawIndex();
                 break;
             }
+            case PM4ItOpcode::DrawIndexAuto: {
+                auto* draw_index = reinterpret_cast<PM4CmdDrawIndexAuto*>(header);
+                regs.num_indices = draw_index->index_count;
+                regs.draw_initiator = draw_index->draw_initiator;
+                rasterizer->DrawIndex();
+                break;
+            }
             case PM4ItOpcode::EventWriteEop: {
                 auto* event_write = reinterpret_cast<PM4CmdEventWriteEop*>(header);
                 const InterruptSelect irq_sel = event_write->intSel;
@@ -64,17 +77,21 @@ void Liverpool::ProcessCmdList(u32* cmdbuf, u32 size_in_bytes) {
                 *event_write->Address() = event_write->DataQWord();
                 break;
             }
+            case PM4ItOpcode::DmaData: {
+                auto* dma_data = reinterpret_cast<PM4DmaData*>(header);
+                break;
+            }
             default:
                 UNREACHABLE_MSG("Unknown PM4 type 3 opcode {:#x} with count {}",
                                 static_cast<u32>(opcode), count);
             }
+            next_header = header + header->type3.NumWords() + 1;
             break;
         }
         default:
             UNREACHABLE_MSG("Invalid PM4 type {}", type);
         }
 
-        auto* next_header = header + header->type3.NumWords() + 1;
         processed_cmd_size += uintptr_t(next_header) - uintptr_t(header);
         header = next_header;
     }

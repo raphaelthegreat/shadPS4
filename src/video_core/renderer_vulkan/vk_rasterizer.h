@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include <memory>
+#include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 #include "video_core/renderer_vulkan/vk_stream_buffer.h"
 
 namespace AmdGpu {
@@ -22,7 +22,8 @@ class GraphicsPipeline;
 class Rasterizer {
 public:
     explicit Rasterizer(const Instance& instance, Scheduler& scheduler,
-                        VideoCore::TextureCache& texture_cache, AmdGpu::Liverpool* liverpool);
+                        VideoCore::TextureCache& texture_cache, VideoCore::MemoryManager& memory_manager,
+                        AmdGpu::Liverpool* liverpool);
     ~Rasterizer();
 
     /// Performs a draw call with an index buffer.
@@ -32,6 +33,9 @@ public:
     void UpdateDynamicState();
 
 private:
+    /// Prepares buffers and pipelines necessary for the current draw command.
+    void PrepareDraw();
+
     /// Updates viewport and scissor from liverpool registers.
     void UpdateViewportScissorState();
 
@@ -42,9 +46,9 @@ private:
     const Instance& instance;
     Scheduler& scheduler;
     VideoCore::TextureCache& texture_cache;
+    PipelineCache pipeline_cache;
     AmdGpu::Liverpool* liverpool;
     StreamBuffer vertex_index_buffer;
-    std::unique_ptr<GraphicsPipeline> pipeline;
 };
 
 } // namespace Vulkan

@@ -18,6 +18,34 @@ enum class ShaderBinaryType : u8 {
     kDomainShader = 8, ///< DS stage shader with embedded CS stage frontend shader.
 };
 
+enum ShaderInputUsageType : u8 {
+    ImmResource = 0x00,                      ///< Immediate read-only buffer/texture descriptor.
+    ImmSampler = 0x01,                       ///< Immediate sampler descriptor.
+    ImmConstBuffer = 0x02,                   ///< Immediate constant buffer descriptor.
+    ImmVertexBuffer = 0x03,                  ///< Immediate vertex buffer descriptor.
+    ImmRwResource = 0x04,                    ///< Immediate read/write buffer/texture descriptor.
+    ImmAluFloatConst = 0x05,                 ///< Immediate float const (scalar or vector).
+    ImmAluBool32Const = 0x06,                ///< 32 immediate Booleans packed into one UINT.
+    ImmGdsCounterRange = 0x07,
+    ImmGdsMemoryRange = 0x08,                ///< Immediate UINT with GDS address range for storage.
+    ImmGwsBase = 0x09,                       ///< Immediate UINT with GWS resource base offset.
+    ImmShaderResourceTable = 0x0A,           ///< Pointer to read/write resource indirection table.
+    ImmLdsEsGsSize = 0x0D,                   ///< Immediate LDS ESGS size used in on-chip GS
+    SubPtrFetchShader = 0x12,                ///< Immediate fetch shader subroutine pointer.
+    PtrResourceTable = 0x13,                 ///< Flat resource table pointer.
+    PtrInternalResourceTable = 0x14,         ///< Flat internal resource table pointer.
+    PtrSamplerTable = 0x15,                  ///< Flat sampler table pointer.
+    PtrConstBufferTable = 0x16,              ///< Flat const buffer table pointer.
+    PtrVertexBufferTable = 0x17,             ///< Flat vertex buffer table pointer.
+    PtrSoBufferTable = 0x18,                 ///< Flat stream-out buffer table pointer.
+    PtrRwResourceTable = 0x19,               ///< Flat read/write resource table pointer.
+    PtrInternalGlobalTable = 0x1A,           ///< Internal driver table pointer.
+    PtrExtendedUserData = 0x1B,              ///< Extended user data pointer.
+    PtrIndirectResourceTable = 0x1C,         ///< Pointer to resource indirection table.
+    PtrIndirectInternalResourceTable = 0x1D, ///< Pointer to internal resource indirection table.
+    PtrIndirectRwResourceTable = 0x1E,       ///< Pointer to read/write resource indirection table.
+};
+
 struct ShaderBinaryInfo {
     u8 m_signature[7]; // 'OrbShdr'
     u8 m_version;      // ShaderBinaryInfoVersion
@@ -74,10 +102,10 @@ struct alignas(4) InputUsageSlot {
 using InputUsageSlotTable = std::vector<InputUsageSlot>;
 
 struct VertexInputSemantic {
-    u8 m_semantic;
-    u8 m_vgpr;
-    u8 m_sizeInElements;
-    u8 m_reserved;
+    u8 semantic;
+    u8 dest_vgpr;
+    u8 num_elements;
+    u8 vsharp_index;
 };
 
 using VertexInputSemanticTable = std::vector<VertexInputSemantic>;

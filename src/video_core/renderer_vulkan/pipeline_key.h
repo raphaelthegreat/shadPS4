@@ -9,6 +9,9 @@ namespace Vulkan {
 
 using Liverpool = AmdGpu::Liverpool;
 
+constexpr u32 MaxVertexBufferCount = 32;
+constexpr u32 MaxShaderStages = 5;
+
 struct PipelineKey {
     Liverpool::DepthControl depth;
     Liverpool::StencilControl stencil;
@@ -17,6 +20,10 @@ struct PipelineKey {
     Liverpool::PrimitiveType prim_type;
     Liverpool::PolygonMode polygon_mode;
     Liverpool::CullMode cull_mode;
+    u32 num_attributes;
+    u32 num_bindings;
+    std::array<vk::VertexInputAttributeDescription, MaxVertexBufferCount> attributes;
+    std::array<vk::VertexInputBindingDescription, MaxVertexBufferCount> bindings;
 };
 static_assert(std::has_unique_object_representations_v<PipelineKey>);
 

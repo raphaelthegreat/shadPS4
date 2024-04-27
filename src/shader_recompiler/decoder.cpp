@@ -6,11 +6,11 @@
 namespace Shader::Gcn {
 
 namespace bit {
-template<typename T>
+template <typename T>
 T extract(T value, uint32_t lst, uint32_t fst) {
     return (value >> fst) & ~(~T(0) << (lst - fst + 1));
 }
-}
+} // namespace bit
 
 GcnDecodeContext::GcnDecodeContext() = default;
 
@@ -20,7 +20,7 @@ void GcnDecodeContext::decodeInstruction(GcnCodeSlice& code) {
     const u32 token = code.at(0);
 
     GcnInstEncoding encoding = getInstructionEncoding(token);
-    ASSERT_MSG(encoding != GcnInstEncoding::ILLEGAL, "illegal encoding {}", encoding);
+    ASSERT_MSG(encoding != GcnInstEncoding::ILLEGAL, "illegal encoding {}", (u32)encoding);
     u32 encodingLen = getEncodingLength(encoding);
 
     // Clear the instruction
@@ -336,7 +336,7 @@ void GcnDecodeContext::repairOperandType() {
         m_instruction.src[2].type = GcnScalarType::Uint64;
         break;
     default:
-        UNREACHABLE();
+        break;
     }
 }
 

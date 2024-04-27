@@ -2,22 +2,14 @@
 
 #include "shader_recompiler/shader_binary.h"
 
-namespace Shader::Gcn {
+namespace Shader::Gcn::FetchShader {
 
-class GcnFetchShader {
-public:
-    GcnFetchShader(const u8* code);
-    ~GcnFetchShader();
-
-    const VertexInputSemanticTable& getVertexInputSemanticTable() const {
-        return m_vsInputSemanticTable;
-    }
-
-private:
-    void parseVsInputSemantic(const u8* code);
-
-private:
-    VertexInputSemanticTable m_vsInputSemanticTable;
-};
+/**
+ * @brief ParseVsInputSemantic
+ *
+ * Parses the fetch shader instruction block and extracts the sematic mappings
+ * from the shader instructions.
+ */
+VertexInputSemanticTable ParseInputSemantic(const u64 code_ptr);
 
 } // namespace Shader::Gcn

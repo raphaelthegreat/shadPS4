@@ -60,14 +60,25 @@ std::string GcnProgramInfo::name() const {
 
 GcnProgramType gcnProgramTypeFromVkStage(vk::PipelineStageFlagBits stage) {
     GcnProgramType type = GcnProgramType::VertexShader;
-    switch (stage)
-    {
-    case vk::PipelineStageFlagBits::eVertexShader: type = GcnProgramType::VertexShader; break;
-    case vk::PipelineStageFlagBits::eFragmentShader: type = GcnProgramType::PixelShader; break;
-    case vk::PipelineStageFlagBits::eComputeShader: type = GcnProgramType::ComputeShader; break;
-    case vk::PipelineStageFlagBits::eGeometryShader: type = GcnProgramType::GeometryShader; break;
-    case vk::PipelineStageFlagBits::eTessellationControlShader: type = GcnProgramType::DomainShader; break;
-    case vk::PipelineStageFlagBits::eTessellationEvaluationShader: type = GcnProgramType::HullShader; break;
+    switch (stage) {
+    case vk::PipelineStageFlagBits::eVertexShader:
+        type = GcnProgramType::VertexShader;
+        break;
+    case vk::PipelineStageFlagBits::eFragmentShader:
+        type = GcnProgramType::PixelShader;
+        break;
+    case vk::PipelineStageFlagBits::eComputeShader:
+        type = GcnProgramType::ComputeShader;
+        break;
+    case vk::PipelineStageFlagBits::eGeometryShader:
+        type = GcnProgramType::GeometryShader;
+        break;
+    case vk::PipelineStageFlagBits::eTessellationControlShader:
+        type = GcnProgramType::DomainShader;
+        break;
+    case vk::PipelineStageFlagBits::eTessellationEvaluationShader:
+        type = GcnProgramType::HullShader;
+        break;
     default:
         UNREACHABLE_MSG("Error pipeline stage.");
         break;

@@ -8,6 +8,7 @@
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_swapchain.h"
 #include "video_core/texture_cache/texture_cache.h"
+#include "video_core/memory_manager.h"
 
 namespace Frontend {
 class WindowSDL;
@@ -37,6 +38,10 @@ public:
     explicit RendererVulkan(Frontend::WindowSDL& window, AmdGpu::Liverpool* liverpool);
     ~RendererVulkan();
 
+    VideoCore::MemoryManager& MemoryManager() {
+        return memory_manager;
+    }
+
     Frame* PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& attribute,
                         VAddr cpu_address);
 
@@ -52,6 +57,7 @@ private:
     Scheduler scheduler;
     Swapchain swapchain;
     VideoCore::TextureCache texture_cache;
+    VideoCore::MemoryManager memory_manager;
     std::unique_ptr<Rasterizer> rasterizer;
     vk::UniqueCommandPool command_pool;
     std::vector<Frame> present_frames;

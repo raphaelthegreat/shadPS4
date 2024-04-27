@@ -38,7 +38,7 @@ int PS4_SYSV_ABI sceGnmDispatchIndirectOnMec();
 int PS4_SYSV_ABI sceGnmDispatchInitDefaultHardwareState();
 s32 PS4_SYSV_ABI sceGnmDrawIndex(u32* cmd, u64 size, u32 index_count, uintptr_t index_addr,
                                  u32 flags, u32 type);
-int PS4_SYSV_ABI sceGnmDrawIndexAuto();
+int PS4_SYSV_ABI sceGnmDrawIndexAuto(u32* cmdbuf, u32 size, u32 index_count, u32 flags);
 int PS4_SYSV_ABI sceGnmDrawIndexIndirect();
 int PS4_SYSV_ABI sceGnmDrawIndexIndirectCountMulti();
 int PS4_SYSV_ABI sceGnmDrawIndexIndirectMulti();

@@ -171,9 +171,18 @@ s32 PS4_SYSV_ABI sceGnmDrawIndex(u32* cmdbuf, u64 size, u32 index_count, uintptr
     return -1;
 }
 
-int PS4_SYSV_ABI sceGnmDrawIndexAuto() {
-    LOG_ERROR(Lib_GnmDriver, "(STUBBED) called");
-    return ORBIS_OK;
+int PS4_SYSV_ABI sceGnmDrawIndexAuto(u32* cmdbuf, u32 size, u32 index_count, u32 flags) {
+    LOG_INFO(Lib_GnmDriver, "called");
+
+    if (cmdbuf && (size == 7) && (flags & 0x1ffffffe) == 0) {
+        *cmdbuf = flags & 1 | 0xc0012d00;
+        cmdbuf[1] = index_count;
+        cmdbuf[2] = 2;
+        cmdbuf[3] = 0xc0021000;
+        cmdbuf[4] = 0;
+        return ORBIS_OK;
+    }
+    return -1;
 }
 
 int PS4_SYSV_ABI sceGnmDrawIndexIndirect() {
@@ -999,10 +1008,10 @@ int PS4_SYSV_ABI sceGnmSubmitCommandBuffers(u32 count, void* dcbGpuAddrs[], u32*
         LOG_ERROR(Lib_GnmDriver, "dcbGpuAddrs and dcbSizesInBytes must not be NULL");
         return 0x80d11000;
     }
-    if (!ccbGpuAddrs || !ccbSizesInBytes) {
-        LOG_ERROR(Lib_GnmDriver, "ccbGpuAddrs and ccbSizesInBytes must not be NULL");
-        return 0x80d11000;
-    }
+    //if (!ccbGpuAddrs || !ccbSizesInBytes) {
+    //    LOG_ERROR(Lib_GnmDriver, "ccbGpuAddrs and ccbSizesInBytes must not be NULL");
+    //    return 0x80d11000;
+    //}
 
     for (u32 i = 0; i < count; i++) {
         if (dcbSizesInBytes[i] == 0) {

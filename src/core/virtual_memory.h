@@ -13,6 +13,7 @@ constexpr u64 USER_MIN = 0x1000000000u;
 constexpr u64 USER_MAX = 0xFBFFFFFFFFu;
 
 namespace VirtualMemory {
+
 enum class MemoryMode : u32 {
     NoAccess = 0,
     Read = 1,
@@ -23,6 +24,10 @@ enum class MemoryMode : u32 {
     ExecuteWrite = 6,
     ExecuteReadWrite = 7,
 };
+
+u32 convertMemoryMode(MemoryMode mode);
+MemoryMode convertMemoryMode(u32 mode);
+
 u64 memory_alloc(u64 address, u64 size, MemoryMode mode);
 u64 memory_alloc_aligned(u64 address, u64 size, MemoryMode mode, u64 alignment);
 bool memory_protect(u64 address, u64 size, MemoryMode mode, MemoryMode* old_mode);

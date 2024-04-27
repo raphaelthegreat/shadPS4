@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <fstream>
 #include <fmt/format.h>
 #include "common/assert.h"
 #include "shader_recompiler/analysis.h"
@@ -9,46 +10,12 @@
 
 namespace Shader::Gcn {
 
-typedef enum ShaderInputUsageType {
-    kShaderInputUsageImmResource = 0x00,        ///< Immediate read-only buffer/texture descriptor.
-    kShaderInputUsageImmSampler = 0x01,         ///< Immediate sampler descriptor.
-    kShaderInputUsageImmConstBuffer = 0x02,     ///< Immediate constant buffer descriptor.
-    kShaderInputUsageImmVertexBuffer = 0x03,    ///< Immediate vertex buffer descriptor.
-    kShaderInputUsageImmRwResource = 0x04,      ///< Immediate read/write buffer/texture descriptor.
-    kShaderInputUsageImmAluFloatConst = 0x05,   ///< Immediate float const (scalar or vector).
-    kShaderInputUsageImmAluBool32Const = 0x06,  ///< 32 immediate Booleans packed into one UINT.
-    kShaderInputUsageImmGdsCounterRange = 0x07, ///< Immediate UINT with GDS address range for
-                                                ///< counters (used for append/consume buffers).
-    kShaderInputUsageImmGdsMemoryRange =
-        0x08,                           ///< Immediate UINT with GDS address range for storage.
-    kShaderInputUsageImmGwsBase = 0x09, ///< Immediate UINT with GWS resource base offset.
-    kShaderInputUsageImmShaderResourceTable =
-        0x0A,                               ///< Pointer to read/write resource indirection table.
-    kShaderInputUsageImmLdsEsGsSize = 0x0D, ///< Immediate LDS ESGS size used in on-chip GS
-                                            // Skipped several items here...
-    kShaderInputUsageSubPtrFetchShader = 0x12, ///< Immediate fetch shader subroutine pointer.
-    kShaderInputUsagePtrResourceTable = 0x13,  ///< Flat resource table pointer.
-    kShaderInputUsagePtrInternalResourceTable = 0x14, ///< Flat internal resource table pointer.
-    kShaderInputUsagePtrSamplerTable = 0x15,          ///< Flat sampler table pointer.
-    kShaderInputUsagePtrConstBufferTable = 0x16,      ///< Flat const buffer table pointer.
-    kShaderInputUsagePtrVertexBufferTable = 0x17,     ///< Flat vertex buffer table pointer.
-    kShaderInputUsagePtrSoBufferTable = 0x18,         ///< Flat stream-out buffer table pointer.
-    kShaderInputUsagePtrRwResourceTable = 0x19,       ///< Flat read/write resource table pointer.
-    kShaderInputUsagePtrInternalGlobalTable = 0x1A,   ///< Internal driver table pointer.
-    kShaderInputUsagePtrExtendedUserData = 0x1B,      ///< Extended user data pointer.
-    kShaderInputUsagePtrIndirectResourceTable = 0x1C, ///< Pointer to resource indirection table.
-    kShaderInputUsagePtrIndirectInternalResourceTable =
-        0x1D, ///< Pointer to internal resource indirection table.
-    kShaderInputUsagePtrIndirectRwResourceTable =
-        0x1E, ///< Pointer to read/write resource indirection table.
-} ShaderInputUsageType;
-
 constexpr u32 PerVertex_Position = 0;
 constexpr u32 PerVertex_CullDist = 1;
 constexpr u32 PerVertex_ClipDist = 2;
 
 GcnCompiler::GcnCompiler(const std::string& fileName, const GcnModuleInfo& moduleInfo,
-                         const GcnProgramInfo& programInfo, const GcnHeader& header,
+                         const GcnProgramInfo& programInfo, const Header& header,
                          const GcnShaderMeta& meta, const GcnAnalysisInfo& analysis)
     : m_moduleInfo(moduleInfo), m_programInfo(programInfo), m_header(&header), m_meta(meta),
       m_analysis(&analysis), m_module(spvVersion(1, 3)), m_state({
@@ -72,9 +39,7 @@ GcnCompiler::GcnCompiler(const std::string& fileName, const GcnModuleInfo& modul
 GcnCompiler::~GcnCompiler() {}
 
 void GcnCompiler::compile(const GcnTokenList& tokens) {
-    // Define and initialize global
-    // variables used for control
-    // flow first.
+    // Define and initialize global variables used for control flow first.
     compileGlobalVariable(tokens);
     // Compile each token left
     for (const auto& token : tokens) {
@@ -203,8 +168,13 @@ std::vector<u32> GcnCompiler::finalize() {
     m_module.setDebugName(m_entryPointId, "main");
 
     // Create the shader module object
-    return new VltShader(m_programInfo.shaderStage(), m_resourceSlots, m_interfaceSlots,
-                         m_module.compile(), shaderOptions, std::move(m_immConstData));
+    // return new VltShader(m_programInfo.shaderStage(), m_resourceSlots, m_interfaceSlots,
+    //                     m_module.compile(), shaderOptions, std::move(m_immConstData));
+    //std::ofstream file("vs_shader.spv", std::ios::binary);
+    //auto buf = m_module.compile();
+    //buf.store(file);
+    //file.close();
+    return m_module.compile().code();
 }
 
 void GcnCompiler::emitInit() {
@@ -425,14 +395,14 @@ void GcnCompiler::emitDclInputSlots() {
     for (const auto& res : resouceTable) {
         ShaderInputUsageType usage = (ShaderInputUsageType)res.usage;
         switch (usage) {
-        case kShaderInputUsageImmConstBuffer: {
+        case ShaderInputUsageType::ImmConstBuffer: {
             // ImmConstBuffer is different from D3D11's ImmediateConstantBuffer
             // It's not constant data embedded into the shader, it's just a simple buffer binding.
             this->emitDclBuffer(res);
             break;
         }
-        case kShaderInputUsageImmResource:
-        case kShaderInputUsageImmRwResource: {
+        case ShaderInputUsageType::ImmResource:
+        case ShaderInputUsageType::ImmRwResource: {
             if (res.type == vk::DescriptorType::eStorageBuffer) {
                 this->emitDclBuffer(res);
             } else {
@@ -440,11 +410,11 @@ void GcnCompiler::emitDclInputSlots() {
             }
             break;
         }
-        case kShaderInputUsageImmSampler: {
+        case ShaderInputUsageType::ImmSampler: {
             this->emitDclSampler(res);
             break;
         }
-        case kShaderInputUsagePtrVertexBufferTable: {
+        case ShaderInputUsageType::PtrVertexBufferTable: {
             ASSERT_MSG(hasFetchShader() == true,
                        "no fetch shader found while vertex buffer table exist.");
             // Declare vertex input
@@ -453,14 +423,14 @@ void GcnCompiler::emitDclInputSlots() {
             this->emitFetchInput();
             break;
         }
-        case kShaderInputUsageImmAluFloatConst:
-        case kShaderInputUsageImmAluBool32Const:
-        case kShaderInputUsageImmGdsCounterRange:
-        case kShaderInputUsageImmGdsMemoryRange:
-        case kShaderInputUsageImmGwsBase:
-        case kShaderInputUsageImmLdsEsGsSize:
-        case kShaderInputUsageImmVertexBuffer:
-            UNREACHABLE_MSG("TODO: usage type %d not supported.", usage);
+        case ShaderInputUsageType::ImmAluFloatConst:
+        case ShaderInputUsageType::ImmAluBool32Const:
+        case ShaderInputUsageType::ImmGdsCounterRange:
+        case ShaderInputUsageType::ImmGdsMemoryRange:
+        case ShaderInputUsageType::ImmGwsBase:
+        case ShaderInputUsageType::ImmLdsEsGsSize:
+        case ShaderInputUsageType::ImmVertexBuffer:
+            UNREACHABLE_MSG("TODO: usage type %d not supported.", (u32)usage);
             break;
         }
     }
@@ -469,7 +439,7 @@ void GcnCompiler::emitDclInputSlots() {
     mapNonEudResource();
 }
 
-void GcnCompiler::emitDclBuffer(const GcnShaderResource& res) {
+void GcnCompiler::emitDclBuffer(const ShaderResource& res) {
     u32 regIdx = res.startRegister;
 
     const bool asSsbo = (res.type == vk::DescriptorType::eStorageBuffer);
@@ -516,7 +486,7 @@ void GcnCompiler::emitDclBuffer(const GcnShaderResource& res) {
     m_module.decorateDescriptorSet(varId, 0);
     m_module.decorateBinding(varId, bindingId);
 
-    if (res.usage == kShaderInputUsageImmResource)
+    if (res.usage == ShaderInputUsageType::ImmResource)
         m_module.decorate(varId, spv::DecorationNonWritable);
 
     // Record the buffer so that we can use it
@@ -534,14 +504,14 @@ void GcnCompiler::emitDclBuffer(const GcnShaderResource& res) {
         asSsbo ? vk::DescriptorType::eStorageBuffer : vk::DescriptorType::eUniformBuffer;
     resource.view = vk::ImageViewType{VK_IMAGE_VIEW_TYPE_MAX_ENUM};
     resource.access =
-        res.usage == kShaderInputUsageImmResource
+        res.usage == ShaderInputUsageType::ImmResource
             ? vk::AccessFlagBits::eShaderRead
             : (asSsbo ? vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eShaderWrite
                       : vk::AccessFlagBits::eUniformRead);
     m_resourceSlots.push_back(resource);
 }
 
-void GcnCompiler::emitDclTexture(const GcnShaderResource& res) {
+void GcnCompiler::emitDclTexture(const ShaderResource& res) {
     const u32 registerId = res.startRegister;
 
     const auto& textureMetaTable = getTextureMetaTable();
@@ -567,7 +537,7 @@ void GcnCompiler::emitDclTexture(const GcnShaderResource& res) {
                 case kTextureChannelTypeSrgb:  return GcnScalarType::Float32;
                 case kTextureChannelTypeSInt:  return GcnScalarType::Sint32;
                 case kTextureChannelTypeUInt:  return GcnScalarType::Uint32;
-                default: UNREACHABLE_MSG("GcnCompiler: Invalid sampled type: ", channelType);
+                default: UNREACHABLE_MSG("GcnCompiler: Invalid sampled type: ", (u32)channelType);
 			}
         // clang-format on
     }();
@@ -659,7 +629,7 @@ void GcnCompiler::emitDclTexture(const GcnShaderResource& res) {
     m_resourceSlots.push_back(resource);
 }
 
-void GcnCompiler::emitDclSampler(const GcnShaderResource& res) {
+void GcnCompiler::emitDclSampler(const ShaderResource& res) {
     const u32 samplerId = res.startRegister;
 
     // The sampler type is opaque, but we still have to
@@ -730,8 +700,7 @@ void GcnCompiler::emitDclInput(u32 regIdx, GcnInterpolationMode im) {
     m_module.decorateLocation(varId, regIdx);
     m_module.setDebugName(varId, fmt::format("i{}", regIdx).c_str());
 
-    // Record the input so that we can
-    // use it in fetch shader.
+    // Record the input so that we can use it in fetch shader.
     GcnRegisterPointer input;
     input.type.ctype = info.type.ctype;
     input.type.ccount = info.type.ccount;
@@ -768,7 +737,7 @@ void GcnCompiler::emitDclVertexInput() {
 
     for (u32 i = 0; i != table.second; ++i) {
         auto& sema = table.first[i];
-        this->emitDclInput(sema.m_semantic, GcnInterpolationMode::Undefined);
+        this->emitDclInput(sema.semantic, GcnInterpolationMode::Undefined);
     }
 }
 
@@ -790,43 +759,39 @@ void GcnCompiler::emitDclThreadGroup() {
 }
 
 void GcnCompiler::emitDclThreadGroupSharedMemory(u32 size) {
-    do {
-        if (size == 0) {
-            break;
-        }
+    if (size == 0) {
+        return;
+    }
 
-        GcnRegisterInfo varInfo;
-        varInfo.type.ctype = GcnScalarType::Uint32;
-        varInfo.type.ccount = 1;
-        varInfo.type.alength = size / sizeof(u32);
-        varInfo.sclass = spv::StorageClassWorkgroup;
+    GcnRegisterInfo varInfo;
+    varInfo.type.ctype = GcnScalarType::Uint32;
+    varInfo.type.ccount = 1;
+    varInfo.type.alength = size / sizeof(u32);
+    varInfo.sclass = spv::StorageClassWorkgroup;
 
-        m_lds = emitNewVariable(varInfo);
+    m_lds = emitNewVariable(varInfo);
 
-        m_module.setDebugName(m_lds, "lds");
-    } while (false);
+    m_module.setDebugName(m_lds, "lds");
 }
 
 void GcnCompiler::emitDclCrossGroupSharedMemory() {
-    do {
-        if (!m_analysis->hasComputeLane) {
-            break;
-        }
+    if (!m_analysis->hasComputeLane) {
+        return;
+    }
 
-        if (!m_moduleInfo.options.separateSubgroup) {
-            break;
-        }
+    if (!m_moduleInfo.options.separateSubgroup) {
+        return;
+    }
 
-        GcnRegisterInfo varInfo;
-        varInfo.type.ctype = GcnScalarType::Uint32;
-        varInfo.type.ccount = 1;
-        varInfo.type.alength = m_moduleInfo.maxComputeSubgroupCount;
-        varInfo.sclass = spv::StorageClassWorkgroup;
+    GcnRegisterInfo varInfo;
+    varInfo.type.ctype = GcnScalarType::Uint32;
+    varInfo.type.ccount = 1;
+    varInfo.type.alength = m_moduleInfo.maxComputeSubgroupCount;
+    varInfo.sclass = spv::StorageClassWorkgroup;
 
-        m_cs.crossGroupMemoryId = emitNewVariable(varInfo);
+    m_cs.crossGroupMemoryId = emitNewVariable(varInfo);
 
-        m_module.setDebugName(m_lds, "cross_group_memory");
-    } while (false);
+    m_module.setDebugName(m_lds, "cross_group_memory");
 }
 
 void GcnCompiler::emitDclOutput(u32 regIdx, GcnExportTarget target) {
@@ -1018,6 +983,7 @@ void GcnCompiler::emitPsInputSetup() {
     ASSERT_MSG(m_meta.ps.linearSampleEn == false, "TODO");
     ASSERT_MSG(m_meta.ps.linearCenterEn == false, "TODO");
     ASSERT_MSG(m_meta.ps.linearCentroidEn == false, "TODO");
+
     if (m_meta.ps.posXEn) {
         GcnRegisterValue value =
             emitPsSystemValueLoad(GcnSystemValue::Position, GcnRegMask::select(0));
@@ -1105,11 +1071,11 @@ void GcnCompiler::emitFetchInput() {
     for (u32 i = 0; i != semaCount; ++i) {
         auto& sema = semaTable[i];
 
-        auto value = emitValueLoad(m_inputs[sema.m_semantic]);
+        auto value = emitValueLoad(m_inputs[sema.semantic]);
         GcnInstOperand reg = {};
         reg.field = GcnOperandField::VectorGPR;
-        reg.code = sema.m_vgpr;
-        this->emitVgprArrayStore(reg, value, GcnRegMask::firstN(sema.m_sizeInElements));
+        reg.code = sema.dest_vgpr;
+        this->emitVgprArrayStore(reg, value, GcnRegMask::firstN(sema.num_elements));
     }
 }
 
@@ -2541,8 +2507,8 @@ u32 GcnCompiler::getUserSgprCount() const {
 
 bool GcnCompiler::hasFetchShader() const {
     auto& resTable = m_header->getShaderResourceTable();
-    auto iter = std::find_if(resTable.begin(), resTable.end(), [](const GcnShaderResource& res) {
-        return res.usage == kShaderInputUsageSubPtrFetchShader;
+    auto iter = std::find_if(resTable.begin(), resTable.end(), [](const ShaderResource& res) {
+        return res.usage == ShaderInputUsageType::SubPtrFetchShader;
     });
     return iter != resTable.end();
 }
@@ -2584,7 +2550,7 @@ GcnVectorType GcnCompiler::getInputRegType(u32 regIdx) const {
         auto& sema = table.first[regIdx];
         result.ctype = GcnScalarType::Float32;
         // The count value is fixed when parsing V# in CommandBufferDraw
-        result.ccount = sema.m_sizeInElements;
+        result.ccount = sema.num_elements;
     } break;
     default: {
         result.ctype = GcnScalarType::Float32;
@@ -2623,18 +2589,18 @@ void GcnCompiler::mapNonEudResource() {
 
         auto regIdx = res.startRegister;
         switch (res.type) {
-        case VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER:
-        case VK_DESCRIPTOR_TYPE_STORAGE_BUFFER:
+        case vk::DescriptorType::eUniformBuffer:
+        case vk::DescriptorType::eStorageBuffer:
             m_buffers.at(regIdx) = m_buffersDcl.at(regIdx);
             break;
-        case VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE:
-        case VK_DESCRIPTOR_TYPE_STORAGE_IMAGE:
+        case vk::DescriptorType::eSampledImage:
+        case vk::DescriptorType::eStorageImage:
             m_textures.at(regIdx) = m_texturesDcl.at(regIdx);
             break;
-        case VK_DESCRIPTOR_TYPE_SAMPLER:
+        case vk::DescriptorType::eSampler:
             m_samplers.at(regIdx) = m_samplersDcl.at(regIdx);
             break;
-        case VK_DESCRIPTOR_TYPE_MAX_ENUM:
+        case vk::DescriptorType{VK_DESCRIPTOR_TYPE_MAX_ENUM}:
             // skip
             break;
         default:

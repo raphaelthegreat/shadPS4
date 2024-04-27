@@ -171,7 +171,7 @@ vk::ShaderModule Compile(std::string_view code, vk::ShaderStageFlagBits stage, v
 
     auto shader = std::make_unique<glslang::TShader>(lang);
     shader->setEnvTarget(glslang::EShTargetSpv,
-                         glslang::EShTargetLanguageVersion::EShTargetSpv_1_6);
+                         glslang::EShTargetLanguageVersion::EShTargetSpv_1_3);
     shader->setStringsWithLengths(&pass_source_code, &pass_source_code_length, 1);
 
     glslang::TShader::ForbidIncluder includer;

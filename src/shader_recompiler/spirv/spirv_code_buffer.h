@@ -39,6 +39,10 @@ public:
         return m_code.data();
     }
 
+    std::vector<u32> code() const {
+        return m_code;
+    }
+
     /**
      * \brief Code size, in dwords
      * \returns Code size, in dwords

@@ -12,46 +12,184 @@
 namespace Vulkan {
 
 static constexpr std::string_view VsShader = R"(
-#version 450 core
+#version 450
+#ifdef GL_ARB_shader_draw_parameters
+#extension GL_ARB_shader_draw_parameters : enable
+#endif
 
-const vec2 positions[3] = vec2[3](
-    vec2(-0.5, -0.4),
-    vec2(0, 0.6),
-    vec2(0.5, -0.4)
-);
+#if defined(GL_KHR_shader_subgroup_ballot)
+#extension GL_KHR_shader_subgroup_ballot : require
+#elif defined(GL_NV_shader_thread_group)
+#extension GL_NV_shader_thread_group : require
+#elif defined(GL_ARB_shader_ballot) && defined(GL_ARB_shader_int64)
+#extension GL_ARB_shader_int64 : enable
+#extension GL_ARB_shader_ballot : require
+#else
+#error No extensions available to emulate requested subgroup feature.
+#endif
 
-void main() {
-    const vec2 pos = positions[gl_VertexIndex];
-    gl_Position = vec4(pos.x, pos.y, 0.f, 1.f);
+layout(location = 0) in vec4 i0;
+layout(location = 1) in vec4 i1;
+layout(location = 0) out vec4 o0;
+#ifdef GL_ARB_shader_draw_parameters
+#define SPIRV_Cross_BaseVertex gl_BaseVertexARB
+#else
+uniform int SPIRV_Cross_BaseVertex;
+#endif
+float s[1];
+float v[12];
+uint m0;
+bool scc;
+uint vcc_lo;
+uint vcc_hi;
+bool vcc_z;
+uint exec_lo;
+uint exec_hi;
+bool exec_z;
+
+#if defined(GL_KHR_shader_subgroup_ballot)
+#elif defined(GL_NV_shader_thread_group)
+uvec4 subgroupBallot(bool v) { return uvec4(ballotThreadNV(v), 0u, 0u, 0u); }
+#elif defined(GL_ARB_shader_ballot)
+uvec4 subgroupBallot(bool v) { return uvec4(unpackUint2x32(ballotARB(v)), 0u, 0u); }
+#endif
+
+void vs_fetch()
+{
+    v[4u] = i0.x;
+    v[5u] = i0.y;
+    v[6u] = i0.z;
+    v[7u] = i0.w;
+    v[8u] = i1.x;
+    v[9u] = i1.y;
+    v[10u] = i1.z;
+    v[11u] = i1.w;
+}
+
+void vs_main()
+{
+    vcc_hi = 8u;
+    vcc_z = (vcc_lo == 0u) && (vcc_hi == 0u);
+    gl_Position = vec4(v[4u], v[5u], v[6u], v[7u]);
+    o0 = vec4(v[8u], v[9u], v[10u], v[11u]);
+}
+
+void main()
+{
+    uvec4 _95 = subgroupBallot(true);
+    exec_lo = _95.x;
+    exec_hi = _95.y;
+    exec_z = (exec_lo == 0u) && (exec_hi == 0u);
+    vcc_lo = 0u;
+    vcc_hi = 0u;
+    vcc_z = (vcc_lo == 0u) && (vcc_hi == 0u);
+    v[0u] = uintBitsToFloat(uint(gl_VertexIndex) - uint(SPIRV_Cross_BaseVertex));
+    vs_fetch();
+    vs_main();
 }
 )";
 
 static constexpr std::string_view PsShader = R"(
-#version 450 core
+#version 450
 
-layout (location = 0) out vec4 color;
+#if defined(GL_KHR_shader_subgroup_ballot)
+#extension GL_KHR_shader_subgroup_ballot : require
+#elif defined(GL_NV_shader_thread_group)
+#extension GL_NV_shader_thread_group : require
+#elif defined(GL_ARB_shader_ballot) && defined(GL_ARB_shader_int64)
+#extension GL_ARB_shader_int64 : enable
+#extension GL_ARB_shader_ballot : require
+#else
+#error No extensions available to emulate requested subgroup feature.
+#endif
 
-void main() {
-    color = vec4(0.3, 0.9, 0.9, 1.0);
+#if defined(GL_KHR_shader_subgroup_ballot)
+#extension GL_KHR_shader_subgroup_ballot : require
+#elif defined(GL_NV_shader_thread_group)
+#extension GL_NV_shader_thread_group : require
+#elif defined(GL_ARB_shader_ballot) && defined(GL_ARB_shader_int64)
+#extension GL_ARB_shader_int64 : enable
+#extension GL_ARB_shader_ballot : require
+#else
+#error No extensions available to emulate requested subgroup feature.
+#endif
+
+layout(location = 0, index = 0) out vec4 o0;
+layout(location = 0) in vec4 i0;
+float s[1];
+float v[4];
+uint m0;
+bool scc;
+uint vcc_lo;
+uint vcc_hi;
+bool vcc_z;
+uint exec_lo;
+uint exec_hi;
+bool exec_z;
+
+#if defined(GL_KHR_shader_subgroup_ballot)
+#elif defined(GL_NV_shader_thread_group)
+#define gl_SubgroupEqMask uvec4(gl_ThreadEqMaskNV, 0u, 0u, 0u)
+#define gl_SubgroupGeMask uvec4(gl_ThreadGeMaskNV, 0u, 0u, 0u)
+#define gl_SubgroupGtMask uvec4(gl_ThreadGtMaskNV, 0u, 0u, 0u)
+#define gl_SubgroupLeMask uvec4(gl_ThreadLeMaskNV, 0u, 0u, 0u)
+#define gl_SubgroupLtMask uvec4(gl_ThreadLtMaskNV, 0u, 0u, 0u)
+#elif defined(GL_ARB_shader_ballot)
+#define gl_SubgroupEqMask uvec4(unpackUint2x32(gl_SubGroupEqMaskARB), 0u, 0u)
+#define gl_SubgroupGeMask uvec4(unpackUint2x32(gl_SubGroupGeMaskARB), 0u, 0u)
+#define gl_SubgroupGtMask uvec4(unpackUint2x32(gl_SubGroupGtMaskARB), 0u, 0u)
+#define gl_SubgroupLeMask uvec4(unpackUint2x32(gl_SubGroupLeMaskARB), 0u, 0u)
+#define gl_SubgroupLtMask uvec4(unpackUint2x32(gl_SubGroupLtMaskARB), 0u, 0u)
+#endif
+
+#if defined(GL_KHR_shader_subgroup_ballot)
+#elif defined(GL_NV_shader_thread_group)
+uvec4 subgroupBallot(bool v) { return uvec4(ballotThreadNV(v), 0u, 0u, 0u); }
+#elif defined(GL_ARB_shader_ballot)
+uvec4 subgroupBallot(bool v) { return uvec4(unpackUint2x32(ballotARB(v)), 0u, 0u); }
+#endif
+
+void ps_main()
+{
+    vcc_hi = 8u;
+    vcc_z = (vcc_lo == 0u) && (vcc_hi == 0u);
+    m0 = floatBitsToUint(s[0u]);
+    if (((exec_lo & gl_SubgroupEqMask.xy.x) != 0u) || ((exec_hi & gl_SubgroupEqMask.xy.y) != 0u))
+    {
+        v[3u] = i0.x;
+        v[2u] = i0.y;
+        v[2u] = uintBitsToFloat(packHalf2x16(vec2(v[3u], v[2u])));
+        v[3u] = i0.z;
+        v[0u] = i0.w;
+        v[0u] = uintBitsToFloat(packHalf2x16(vec2(v[3u], v[0u])));
+    }
+    o0 = vec4(unpackHalf2x16(floatBitsToUint(v[2u])), unpackHalf2x16(floatBitsToUint(v[0u])));
+}
+
+void main()
+{
+    uvec4 _111 = subgroupBallot(true);
+    exec_lo = _111.x;
+    exec_hi = _111.y;
+    exec_z = (exec_lo == 0u) && (exec_hi == 0u);
+    vcc_lo = 0u;
+    vcc_hi = 0u;
+    vcc_z = (vcc_lo == 0u) && (vcc_hi == 0u);
+    ps_main();
 }
 )";
 
 GraphicsPipeline::GraphicsPipeline(const Instance& instance_, const PipelineKey& key_,
-                                   vk::PipelineCache pipeline_cache_, vk::PipelineLayout layout_)
-    : instance{instance_}, pipeline_layout{layout_}, pipeline_cache{pipeline_cache_}, key{key_} {
-    Build();
-}
-
-GraphicsPipeline::~GraphicsPipeline() = default;
-
-bool GraphicsPipeline::Build(bool fail_on_compile_required) {
+                                   vk::PipelineCache pipeline_cache, vk::PipelineLayout layout_,
+                                   std::span<const u32> vs_code, std::span<const u32> fs_code)
+    : instance{instance_}, pipeline_layout{layout_}, key{key_} {
     const vk::Device device = instance.GetDevice();
 
     const vk::PipelineVertexInputStateCreateInfo vertex_input_info = {
-        .vertexBindingDescriptionCount = 0U,
-        .pVertexBindingDescriptions = nullptr,
-        .vertexAttributeDescriptionCount = 0U,
-        .pVertexAttributeDescriptions = nullptr,
+        .vertexBindingDescriptionCount = key.num_bindings,
+        .pVertexBindingDescriptions = key.bindings.data(),
+        .vertexAttributeDescriptionCount = key.num_attributes,
+        .pVertexAttributeDescriptions = key.attributes.data(),
     };
 
     const vk::PipelineInputAssemblyStateCreateInfo input_assembly = {
@@ -145,16 +283,29 @@ bool GraphicsPipeline::Build(bool fail_on_compile_required) {
         },
     };
 
+    const vk::ShaderModuleCreateInfo vs_info = {
+        .codeSize = vs_code.size() * sizeof(u32),
+        .pCode = vs_code.data(),
+    };
+    auto vs_module = device.createShaderModule(vs_info);
+    ASSERT(vs_module != VK_NULL_HANDLE);
+    const vk::ShaderModuleCreateInfo fs_info = {
+        .codeSize = fs_code.size() * sizeof(u32),
+        .pCode = fs_code.data(),
+    };
+    auto fs_module = device.createShaderModule(fs_info);
+    ASSERT(fs_module != VK_NULL_HANDLE);
+
     u32 shader_count = 2;
     std::array<vk::PipelineShaderStageCreateInfo, MaxShaderStages> shader_stages;
     shader_stages[0] = vk::PipelineShaderStageCreateInfo{
         .stage = vk::ShaderStageFlagBits::eVertex,
-        .module = Compile(VsShader, vk::ShaderStageFlagBits::eVertex, device),
+        .module = vs_module,
         .pName = "main",
     };
     shader_stages[1] = vk::PipelineShaderStageCreateInfo{
         .stage = vk::ShaderStageFlagBits::eFragment,
-        .module = Compile(PsShader, vk::ShaderStageFlagBits::eFragment, device),
+        .module = fs_module,
         .pName = "main",
     };
 
@@ -184,13 +335,11 @@ bool GraphicsPipeline::Build(bool fail_on_compile_required) {
     auto result = device.createGraphicsPipelineUnique(pipeline_cache, pipeline_info);
     if (result.result == vk::Result::eSuccess) {
         pipeline = std::move(result.value);
-    } else if (result.result == vk::Result::eErrorPipelineCompileRequiredEXT) {
-        return false;
     } else {
         UNREACHABLE_MSG("Graphics pipeline creation failed!");
     }
-
-    return true;
 }
+
+GraphicsPipeline::~GraphicsPipeline() = default;
 
 } // namespace Vulkan
