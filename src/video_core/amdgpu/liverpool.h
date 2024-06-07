@@ -512,8 +512,8 @@ struct Liverpool {
         float xoffset;
         float yscale;
         float yoffset;
-        float zoffset;
         float zscale;
+        float zoffset;
     };
 
     union ViewportControl {

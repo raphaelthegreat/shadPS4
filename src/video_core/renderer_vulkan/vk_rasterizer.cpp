@@ -179,7 +179,7 @@ void Rasterizer::UpdateViewportScissorState() {
         .y = regs.viewports[0].yoffset - regs.viewports[0].yscale,
         .width = regs.viewports[0].xscale * 2.0f,
         .height = regs.viewports[0].yscale * 2.0f,
-        .minDepth = /*regs.viewports[0].zoffset - regs.viewports[0].zscale * reduce_z*/-1.f,
+        .minDepth = regs.viewports[0].zoffset - regs.viewports[0].zscale * reduce_z,
         .maxDepth = regs.viewports[0].zscale + regs.viewports[0].zoffset,
     };
     const vk::Rect2D scissor{
