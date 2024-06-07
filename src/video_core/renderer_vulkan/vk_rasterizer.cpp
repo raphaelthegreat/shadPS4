@@ -172,13 +172,14 @@ void Rasterizer::UpdateDynamicState(const GraphicsPipeline& pipeline) {
 void Rasterizer::UpdateViewportScissorState() {
     auto& regs = liverpool->regs;
 
+    const float reduce_z = regs.clipper_control.clip_space == AmdGpu::Liverpool::ClipSpace::MinusWToW ? 1.0f : 0.0f;;
     const auto cmdbuf = scheduler.CommandBuffer();
     const vk::Viewport viewport{
         .x = regs.viewports[0].xoffset - regs.viewports[0].xscale,
         .y = regs.viewports[0].yoffset - regs.viewports[0].yscale,
         .width = regs.viewports[0].xscale * 2.0f,
         .height = regs.viewports[0].yscale * 2.0f,
-        .minDepth = /*regs.viewports[0].zoffset - regs.viewports[0].zscale*/ 0.f,
+        .minDepth = /*regs.viewports[0].zoffset - regs.viewports[0].zscale * reduce_z*/-1.f,
         .maxDepth = regs.viewports[0].zscale + regs.viewports[0].zoffset,
     };
     const vk::Rect2D scissor{

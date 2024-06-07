@@ -41,7 +41,7 @@ Instance::Instance(bool enable_validation, bool dump_command_buffers)
       physical_devices{instance->enumeratePhysicalDevices()} {}
 
 Instance::Instance(Frontend::WindowSDL& window, s32 physical_device_index)
-    : enable_validation{false}, instance{CreateInstance(dl, window.getWindowInfo().type, enable_validation, false)},
+    : enable_validation{true}, instance{CreateInstance(dl, window.getWindowInfo().type, enable_validation, false)},
       physical_devices{instance->enumeratePhysicalDevices()} {
     if (enable_validation) {
         debug_callback = CreateDebugCallback(*instance);
@@ -154,6 +154,8 @@ bool Instance::CreateDevice() {
     custom_border_color = add_extension(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME);
     add_extension(VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME);
     add_extension(VK_KHR_MAINTENANCE_4_EXTENSION_NAME);
+    add_extension(VK_EXT_DEPTH_CLIP_CONTROL_EXTENSION_NAME);
+    add_extension(VK_EXT_DEPTH_RANGE_UNRESTRICTED_EXTENSION_NAME);
     // The next two extensions are required to be available together in order to support write masks
     color_write_en = add_extension(VK_EXT_COLOR_WRITE_ENABLE_EXTENSION_NAME);
     color_write_en &= add_extension(VK_EXT_EXTENDED_DYNAMIC_STATE_3_EXTENSION_NAME);
@@ -225,6 +227,9 @@ bool Instance::CreateDevice() {
         },
         vk::PhysicalDeviceExtendedDynamicState3FeaturesEXT{
             .extendedDynamicState3ColorWriteMask = true,
+        },
+        vk::PhysicalDeviceDepthClipControlFeaturesEXT{
+            .depthClipControl = true,
         },
     };
 

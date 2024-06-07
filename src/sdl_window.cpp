@@ -124,6 +124,12 @@ void WindowSDL::onKeyPress(const SDL_Event* event) {
     case SDLK_RETURN:
         button = ScePadButton::OPTIONS;
         break;
+    case SDLK_o:
+        button = ScePadButton::L1;
+        break;
+    case SDLK_p:
+        button = ScePadButton::R1;
+        break;
     default:
         break;
     }

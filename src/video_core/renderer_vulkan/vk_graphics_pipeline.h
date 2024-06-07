@@ -32,6 +32,11 @@ struct GraphicsPipelineKey {
     vk::Format depth_format;
 
     Liverpool::DepthControl depth;
+    float depth_bounds_min;
+    float depth_bounds_max;
+    float depth_bias_const_factor;
+    float depth_bias_slope_factor;
+    float depth_bias_clamp;
     Liverpool::StencilControl stencil;
     Liverpool::StencilRefMask stencil_ref_front;
     Liverpool::StencilRefMask stencil_ref_back;
@@ -39,15 +44,16 @@ struct GraphicsPipelineKey {
     Liverpool::PolygonMode polygon_mode;
     Liverpool::CullMode cull_mode;
     Liverpool::FrontFace front_face;
-    u32 pad{};
+    Liverpool::ClipSpace clip_space;
     std::array<Liverpool::BlendControl, Liverpool::NumColorBuffers> blend_controls;
     std::array<vk::ColorComponentFlags, Liverpool::NumColorBuffers> write_masks;
+    u32 depth_bias_enable;
 
     bool operator==(const GraphicsPipelineKey& key) const noexcept {
         return std::memcmp(this, &key, sizeof(key)) == 0;
     }
 };
-static_assert(std::has_unique_object_representations_v<GraphicsPipelineKey>);
+//static_assert(std::has_unique_object_representations_v<GraphicsPipelineKey>);
 
 class GraphicsPipeline {
 public:

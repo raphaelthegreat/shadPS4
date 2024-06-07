@@ -140,7 +140,7 @@ ImageInfo::ImageInfo(const AmdGpu::Image& image) noexcept {
         .nummips = image.NumLevels(),
         .numslices = image.NumLayers(),
         .tm = static_cast<GnmTileMode>(image.tiling_index.Value()),
-        .mingpumode = GNM_GPU_BASE,
+        .mingpumode = Config::isNeoMode() ? GNM_GPU_NEO : GNM_GPU_BASE,
         .pow2pad = bool(image.pow2pad.Value()),
     };
     guest_size_bytes = image.GetSizeAligned(texinfo);
