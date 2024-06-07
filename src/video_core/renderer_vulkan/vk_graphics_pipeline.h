@@ -81,6 +81,7 @@ public:
 
 private:
     void BuildDescSetLayout();
+    void BindVertexBuffers(StreamBuffer& staging) const;
 
 private:
     const Instance& instance;

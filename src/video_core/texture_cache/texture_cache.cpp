@@ -147,10 +147,10 @@ ImageView& TextureCache::RegisterImageView(Image& image, const ImageViewInfo& vi
     }
 
     // All tiled images are created with storage usage flag. This makes set of formats (e.g. sRGB)
-    // impossible to use. However, during view creation, if an image isn't used as storage and not a
-    // target for the detiler, we can temporary remove its storage bit.
+    // impossible to use. However, during view creation, if an image isn't used as storage we can
+    // temporary remove its storage bit.
     std::optional<vk::ImageUsageFlags> usage_override;
-    if (!image.info.is_storage && !view_info.used_for_detiling) {
+    if (!image.info.is_storage) {
         usage_override = image.info.usage & ~vk::ImageUsageFlagBits::eStorage;
     }
 
@@ -162,6 +162,12 @@ ImageView& TextureCache::RegisterImageView(Image& image, const ImageViewInfo& vi
 
 ImageView& TextureCache::FindImageView(const AmdGpu::Image& desc) {
     Image& image = FindImage(ImageInfo{desc}, desc.Address());
+
+    if (image.info.is_storage) {
+        image.Transit(vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
+    } else {
+        image.Transit(vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
+    }
 
     const ImageViewInfo view_info{desc};
     return RegisterImageView(image, view_info);
@@ -183,6 +189,10 @@ ImageView& TextureCache::DepthTarget(const AmdGpu::Liverpool::DepthBuffer& buffe
     const ImageInfo info{buffer, hint};
     auto& image = FindImage(info, buffer.Address(), false);
     image.flags &= ~ImageFlagBits::CpuModified;
+
+    image.Transit(vk::ImageLayout::eColorAttachmentOptimal,
+                  vk::AccessFlagBits::eColorAttachmentWrite |
+                      vk::AccessFlagBits::eColorAttachmentRead);
 
     ImageViewInfo view_info;
     view_info.format = info.pixel_format;
