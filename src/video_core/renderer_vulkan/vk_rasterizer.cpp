@@ -175,7 +175,8 @@ void Rasterizer::UpdateDynamicState(const GraphicsPipeline& pipeline) {
 void Rasterizer::UpdateViewportScissorState() {
     auto& regs = liverpool->regs;
 
-    const float reduce_z = regs.clipper_control.clip_space == AmdGpu::Liverpool::ClipSpace::MinusWToW ? 1.0f : 0.0f;
+    auto clip_space = AmdGpu::Liverpool::ClipSpace::ZeroToW;
+    const float reduce_z = clip_space == AmdGpu::Liverpool::ClipSpace::MinusWToW ? 1.0f : 0.0f;
     const auto cmdbuf = scheduler.CommandBuffer();
     const vk::Viewport viewport{
         .x = regs.viewports[0].xoffset - regs.viewports[0].xscale,

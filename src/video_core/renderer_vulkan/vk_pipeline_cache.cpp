@@ -104,7 +104,7 @@ void PipelineCache::RefreshGraphicsKey() {
     key.prim_type = regs.primitive_type;
     key.polygon_mode = regs.polygon_control.PolyMode();
     key.cull_mode = regs.polygon_control.CullingMode();
-    key.clip_space = regs.clipper_control.clip_space;
+    key.clip_space = AmdGpu::Liverpool::ClipSpace::ZeroToW;
     key.front_face = regs.polygon_control.front_face;
 
     const auto& db = regs.depth_buffer;

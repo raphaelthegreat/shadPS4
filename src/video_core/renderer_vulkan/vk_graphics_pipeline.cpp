@@ -318,7 +318,7 @@ void GraphicsPipeline::BindResources(Core::MemoryManager* memory, StreamBuffer& 
 
         for (const auto& image : stage.images) {
             const auto tsharp = stage.ReadUd<AmdGpu::Image>(image.sgpr_base, image.dword_offset);
-            const auto& image_view = texture_cache.FindImageView(tsharp);
+            const auto& image_view = texture_cache.FindImageView(tsharp, image.is_storage);
             image_infos.emplace_back(VK_NULL_HANDLE, *image_view.image_view,
                                      vk::ImageLayout::eShaderReadOnlyOptimal);
             set_writes.push_back({
@@ -358,6 +358,32 @@ void GraphicsPipeline::BindVertexBuffers(StreamBuffer& staging) const {
     if (vs_info.vs_inputs.empty()) {
         return;
     }
+
+    {
+        std::array<vk::Buffer, MaxVertexBufferCount> buffers;
+        std::array<vk::DeviceSize, MaxVertexBufferCount> offsets;
+        VAddr base_address = 0;
+        u32 start_offset = 0;
+
+        // Bind vertex buffer.
+        const size_t num_buffers = vs_info.vs_inputs.size();
+        for (u32 i = 0; i < num_buffers; ++i) {
+            const auto& input = vs_info.vs_inputs[i];
+            const auto buffer = vs_info.ReadUd<AmdGpu::Buffer>(input.sgpr_base, input.dword_offset);
+            if (i == 0) {
+                start_offset = staging.Copy(buffer.base_address.Value(), buffer.GetSize());
+                base_address = buffer.base_address;
+            }
+            buffers[i] = staging.Handle();
+            offsets[i] = start_offset + buffer.base_address - base_address;
+        }
+
+        const auto cmdbuf = scheduler.CommandBuffer();
+        if (num_buffers > 0) {
+            cmdbuf.bindVertexBuffers(0, num_buffers, buffers.data(), offsets.data());
+        }
+    }
+    return;
 
     std::array<vk::Buffer, MaxVertexBufferCount> host_buffers;
     std::array<vk::DeviceSize, MaxVertexBufferCount> host_offsets;

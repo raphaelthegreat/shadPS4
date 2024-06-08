@@ -25,7 +25,11 @@ Id OutputAttrPointer(EmitContext& ctx, IR::Attribute attr, u32 element) {
     case IR::Attribute::RenderTarget2:
     case IR::Attribute::RenderTarget3: {
         const u32 index = u32(attr) - u32(IR::Attribute::RenderTarget0);
-        return ctx.OpAccessChain(ctx.output_f32, ctx.frag_color[index], ctx.ConstU32(element));
+        if (ctx.frag_num_comp[index] > 1) {
+            return ctx.OpAccessChain(ctx.output_f32, ctx.frag_color[index], ctx.ConstU32(element));
+        } else {
+            return ctx.frag_color[index];
+        }
     }
     }
     default:

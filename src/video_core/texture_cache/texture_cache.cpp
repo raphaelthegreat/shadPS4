@@ -160,16 +160,17 @@ ImageView& TextureCache::RegisterImageView(Image& image, const ImageViewInfo& vi
     return slot_image_views[view_id];
 }
 
-ImageView& TextureCache::FindImageView(const AmdGpu::Image& desc) {
+ImageView& TextureCache::FindImageView(const AmdGpu::Image& desc, bool is_storage) {
     Image& image = FindImage(ImageInfo{desc}, desc.Address());
 
-    if (image.info.is_storage) {
-        image.Transit(vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite);
+    if (is_storage) {
+        image.Transit(vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite |
+                                                 vk::AccessFlagBits::eShaderRead);
     } else {
         image.Transit(vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
     }
 
-    const ImageViewInfo view_info{desc};
+    const ImageViewInfo view_info{desc, is_storage};
     return RegisterImageView(image, view_info);
 }
 
@@ -178,6 +179,10 @@ ImageView& TextureCache::RenderTarget(const AmdGpu::Liverpool::ColorBuffer& buff
     const ImageInfo info{buffer, hint};
     auto& image = FindImage(info, buffer.Address(), false);
     image.flags &= ~ImageFlagBits::CpuModified;
+
+    image.Transit(vk::ImageLayout::eColorAttachmentOptimal,
+                  vk::AccessFlagBits::eColorAttachmentWrite |
+                      vk::AccessFlagBits::eColorAttachmentRead);
 
     ImageViewInfo view_info;
     view_info.format = info.pixel_format;
@@ -190,9 +195,9 @@ ImageView& TextureCache::DepthTarget(const AmdGpu::Liverpool::DepthBuffer& buffe
     auto& image = FindImage(info, buffer.Address(), false);
     image.flags &= ~ImageFlagBits::CpuModified;
 
-    image.Transit(vk::ImageLayout::eColorAttachmentOptimal,
-                  vk::AccessFlagBits::eColorAttachmentWrite |
-                      vk::AccessFlagBits::eColorAttachmentRead);
+    image.Transit(vk::ImageLayout::eDepthStencilAttachmentOptimal,
+                  vk::AccessFlagBits::eDepthStencilAttachmentWrite |
+                      vk::AccessFlagBits::eDepthStencilAttachmentRead);
 
     ImageViewInfo view_info;
     view_info.format = info.pixel_format;

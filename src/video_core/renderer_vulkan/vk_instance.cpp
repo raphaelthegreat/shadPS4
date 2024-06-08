@@ -40,8 +40,9 @@ Instance::Instance(bool enable_validation, bool dump_command_buffers)
                               dump_command_buffers)},
       physical_devices{instance->enumeratePhysicalDevices()} {}
 
-Instance::Instance(Frontend::WindowSDL& window, s32 physical_device_index)
-    : enable_validation{true}, instance{CreateInstance(dl, window.getWindowInfo().type, enable_validation, false)},
+Instance::Instance(Frontend::WindowSDL& window, s32 physical_device_index, bool enable_validation)
+    : enable_validation{enable_validation},
+      instance{CreateInstance(dl, window.getWindowInfo().type, enable_validation, false)},
       physical_devices{instance->enumeratePhysicalDevices()} {
     if (enable_validation) {
         debug_callback = CreateDebugCallback(*instance);

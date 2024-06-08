@@ -318,6 +318,7 @@ set(SHADER_RECOMPILER src/shader_recompiler/exception.h
                       src/shader_recompiler/backend/spirv/emit_spirv_select.cpp
                       src/shader_recompiler/backend/spirv/emit_spirv_special.cpp
                       src/shader_recompiler/backend/spirv/emit_spirv_undefined.cpp
+                      src/shader_recompiler/backend/spirv/emit_spirv_warp.cpp
                       src/shader_recompiler/backend/spirv/spirv_emit_context.cpp
                       src/shader_recompiler/backend/spirv/spirv_emit_context.h
                       src/shader_recompiler/frontend/translate/data_share.cpp
@@ -372,7 +373,9 @@ set(SHADER_RECOMPILER src/shader_recompiler/exception.h
                       src/shader_recompiler/ir/value.h
 )
 
-set(VIDEO_CORE src/video_core/amdgpu/liverpool.cpp
+set(VIDEO_CORE src/video_core/amdgpu/label_manager.cpp
+               src/video_core/amdgpu/label_manager.h
+               src/video_core/amdgpu/liverpool.cpp
                src/video_core/amdgpu/liverpool.h
                src/video_core/amdgpu/pixel_format.cpp
                src/video_core/amdgpu/pixel_format.h

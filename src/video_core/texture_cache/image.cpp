@@ -43,8 +43,10 @@ static vk::ImageUsageFlags ImageUsageFlags(const vk::Format format) {
     } else {
         if (format != vk::Format::eBc3SrgbBlock && format != vk::Format::eBc3UnormBlock &&
             format != vk::Format::eBc1RgbaUnormBlock) {
-            usage |= vk::ImageUsageFlagBits::eColorAttachment
-                  | vk::ImageUsageFlagBits::eStorage;
+            usage |= vk::ImageUsageFlagBits::eColorAttachment;;
+        }
+        if (format != vk::Format::eA8B8G8R8SrgbPack32) {
+            usage |= vk::ImageUsageFlagBits::eStorage;
         }
     }
     return usage;

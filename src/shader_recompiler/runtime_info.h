@@ -103,6 +103,9 @@ struct Info {
 
         u32 NumComponents(IR::Attribute attrib) const {
             const u8 mask = flags[Index(attrib)];
+            if (mask == 0b1001) {
+                return 4;
+            }
             ASSERT(mask != 0b1011 || mask != 0b1101);
             return std::popcount(mask);
         }
@@ -125,6 +128,8 @@ struct Info {
     u32 num_user_data;
     std::span<const u32> user_data;
     Stage stage;
+
+    bool uses_group_quad{};
 
     template <typename T>
     T ReadUd(u32 ptr_index, u32 dword_offset) const noexcept {

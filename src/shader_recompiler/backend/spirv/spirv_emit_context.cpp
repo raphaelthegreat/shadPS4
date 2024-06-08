@@ -178,9 +178,11 @@ void EmitContext::DefineInputs(const Info& info) {
         }
         break;
     case Stage::Fragment:
-        subgroup_local_invocation_id =
-            DefineVariable(U32[1], spv::BuiltIn::SubgroupLocalInvocationId, spv::StorageClass::Input);
-        Decorate(subgroup_local_invocation_id, spv::Decoration::Flat);
+        if (info.uses_group_quad) {
+            subgroup_local_invocation_id =
+                DefineVariable(U32[1], spv::BuiltIn::SubgroupLocalInvocationId, spv::StorageClass::Input);
+            Decorate(subgroup_local_invocation_id, spv::Decoration::Flat);
+        }
         frag_coord = DefineVariable(F32[4], spv::BuiltIn::FragCoord, spv::StorageClass::Input);
         front_facing = DefineVariable(U1[1], spv::BuiltIn::FrontFacing, spv::StorageClass::Input);
         for (const auto& input : info.ps_inputs) {
@@ -234,7 +236,9 @@ void EmitContext::DefineOutputs(const Info& info) {
             if (!info.stores.GetAny(mrt)) {
                 continue;
             }
-            frag_color[i] = DefineOutput(F32[4], i);
+            const u32 num_components = info.stores.NumComponents(mrt);
+            frag_color[i] = DefineOutput(F32[num_components], i);
+            frag_num_comp[i] = num_components;
             Name(frag_color[i], fmt::format("frag_color{}", i));
             interfaces.push_back(frag_color[i]);
         }
@@ -324,7 +328,7 @@ spv::ImageFormat GetImageFormat(const AmdGpu::Image& image) {
 
 Id ImageType(EmitContext& ctx, const ImageResource& desc, Id sampled_type, bool needs_format = false) {
     const auto tsharp = ctx.info.ReadUd<AmdGpu::Image>(desc.sgpr_base, desc.dword_offset);
-    const auto format = needs_format ? GetImageFormat(tsharp) : spv::ImageFormat::Unknown;
+    const auto format = spv::ImageFormat::Unknown;
     const u32 sampled = desc.is_storage ? 2 : 1;
     switch (desc.type) {
     case AmdGpu::ImageType::Color1D:

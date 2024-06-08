@@ -43,6 +43,9 @@ void Translator::EXP(const GcnInst& inst) {
             const IR::F32 comp = ir.GetVectorReg<IR::F32>(vsrc[i]);
             ir.SetAttribute(attrib, comp, i);
         }
+        if (attrib == IR::Attribute::RenderTarget0 && exp.en == 0b1) {
+            ir.SetAttribute(attrib, ir.Imm32(0.f), 3);
+        }
     }
 }
 
