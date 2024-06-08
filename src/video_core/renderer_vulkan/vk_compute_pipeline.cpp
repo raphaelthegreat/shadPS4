@@ -36,7 +36,8 @@ ComputePipeline::ComputePipeline(const Instance& instance_, Scheduler& scheduler
     for (const auto& image : info.images) {
         bindings.push_back({
             .binding = binding++,
-            .descriptorType = vk::DescriptorType::eSampledImage,
+            .descriptorType = image.is_storage ? vk::DescriptorType::eStorageImage
+                                               : vk::DescriptorType::eSampledImage,
             .descriptorCount = 1,
             .stageFlags = vk::ShaderStageFlagBits::eCompute,
         });
@@ -82,7 +83,8 @@ ComputePipeline::ComputePipeline(const Instance& instance_, Scheduler& scheduler
 ComputePipeline::~ComputePipeline() = default;
 
 void ComputePipeline::BindResources(Core::MemoryManager* memory, StreamBuffer& staging,
-                                    VideoCore::TextureCache& texture_cache) const {
+                                    VideoCore::TextureCache& texture_cache,
+                                    AmdGpu::Liverpool* liverpool) const {
     static constexpr u64 MinUniformAlignment = 64;
 
     const auto map_staging = [&](auto src, size_t size) {
@@ -126,7 +128,8 @@ void ComputePipeline::BindResources(Core::MemoryManager* memory, StreamBuffer& s
             .dstBinding = binding++,
             .dstArrayElement = 0,
             .descriptorCount = 1,
-            .descriptorType = vk::DescriptorType::eSampledImage,
+            .descriptorType = image.is_storage ? vk::DescriptorType::eStorageImage
+                                               : vk::DescriptorType::eSampledImage,
             .pImageInfo = &image_infos.back(),
         });
     }

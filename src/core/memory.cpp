@@ -13,6 +13,8 @@
 namespace Core {
 
 MemoryManager::MemoryManager() {
+    dmem_map.emplace(0, DirectMemoryArea{0, SCE_KERNEL_MAIN_DMEM_SIZE});
+
     // Insert a virtual memory area that covers the user area.
     const size_t user_size = USER_MAX - USER_MIN - 1;
     vma_map.emplace(USER_MIN, VirtualMemoryArea{USER_MIN, user_size});
@@ -26,31 +28,40 @@ MemoryManager::~MemoryManager() = default;
 
 PAddr MemoryManager::Allocate(PAddr search_start, PAddr search_end, size_t size, u64 alignment,
                               int memory_type) {
-    PAddr free_addr = search_start;
+    fmt::print("Size = {}\n", dmem_map.begin()->second.size);
+    std::fflush(stdout);
+    auto dmem_area = FindDmemArea(search_start);
 
-    // Iterate through allocated blocked and find the next free position
-    for (const auto& block : allocations) {
-        const PAddr end = block.base + block.size;
-        free_addr = std::max(end, free_addr);
+    const auto is_suitable = [&] {
+        return dmem_area->second.is_free && dmem_area->second.size >= size;
+    };
+    while (!is_suitable() && dmem_area->second.GetEnd() <= search_end) {
+        dmem_area++;
     }
+    ASSERT_MSG(is_suitable(), "Unable to find free direct memory area");
 
     // Align free position
+    PAddr free_addr = dmem_area->second.base;
     free_addr = alignment > 0 ? Common::AlignUp(free_addr, alignment) : free_addr;
-    ASSERT(free_addr >= search_start && free_addr + size <= search_end);
 
     // Add the allocated region to the list and commit its pages.
-    allocations.emplace_back(free_addr, size, memory_type);
+    auto& area = AddDmemAllocation(free_addr, size);
+    area.memory_type = memory_type;
+    area.is_free = false;
     return free_addr;
 }
 
 void MemoryManager::Free(PAddr phys_addr, size_t size) {
-    const auto it = std::ranges::find_if(allocations, [&](const auto& alloc) {
-        return alloc.base == phys_addr && alloc.size == size;
-    });
-    ASSERT(it != allocations.end());
+    fmt::print("phys_addr = {:#x}\n", phys_addr);
+    std::fflush(stdout);
+    const auto dmem_area = FindDmemArea(phys_addr);
+    ASSERT(dmem_area != dmem_map.end() && dmem_area->second.base == phys_addr && dmem_area->second.size == size);
 
-    // Free the ranges.
-    allocations.erase(it);
+    // Mark region as free and attempt to coalesce it with neighbours.
+    auto& area = dmem_area->second;
+    area.is_free = true;
+    area.memory_type = 0;
+    MergeAdjacent(dmem_map, dmem_area);
 }
 
 int MemoryManager::MapMemory(void** out_addr, VAddr virtual_addr, size_t size, MemoryProt prot,
@@ -118,7 +129,7 @@ void MemoryManager::UnmapMemory(VAddr virtual_addr, size_t size) {
     vma.type = VMAType::Free;
     vma.prot = MemoryProt::NoAccess;
     vma.phys_base = 0;
-    MergeAdjacent(it);
+    MergeAdjacent(vma_map, it);
 
     // Unmap the memory region.
     impl.Unmap(virtual_addr, size);
@@ -137,16 +148,38 @@ int MemoryManager::QueryProtection(VAddr addr, void** start, void** end, u32* pr
 
 int MemoryManager::DirectMemoryQuery(PAddr addr, bool find_next,
                                      Libraries::Kernel::OrbisQueryInfo* out_info) {
-    const auto it = std::ranges::find_if(allocations, [&](const DirectMemoryArea& alloc) {
-        return alloc.base <= addr && addr < alloc.base + alloc.size;
-    });
-    if (it == allocations.end()) {
+    auto dmem_area = FindDmemArea(addr);
+    if (dmem_area->second.is_free && find_next) {
+        dmem_area++;
+    }
+
+    if (dmem_area == dmem_map.end() || dmem_area->second.is_free) {
+        LOG_ERROR(Core, "Unable to find allocated direct memory region to query!");
         return SCE_KERNEL_ERROR_EACCES;
     }
 
-    out_info->start = it->base;
-    out_info->end = it->base + it->size;
-    out_info->memoryType = it->memory_type;
+    const auto& area = dmem_area->second;
+    out_info->start = area.base;
+    out_info->end = area.GetEnd();
+    out_info->memoryType = area.memory_type;
+    return ORBIS_OK;
+}
+
+int MemoryManager::DirectQueryAvailable(PAddr search_start, PAddr search_end, size_t alignment,
+                                        PAddr* phys_addr_out, size_t* size_out) {
+    auto dmem_area = FindDmemArea(search_start);
+    PAddr paddr{};
+    size_t max_size{};
+    while (dmem_area != dmem_map.end() && dmem_area->second.GetEnd() <= search_end) {
+        if (dmem_area->second.size > max_size) {
+            paddr = dmem_area->second.base;
+            max_size = dmem_area->second.size;
+        }
+        dmem_area++;
+    }
+
+    *phys_addr_out = alignment > 0 ? Common::AlignUp(paddr, alignment) : paddr;
+    *size_out = max_size;
     return ORBIS_OK;
 }
 
@@ -181,6 +214,40 @@ VirtualMemoryArea& MemoryManager::AddMapping(VAddr virtual_addr, size_t size) {
     return vma_handle->second;
 }
 
+DirectMemoryArea& MemoryManager::AddDmemAllocation(PAddr addr, size_t size) {
+    auto dmem_handle = FindDmemArea(addr);
+    ASSERT_MSG(dmem_handle != dmem_map.end(), "Physical address not in dmem_map");
+
+    const DirectMemoryArea& area = dmem_handle->second;
+    ASSERT_MSG(area.is_free && area.base <= addr,
+               "Adding an allocation to already allocated region");
+
+    const PAddr start_in_area = addr - area.base;
+    const PAddr end_in_vma = start_in_area + size;
+    ASSERT_MSG(end_in_vma <= area.size, "Mapping cannot fit inside free region");
+
+    const auto split = [this](DMemHandle dmem_handle, size_t offset_in_area) {
+        auto& old_area = dmem_handle->second;
+        ASSERT(offset_in_area < old_area.size && offset_in_area > 0);
+        auto new_area = old_area;
+        old_area.size = offset_in_area;
+        new_area.base += offset_in_area;
+        new_area.size -= offset_in_area;
+        return dmem_map.emplace_hint(std::next(dmem_handle), new_area.base, new_area);
+    };
+
+    if (end_in_vma != area.size) {
+        // Split VMA at the end of the allocated region
+        split(dmem_handle, end_in_vma);
+    }
+    if (start_in_area != 0) {
+        // Split VMA at the start of the allocated region
+        dmem_handle = split(dmem_handle, start_in_area);
+    }
+
+    return dmem_handle->second;
+}
+
 MemoryManager::VMAHandle MemoryManager::Split(VMAHandle vma_handle, size_t offset_in_vma) {
     auto& old_vma = vma_handle->second;
     ASSERT(offset_in_vma < old_vma.size && offset_in_vma > 0);
@@ -194,25 +261,6 @@ MemoryManager::VMAHandle MemoryManager::Split(VMAHandle vma_handle, size_t offse
         new_vma.phys_base += offset_in_vma;
     }
     return vma_map.emplace_hint(std::next(vma_handle), new_vma.base, new_vma);
-}
-
-MemoryManager::VMAHandle MemoryManager::MergeAdjacent(VMAHandle iter) {
-    const auto next_vma = std::next(iter);
-    if (next_vma != vma_map.end() && iter->second.CanMergeWith(next_vma->second)) {
-        iter->second.size += next_vma->second.size;
-        vma_map.erase(next_vma);
-    }
-
-    if (iter != vma_map.begin()) {
-        auto prev_vma = std::prev(iter);
-        if (prev_vma->second.CanMergeWith(iter->second)) {
-            prev_vma->second.size += iter->second.size;
-            vma_map.erase(iter);
-            iter = prev_vma;
-        }
-    }
-
-    return iter;
 }
 
 void MemoryManager::MapVulkanMemory(VAddr addr, size_t size) {

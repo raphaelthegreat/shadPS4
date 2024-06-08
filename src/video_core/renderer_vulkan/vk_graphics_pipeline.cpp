@@ -323,8 +323,8 @@ void GraphicsPipeline::BindResources(Core::MemoryManager* memory, StreamBuffer& 
     }
 
     // Bind resource buffers and textures.
-    boost::container::static_vector<vk::DescriptorBufferInfo, 4> buffer_infos;
-    boost::container::static_vector<vk::DescriptorImageInfo, 8> image_infos;
+    boost::container::small_vector<vk::DescriptorBufferInfo, 8> buffer_infos;
+    boost::container::small_vector<vk::DescriptorImageInfo, 8> image_infos;
     boost::container::small_vector<vk::WriteDescriptorSet, 16> set_writes;
     u32 binding{};
 

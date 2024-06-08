@@ -192,6 +192,9 @@ void DefineEntryPoint(const IR::Program& program, EmitContext& ctx, Id main) {
         } else {
             ctx.AddExecutionMode(main, spv::ExecutionMode::OriginUpperLeft);
         }
+        // TODO: Make these optional.
+        ctx.AddCapability(spv::Capability::GroupNonUniform);
+        ctx.AddCapability(spv::Capability::GroupNonUniformQuad);
         ctx.AddCapability(spv::Capability::DemoteToHelperInvocationEXT);
         // if (program.info.stores_frag_depth) {
         //     ctx.AddExecutionMode(main, spv::ExecutionMode::DepthReplacing);

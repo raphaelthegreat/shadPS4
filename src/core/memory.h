@@ -53,6 +53,21 @@ struct DirectMemoryArea {
     PAddr base = 0;
     size_t size = 0;
     int memory_type = 0;
+    bool is_free = true;
+
+    PAddr GetEnd() const {
+        return base + size;
+    }
+
+    bool CanMergeWith(const DirectMemoryArea& next) const {
+        if (base + size != next.base) {
+            return false;
+        }
+        if (is_free != next.is_free) {
+            return false;
+        }
+        return true;
+    }
 };
 
 struct VirtualMemoryArea {
@@ -89,6 +104,9 @@ constexpr VAddr USER_MIN = 0x1000000000ULL;
 constexpr VAddr USER_MAX = 0xFBFFFFFFFFULL;
 
 class MemoryManager {
+    using DMemMap = std::map<PAddr, DirectMemoryArea>;
+    using DMemHandle = DMemMap::iterator;
+
     using VMAMap = std::map<VAddr, VirtualMemoryArea>;
     using VMAHandle = VMAMap::iterator;
 
@@ -115,6 +133,9 @@ public:
 
     int DirectMemoryQuery(PAddr addr, bool find_next, Libraries::Kernel::OrbisQueryInfo* out_info);
 
+    int DirectQueryAvailable(PAddr search_start, PAddr search_end, size_t alignment,
+                             PAddr* phys_addr_out, size_t* size_out);
+
     std::pair<vk::Buffer, size_t> GetVulkanBuffer(VAddr addr);
 
 private:
@@ -127,11 +148,35 @@ private:
         return std::prev(it);
     }
 
+    DMemHandle FindDmemArea(PAddr target) {
+        return std::prev(dmem_map.upper_bound(target));
+    }
+
+    template <typename Handle>
+    Handle MergeAdjacent(auto& handle_map, Handle iter) {
+        const auto next_vma = std::next(iter);
+        if (next_vma != handle_map.end() && iter->second.CanMergeWith(next_vma->second)) {
+            iter->second.size += next_vma->second.size;
+            handle_map.erase(next_vma);
+        }
+
+        if (iter != handle_map.begin()) {
+            auto prev_vma = std::prev(iter);
+            if (prev_vma->second.CanMergeWith(iter->second)) {
+                prev_vma->second.size += iter->second.size;
+                handle_map.erase(iter);
+                iter = prev_vma;
+            }
+        }
+
+        return iter;
+    }
+
     VirtualMemoryArea& AddMapping(VAddr virtual_addr, size_t size);
 
-    VMAHandle Split(VMAHandle vma_handle, size_t offset_in_vma);
+    DirectMemoryArea& AddDmemAllocation(PAddr addr, size_t size);
 
-    VMAHandle MergeAdjacent(VMAHandle iter);
+    VMAHandle Split(VMAHandle vma_handle, size_t offset_in_vma);
 
     void MapVulkanMemory(VAddr addr, size_t size);
 
@@ -139,7 +184,7 @@ private:
 
 private:
     AddressSpace impl;
-    std::vector<DirectMemoryArea> allocations;
+    DMemMap dmem_map;
     VMAMap vma_map;
 
     struct MappedMemory {

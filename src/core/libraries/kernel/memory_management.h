@@ -43,6 +43,8 @@ int PS4_SYSV_ABI sceKernelMapDirectMemory(void** addr, u64 len, int prot, int fl
                                           s64 directMemoryStart, u64 alignment);
 s32 PS4_SYSV_ABI sceKernelAllocateMainDirectMemory(size_t len, size_t alignment, int memoryType,
                                                    s64* physAddrOut);
+s32 PS4_SYSV_ABI sceKernelAvailableDirectMemorySize(u64 searchStart, u64 searchEnd, size_t alignment,
+                                                    u64 *physAddrOut, size_t *sizeOut);
 s32 PS4_SYSV_ABI sceKernelMapNamedFlexibleMemory(void** addrInOut, std::size_t len, int prot,
                                                  int flags, const char* name);
 s32 PS4_SYSV_ABI sceKernelMapFlexibleMemory(void** addr_in_out, std::size_t len, int prot,

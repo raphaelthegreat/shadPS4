@@ -332,7 +332,7 @@ struct Liverpool {
             return (depth_size.height_tile_max + 1) << 3;
         }
 
-        u64 Address() const {
+        VAddr Address() const {
             return u64(z_read_base) << 8;
         }
 
@@ -352,6 +352,10 @@ struct Liverpool {
     };
 
     union ClipperControl {
+        ClipperControl() {
+            clip_space.Assign(ClipSpace::ZeroToW);
+        }
+
         u32 raw;
         BitField<0, 6, u32> user_clip_plane_enable;
         BitField<16, 1, u32> clip_disable;
@@ -431,7 +435,7 @@ struct Liverpool {
         BitField<28, 4, u32> output7_mask;
 
         [[nodiscard]] u8 GetMask(int buf_id) const {
-            return (raw >> (buf_id * 4)) & 0xffu;
+            return (raw >> (buf_id * 4)) & 0xfu;
         }
     };
 
@@ -661,12 +665,16 @@ struct Liverpool {
             return (slice.tile_max + 1) * 64 / Pitch();
         }
 
-        u64 Address() const {
+        VAddr Address() const {
             return u64(base_address) << 8;
         }
 
-        u64 CmaskAddress() const {
+        VAddr CmaskAddress() const {
             return u64(cmask_base_address) << 8;
+        }
+
+        VAddr FmaskAddress() const {
+            return u64(fmask_base_address) << 8;
         }
 
         [[nodiscard]] size_t GetSizeAligned() const {
@@ -732,6 +740,20 @@ struct Liverpool {
         float back_offset;
     };
 
+    struct Address {
+        u32 address;
+
+        VAddr GetAddress() const {
+            return u64(address) << 8;
+        }
+    };
+
+    union DepthRenderControl {
+        u32 raw;
+        BitField<0, 1, u32> depth_clear_enable;
+        BitField<1, 1, u32> stencil_clear_enable;
+    };
+
     union Regs {
         struct {
             INSERT_PADDING_WORDS(0x2C08);
@@ -740,11 +762,15 @@ struct Liverpool {
             ShaderProgram vs_program;
             INSERT_PADDING_WORDS(0x2E00 - 0x2C4C - 16);
             ComputeProgram cs_program;
-            INSERT_PADDING_WORDS(0xA008 - 0x2E00 - 80);
+            INSERT_PADDING_WORDS(0xA008 - 0x2E00 - 80 - 3 - 5);
+            DepthRenderControl depth_render_control;
+            INSERT_PADDING_WORDS(4);
+            Address depth_htile_data_base;
+            INSERT_PADDING_WORDS(2);
             float depth_bounds_min;
             float depth_bounds_max;
             u32 stencil_clear;
-            u32 depth_clear;
+            float depth_clear;
             Scissor screen_scissor;
             INSERT_PADDING_WORDS(0xA010 - 0xA00C - 2);
             DepthBuffer depth_buffer;
@@ -925,7 +951,10 @@ static_assert(GFX6_3D_REG_INDEX(cs_program) == 0x2E00);
 static_assert(GFX6_3D_REG_INDEX(cs_program.dim_z) == 0x2E03);
 static_assert(GFX6_3D_REG_INDEX(cs_program.address_lo) == 0x2E0C);
 static_assert(GFX6_3D_REG_INDEX(cs_program.user_data) == 0x2E40);
+static_assert(GFX6_3D_REG_INDEX(depth_render_control) == 0xA000);
+static_assert(GFX6_3D_REG_INDEX(depth_htile_data_base) == 0xA005);
 static_assert(GFX6_3D_REG_INDEX(screen_scissor) == 0xA00C);
+static_assert(GFX6_3D_REG_INDEX(depth_clear) == 0xA00B);
 static_assert(GFX6_3D_REG_INDEX(depth_buffer.depth_slice) == 0xA017);
 static_assert(GFX6_3D_REG_INDEX(color_target_mask) == 0xA08E);
 static_assert(GFX6_3D_REG_INDEX(color_shader_mask) == 0xA08F);
@@ -942,6 +971,7 @@ static_assert(GFX6_3D_REG_INDEX(color_export_format) == 0xA1C5);
 static_assert(GFX6_3D_REG_INDEX(blend_control) == 0xA1E0);
 static_assert(GFX6_3D_REG_INDEX(index_base_address) == 0xA1F9);
 static_assert(GFX6_3D_REG_INDEX(draw_initiator) == 0xA1FC);
+static_assert(GFX6_3D_REG_INDEX(depth_control) == 0xA200);
 static_assert(GFX6_3D_REG_INDEX(clipper_control) == 0xA204);
 static_assert(GFX6_3D_REG_INDEX(viewport_control) == 0xA206);
 static_assert(GFX6_3D_REG_INDEX(vs_output_control) == 0xA207);

@@ -194,7 +194,7 @@ Frame* RendererVulkan::PrepareFrame(const Libraries::VideoOut::BufferAttributeGr
                                     VAddr cpu_address) {
     // Request presentation image from the texture cache.
     const auto info = VideoCore::ImageInfo{attribute};
-    auto& image = texture_cache.FindImage(info, cpu_address);
+    auto& image = texture_cache.FindImage(info, cpu_address, false);
     return PrepareFrameInternal(image);
 }
 

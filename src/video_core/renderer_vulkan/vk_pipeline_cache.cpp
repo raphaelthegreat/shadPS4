@@ -88,6 +88,8 @@ void PipelineCache::RefreshGraphicsKey() {
     auto& key = graphics_key;
 
     key.depth = regs.depth_control;
+    key.depth.depth_write_enable.Assign(regs.depth_control.depth_write_enable.Value() &&
+                                        !regs.depth_render_control.depth_clear_enable);
     key.depth_bounds_min = regs.depth_bounds_min;
     key.depth_bounds_max = regs.depth_bounds_max;
     key.depth_bias_enable = regs.polygon_control.enable_polygon_offset_back ||

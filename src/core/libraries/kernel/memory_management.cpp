@@ -55,6 +55,13 @@ s32 PS4_SYSV_ABI sceKernelAllocateMainDirectMemory(size_t len, size_t alignment,
                                          physAddrOut);
 }
 
+s32 PS4_SYSV_ABI sceKernelAvailableDirectMemorySize(u64 searchStart, u64 searchEnd, size_t alignment,
+                                                    u64 *physAddrOut, size_t *sizeOut) {
+    LOG_WARNING(Kernel_Vmm, "called");
+    auto* memory = Core::Memory::Instance();
+    return memory->DirectQueryAvailable(searchStart, searchEnd, alignment, physAddrOut, sizeOut);
+}
+
 int PS4_SYSV_ABI sceKernelMapDirectMemory(void** addr, u64 len, int prot, int flags,
                                           s64 directMemoryStart, u64 alignment) {
     LOG_INFO(

@@ -62,11 +62,14 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
     if (regs.depth_control.depth_enable && regs.depth_buffer.Address() != 0) {
         const auto& image_view =
             texture_cache.DepthTarget(regs.depth_buffer, liverpool->last_db_extent);
+        const bool is_clear = regs.depth_render_control.depth_clear_enable;
         depth_attachment = {
             .imageView = *image_view.image_view,
             .imageLayout = vk::ImageLayout::eGeneral,
-            .loadOp = vk::AttachmentLoadOp::eLoad,
-            .storeOp = vk::AttachmentStoreOp::eStore,
+            .loadOp = is_clear ? vk::AttachmentLoadOp::eClear : vk::AttachmentLoadOp::eLoad,
+            .storeOp = is_clear ? vk::AttachmentStoreOp::eNone : vk::AttachmentStoreOp::eStore,
+            .clearValue = vk::ClearValue{.depthStencil = {.depth = regs.depth_clear,
+                                                          .stencil = regs.stencil_clear}},
         };
         num_depth_attachments++;
     }
@@ -104,7 +107,7 @@ void Rasterizer::DispatchDirect() {
     const auto cmdbuf = scheduler.CommandBuffer();
     const auto& cs_program = liverpool->regs.cs_program;
     const ComputePipeline* pipeline = pipeline_cache.GetComputePipeline();
-    pipeline->BindResources(memory, vertex_index_buffer, texture_cache);
+    pipeline->BindResources(memory, vertex_index_buffer, texture_cache, liverpool);
 
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline->Handle());
     cmdbuf.dispatch(cs_program.dim_x, cs_program.dim_y, cs_program.dim_z);
@@ -172,7 +175,7 @@ void Rasterizer::UpdateDynamicState(const GraphicsPipeline& pipeline) {
 void Rasterizer::UpdateViewportScissorState() {
     auto& regs = liverpool->regs;
 
-    const float reduce_z = regs.clipper_control.clip_space == AmdGpu::Liverpool::ClipSpace::MinusWToW ? 1.0f : 0.0f;;
+    const float reduce_z = regs.clipper_control.clip_space == AmdGpu::Liverpool::ClipSpace::MinusWToW ? 1.0f : 0.0f;
     const auto cmdbuf = scheduler.CommandBuffer();
     const vk::Viewport viewport{
         .x = regs.viewports[0].xoffset - regs.viewports[0].xscale,

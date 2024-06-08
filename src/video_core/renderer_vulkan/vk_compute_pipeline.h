@@ -14,6 +14,10 @@ namespace VideoCore {
 class TextureCache;
 }
 
+namespace AmdGpu {
+struct Liverpool;
+}
+
 namespace Vulkan {
 
 class Instance;
@@ -32,7 +36,8 @@ public:
     }
 
     void BindResources(Core::MemoryManager* memory, StreamBuffer& staging,
-                       VideoCore::TextureCache& texture_cache) const;
+                       VideoCore::TextureCache& texture_cache,
+                       AmdGpu::Liverpool* liverpool) const;
 
 private:
     const Instance& instance;

@@ -178,6 +178,9 @@ void EmitContext::DefineInputs(const Info& info) {
         }
         break;
     case Stage::Fragment:
+        subgroup_local_invocation_id =
+            DefineVariable(U32[1], spv::BuiltIn::SubgroupLocalInvocationId, spv::StorageClass::Input);
+        Decorate(subgroup_local_invocation_id, spv::Decoration::Flat);
         frag_coord = DefineVariable(F32[4], spv::BuiltIn::FragCoord, spv::StorageClass::Input);
         front_facing = DefineVariable(U1[1], spv::BuiltIn::FrontFacing, spv::StorageClass::Input);
         for (const auto& input : info.ps_inputs) {
@@ -310,21 +313,32 @@ Id ImageType(EmitContext& ctx, const ImageResource& desc) {
     throw InvalidArgument("Invalid texture type {}", desc.type);
 }
 
-Id ImageType(EmitContext& ctx, const ImageResource& desc, Id sampled_type) {
-    const auto format = spv::ImageFormat::Unknown; // Read this from tsharp?
+spv::ImageFormat GetImageFormat(const AmdGpu::Image& image) {
+    const AmdGpu::DataFormat dfmt = image.GetDataFmt();
+    const AmdGpu::NumberFormat nfmt = image.GetNumberFmt();
+    if (dfmt == AmdGpu::DataFormat::Format32 && nfmt == AmdGpu::NumberFormat::Float) {
+        return spv::ImageFormat::R32f;
+    }
+    UNREACHABLE();
+}
+
+Id ImageType(EmitContext& ctx, const ImageResource& desc, Id sampled_type, bool needs_format = false) {
+    const auto tsharp = ctx.info.ReadUd<AmdGpu::Image>(desc.sgpr_base, desc.dword_offset);
+    const auto format = needs_format ? GetImageFormat(tsharp) : spv::ImageFormat::Unknown;
+    const u32 sampled = desc.is_storage ? 2 : 1;
     switch (desc.type) {
     case AmdGpu::ImageType::Color1D:
-        return ctx.TypeImage(sampled_type, spv::Dim::Dim1D, false, false, false, 1, format);
+        return ctx.TypeImage(sampled_type, spv::Dim::Dim1D, false, false, false, sampled, format);
     case AmdGpu::ImageType::Color1DArray:
-        return ctx.TypeImage(sampled_type, spv::Dim::Dim1D, false, true, false, 1, format);
+        return ctx.TypeImage(sampled_type, spv::Dim::Dim1D, false, true, false, sampled, format);
     case AmdGpu::ImageType::Color2D:
-        return ctx.TypeImage(sampled_type, spv::Dim::Dim2D, false, false, false, 1, format);
+        return ctx.TypeImage(sampled_type, spv::Dim::Dim2D, false, false, false, sampled, format);
     case AmdGpu::ImageType::Color2DArray:
-        return ctx.TypeImage(sampled_type, spv::Dim::Dim2D, false, true, false, 1, format);
+        return ctx.TypeImage(sampled_type, spv::Dim::Dim2D, false, true, false, sampled, format);
     case AmdGpu::ImageType::Color3D:
-        return ctx.TypeImage(sampled_type, spv::Dim::Dim3D, false, false, false, 1, format);
+        return ctx.TypeImage(sampled_type, spv::Dim::Dim3D, false, false, false, sampled, format);
     case AmdGpu::ImageType::Cube:
-        return ctx.TypeImage(sampled_type, spv::Dim::Cube, false, false, false, 1, format);
+        return ctx.TypeImage(sampled_type, spv::Dim::Cube, false, false, false, sampled, format);
     case AmdGpu::ImageType::Buffer:
         throw NotImplementedException("Image buffer");
     default:
@@ -336,7 +350,7 @@ Id ImageType(EmitContext& ctx, const ImageResource& desc, Id sampled_type) {
 void EmitContext::DefineImagesAndSamplers(const Info& info) {
     for (const auto& image_desc : info.images) {
         const Id sampled_type{image_desc.nfmt == AmdGpu::NumberFormat::Uint ? U32[1] : F32[1]};
-        const Id image_type{ImageType(*this, image_desc, sampled_type)};
+        const Id image_type{ImageType(*this, image_desc, sampled_type, image_desc.is_storage)};
         const Id pointer_type{TypePointer(spv::StorageClass::UniformConstant, image_type)};
         const Id id{AddGlobalVariable(pointer_type, spv::StorageClass::UniformConstant)};
         Decorate(id, spv::Decoration::Binding, binding);
@@ -345,7 +359,7 @@ void EmitContext::DefineImagesAndSamplers(const Info& info) {
                              image_desc.dword_offset));
         images.push_back({
             .id = id,
-            .sampled_type = TypeSampledImage(image_type),
+            .sampled_type = !image_desc.is_storage ? TypeSampledImage(image_type) : sampled_type,
             .pointer_type = pointer_type,
             .image_type = image_type,
         });

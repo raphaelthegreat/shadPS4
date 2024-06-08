@@ -85,6 +85,9 @@ public:
     void StoreBuffer(int num_dwords, const Value& handle, const Value& address, const Value& data,
                      BufferInstInfo info);
 
+    [[nodiscard]] U32 LaneId();
+    [[nodiscard]] U32 QuadShuffle(const U32& value, const U32& index);
+
     [[nodiscard]] U1 GetZeroFromOp(const Value& op);
     [[nodiscard]] U1 GetSignFromOp(const Value& op);
     [[nodiscard]] U1 GetCarryFromOp(const Value& op);

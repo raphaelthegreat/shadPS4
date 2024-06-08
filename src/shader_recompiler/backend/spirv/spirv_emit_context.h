@@ -161,6 +161,7 @@ public:
 
     Id workgroup_id{};
     Id local_invocation_id{};
+    Id subgroup_local_invocation_id{};
 
     struct TextureDefinition {
         Id id;

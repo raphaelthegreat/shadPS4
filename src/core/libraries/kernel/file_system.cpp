@@ -12,7 +12,7 @@
 namespace Libraries::Kernel {
 
 int PS4_SYSV_ABI sceKernelOpen(const char* path, int flags, u16 mode) {
-    // LOG_INFO(Kernel_Fs, "path = {} flags = {:#x} mode = {}", path, flags, mode);
+    LOG_INFO(Kernel_Fs, "path = {} flags = {:#x} mode = {}", path, flags, mode);
     auto* h = Common::Singleton<Core::FileSys::HandleTable>::Instance();
     auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
 
@@ -32,7 +32,8 @@ int PS4_SYSV_ABI sceKernelOpen(const char* path, int flags, u16 mode) {
     bool directory = (flags & ORBIS_KERNEL_O_DIRECTORY) != 0;
 
     if (directory) {
-        UNREACHABLE(); // not supported yet
+        const std::string host_dir = mnt->GetHostFile(path);
+        std::filesystem::create_directories(host_dir);
     } else {
         u32 handle = h->CreateHandle();
         auto* file = h->GetFile(handle);

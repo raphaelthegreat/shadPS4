@@ -36,10 +36,14 @@ static void* PS4_SYSV_ABI sceKernelGetProcParam() {
     return reinterpret_cast<void*>(linker->GetProcParam());
 }
 
-int32_t PS4_SYSV_ABI sceKernelReleaseDirectMemory(off_t start, size_t len) {
+int32_t PS4_SYSV_ABI sceKernelReleaseDirectMemory(size_t start, size_t len) {
+    if (start < 0 || start > SCE_KERNEL_MAIN_DMEM_SIZE) {
+        LOG_ERROR(Kernel_Vmm, "Invalid physical address provided {:#x}", start);
+        return SCE_KERNEL_ERROR_EINVAL;
+    }
     auto* memory = Core::Memory::Instance();
     memory->Free(start, len);
-    return 0;
+    return ORBIS_OK;
 }
 
 static PS4_SYSV_ABI void stack_chk_fail() {
@@ -244,6 +248,8 @@ void LibKernel_Register(Core::Loader::SymbolsResolver* sym) {
                  sceKernelAllocateMainDirectMemory);
     LIB_FUNCTION("pO96TwzOm5E", "libkernel", 1, "libkernel", 1, 1, sceKernelGetDirectMemorySize);
     LIB_FUNCTION("L-Q3LEjIbgA", "libkernel", 1, "libkernel", 1, 1, sceKernelMapDirectMemory);
+    LIB_FUNCTION("C0f7TJcbfac", "libkernel", 1, "libkernel", 1, 1, sceKernelAvailableDirectMemorySize);
+
     LIB_FUNCTION("WFcfL2lzido", "libkernel", 1, "libkernel", 1, 1, sceKernelQueryMemoryProtection);
     LIB_FUNCTION("BHouLQzh0X0", "libkernel", 1, "libkernel", 1, 1, sceKernelDirectMemoryQuery);
     LIB_FUNCTION("MBuItvba6z8", "libkernel", 1, "libkernel", 1, 1, sceKernelReleaseDirectMemory);

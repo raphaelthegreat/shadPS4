@@ -75,7 +75,7 @@ public:
     void V_SUB_F32(const GcnInst& inst);
     void V_RCP_F32(const GcnInst& inst);
     void V_FMA_F32(const GcnInst& inst);
-    void V_CMP_F32(ConditionOp op, const GcnInst& inst);
+    void V_CMP_F32(ConditionOp op, bool set_exec, const GcnInst& inst);
     void V_MAX_F32(const GcnInst& inst);
     void V_RSQ_F32(const GcnInst& inst);
     void V_SIN_F32(const GcnInst& inst);
@@ -106,6 +106,9 @@ public:
     void V_RNDNE_F32(const GcnInst& inst);
     void V_BCNT_U32_B32(const GcnInst& inst);
     void V_COS_F32(const GcnInst& inst);
+    void V_MAX3_F32(const GcnInst& inst);
+    void V_CVT_I32_F32(const GcnInst& inst);
+    void V_MIN_I32(const GcnInst& inst);
 
     // Vector Memory
     void BUFFER_LOAD_FORMAT(u32 num_dwords, bool is_typed, const GcnInst& inst);
@@ -115,12 +118,14 @@ public:
     void V_INTERP_P2_F32(const GcnInst& inst);
 
     // Data share
+    void DS_SWIZZLE_B32(const GcnInst& inst);
     void DS_READ(int bit_size, bool is_signed, bool is_pair, const GcnInst& inst);
     void DS_WRITE(int bit_size, bool is_signed, bool is_pair, const GcnInst& inst);
 
     // MIMG
     void IMAGE_GET_RESINFO(const GcnInst& inst);
     void IMAGE_SAMPLE(const GcnInst& inst);
+    void IMAGE_STORE(const GcnInst& inst);
 
     // Export
     void EXP(const GcnInst& inst);

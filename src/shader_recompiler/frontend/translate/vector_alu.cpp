@@ -143,7 +143,7 @@ void Translator::V_FMA_F32(const GcnInst& inst) {
     SetDst(inst.dst[0], ir.FPFma(src0, src1, src2));
 }
 
-void Translator::V_CMP_F32(ConditionOp op, const GcnInst& inst) {
+void Translator::V_CMP_F32(ConditionOp op, bool set_exec, const GcnInst& inst) {
     const IR::F32 src0{GetSrc(inst.src[0], true)};
     const IR::F32 src1{GetSrc(inst.src[1], true)};
     const IR::U1 result = [&] {
@@ -166,6 +166,9 @@ void Translator::V_CMP_F32(ConditionOp op, const GcnInst& inst) {
             UNREACHABLE();
         }
     }();
+    if (set_exec) {
+        ir.SetExec(result);
+    }
 
     switch (inst.dst[1].field) {
     case OperandField::VccLo:
@@ -380,6 +383,24 @@ void Translator::V_BCNT_U32_B32(const GcnInst& inst) {
 void Translator::V_COS_F32(const GcnInst& inst) {
     const IR::F32 src0{GetSrc(inst.src[0], true)};
     SetDst(inst.dst[0], ir.FPCos(src0));
+}
+
+void Translator::V_MAX3_F32(const GcnInst& inst) {
+    const IR::F32 src0{GetSrc(inst.src[0], true)};
+    const IR::F32 src1{GetSrc(inst.src[1], true)};
+    const IR::F32 src2{GetSrc(inst.src[2], true)};
+    SetDst(inst.dst[0], ir.FPMax(src0, ir.FPMax(src1, src2)));
+}
+
+void Translator::V_CVT_I32_F32(const GcnInst& inst) {
+    const IR::F32 src0{GetSrc(inst.src[0], true)};
+    SetDst(inst.dst[0], ir.ConvertFToS(32, src0));
+}
+
+void Translator::V_MIN_I32(const GcnInst& inst) {
+    const IR::U32 src0{GetSrc(inst.src[0])};
+    const IR::U32 src1{GetSrc(inst.src[1])};
+    SetDst(inst.dst[0], ir.SMin(src0, src1));
 }
 
 } // namespace Shader::Gcn

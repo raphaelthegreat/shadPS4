@@ -43,7 +43,8 @@ static vk::ImageUsageFlags ImageUsageFlags(const vk::Format format) {
     } else {
         if (format != vk::Format::eBc3SrgbBlock && format != vk::Format::eBc3UnormBlock &&
             format != vk::Format::eBc1RgbaUnormBlock) {
-            usage |= vk::ImageUsageFlagBits::eColorAttachment;
+            usage |= vk::ImageUsageFlagBits::eColorAttachment
+                  | vk::ImageUsageFlagBits::eStorage;
         }
     }
     return usage;
@@ -213,6 +214,9 @@ Image::Image(const Vulkan::Instance& instance_, Vulkan::Scheduler& scheduler_,
     };
 
     image.Create(image_ci);
+
+    const auto name = fmt::format("2D Image {:#x}", cpu_addr);
+    Vulkan::SetObjectName(instance->GetDevice(), vk::Image(image), name);
 
     // Create a special view for detiler
     if (info.is_tiled) {
