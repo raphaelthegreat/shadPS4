@@ -114,15 +114,14 @@ void Translator::IMAGE_STORE(const GcnInst& inst) {
     const IR::ScalarReg tsharp_reg{inst.src[2].code * 4};
 
     const IR::Value handle = ir.GetScalarReg(tsharp_reg);
-    const IR::Value body = ir.CompositeConstruct(
-        ir.GetVectorReg(addr_reg), ir.GetVectorReg(addr_reg + 1),
-        ir.GetVectorReg(addr_reg + 2), ir.GetVectorReg(addr_reg + 3));
+    const IR::Value body =
+        ir.CompositeConstruct(ir.GetVectorReg(addr_reg), ir.GetVectorReg(addr_reg + 1),
+                              ir.GetVectorReg(addr_reg + 2), ir.GetVectorReg(addr_reg + 3));
 
     ASSERT(mimg.dmask == 0xF);
-    const IR::Value value = ir.CompositeConstruct(ir.GetVectorReg<IR::F32>(data_reg),
-                                                  ir.GetVectorReg<IR::F32>(data_reg + 1),
-                                                  ir.GetVectorReg<IR::F32>(data_reg + 2),
-                                                  ir.GetVectorReg<IR::F32>(data_reg + 3));
+    const IR::Value value = ir.CompositeConstruct(
+        ir.GetVectorReg<IR::F32>(data_reg), ir.GetVectorReg<IR::F32>(data_reg + 1),
+        ir.GetVectorReg<IR::F32>(data_reg + 2), ir.GetVectorReg<IR::F32>(data_reg + 3));
     ir.ImageWrite(handle, body, value, {});
 }
 

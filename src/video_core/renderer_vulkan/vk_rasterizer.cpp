@@ -20,7 +20,7 @@ static constexpr vk::BufferUsageFlags VertexIndexFlags =
 Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_,
                        VideoCore::TextureCache& texture_cache_, AmdGpu::Liverpool* liverpool_)
     : instance{instance_}, scheduler{scheduler_}, texture_cache{texture_cache_},
-      liverpool{liverpool_}, memory{Core::Memory::Instance()},
+      liverpool{liverpool_}, memory{Core::Memory::Instance()}, label_mgr{&instance, scheduler},
       pipeline_cache{instance, scheduler, liverpool},
       vertex_index_buffer{instance, scheduler, VertexIndexFlags, 32_MB} {
     if (!Config::nullGpu()) {

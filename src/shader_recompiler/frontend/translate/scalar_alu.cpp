@@ -266,4 +266,11 @@ void Translator::S_LSHL_B32(const GcnInst& inst) {
     ir.SetScc(ir.INotEqual(result, ir.Imm32(0)));
 }
 
+void Translator::S_BFM_B32(const GcnInst& inst) {
+    const IR::U32 src0{ir.BitwiseAnd(GetSrc(inst.src[0]), ir.Imm32(0x1F))};
+    const IR::U32 src1{ir.BitwiseAnd(GetSrc(inst.src[1]), ir.Imm32(0x1F))};
+    const IR::U32 mask{ir.ISub(ir.ShiftLeftLogical(ir.Imm32(1u), src0), ir.Imm32(1))};
+    SetDst(inst.dst[0], ir.ShiftLeftLogical(mask, src1));
+}
+
 } // namespace Shader::Gcn

@@ -18,7 +18,8 @@ public:
     ~Scheduler();
 
     /// Sends the current execution context to the GPU.
-    void Flush(vk::Semaphore signal = nullptr, vk::Semaphore wait = nullptr);
+    void Flush(vk::Semaphore signal = nullptr, vk::Semaphore wait = nullptr,
+               vk::Fence fence = nullptr);
 
     /// Sends the current execution context to the GPU and waits for it to complete.
     void Finish(vk::Semaphore signal = nullptr, vk::Semaphore wait = nullptr);
@@ -51,7 +52,8 @@ public:
 private:
     void AllocateWorkerCommandBuffers();
 
-    void SubmitExecution(vk::Semaphore signal_semaphore, vk::Semaphore wait_semaphore);
+    void SubmitExecution(vk::Semaphore signal_semaphore, vk::Semaphore wait_semaphore,
+                         vk::Fence fence = {});
 
 private:
     MasterSemaphore master_semaphore;

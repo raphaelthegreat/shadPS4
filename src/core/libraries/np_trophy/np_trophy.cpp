@@ -69,9 +69,10 @@ int PS4_SYSV_ABI sceNpTrophyCreateContext() {
     return ORBIS_OK;
 }
 
-int PS4_SYSV_ABI sceNpTrophyCreateHandle() {
+int PS4_SYSV_ABI sceNpTrophyCreateHandle(s32* handle) {
     LOG_ERROR(Lib_NpTrophy, "(STUBBED) called");
-    return -1;
+    *handle = 1;
+    return 0;
 }
 
 int PS4_SYSV_ABI sceNpTrophyDestroyContext() {

@@ -17,13 +17,20 @@ u64 PS4_SYSV_ABI sceKernelGetDirectMemorySize() {
     return SCE_KERNEL_MAIN_DMEM_SIZE;
 }
 
+s32 PS4_SYSV_ABI sceKernelCheckedReleaseDirectMemory(u64 start, size_t len) {
+    LOG_INFO(Kernel_Vmm, "called start = {:#x}, len = {:#x}", start, len);
+    auto* memory = Core::Memory::Instance();
+    memory->Free(start, len);
+    return ORBIS_OK;
+}
+
 int PS4_SYSV_ABI sceKernelAllocateDirectMemory(s64 searchStart, s64 searchEnd, u64 len,
                                                u64 alignment, int memoryType, s64* physAddrOut) {
     if (searchStart < 0 || searchEnd <= searchStart) {
         LOG_ERROR(Kernel_Vmm, "Provided address range is invalid!");
         return SCE_KERNEL_ERROR_EINVAL;
     }
-    const bool is_in_range = searchEnd - searchStart >= len;
+    const bool is_in_range = (searchEnd - searchStart) >= len;
     if (len <= 0 || !Common::Is16KBAligned(len) || !is_in_range) {
         LOG_ERROR(Kernel_Vmm, "Provided address range is invalid!");
         return SCE_KERNEL_ERROR_EINVAL;
@@ -55,11 +62,19 @@ s32 PS4_SYSV_ABI sceKernelAllocateMainDirectMemory(size_t len, size_t alignment,
                                          physAddrOut);
 }
 
-s32 PS4_SYSV_ABI sceKernelAvailableDirectMemorySize(u64 searchStart, u64 searchEnd, size_t alignment,
-                                                    u64 *physAddrOut, size_t *sizeOut) {
-    LOG_WARNING(Kernel_Vmm, "called");
+s32 PS4_SYSV_ABI sceKernelAvailableDirectMemorySize(u64 searchStart, u64 searchEnd,
+                                                    size_t alignment, u64* physAddrOut,
+                                                    size_t* sizeOut) {
+    LOG_WARNING(Kernel_Vmm, "called searchStart = {:#x}, searchEnd = {:#x}, alignment = {:#x}",
+                searchStart, searchEnd, alignment);
     auto* memory = Core::Memory::Instance();
     return memory->DirectQueryAvailable(searchStart, searchEnd, alignment, physAddrOut, sizeOut);
+}
+
+s32 PS4_SYSV_ABI sceKernelVirtualQuery(const void* addr, int flags, OrbisVirtualQueryInfo* info,
+                                       size_t infoSize) {
+    auto* memory = Core::Memory::Instance();
+    return memory->VirtualQuery(std::bit_cast<VAddr>(addr), flags, info);
 }
 
 int PS4_SYSV_ABI sceKernelMapDirectMemory(void** addr, u64 len, int prot, int flags,
@@ -89,7 +104,7 @@ int PS4_SYSV_ABI sceKernelMapDirectMemory(void** addr, u64 len, int prot, int fl
     const auto map_flags = static_cast<Core::MemoryMapFlags>(flags);
     auto* memory = Core::Memory::Instance();
     return memory->MapMemory(addr, in_addr, len, mem_prot, map_flags, Core::VMAType::Direct, "",
-                             directMemoryStart, alignment);
+                             false, directMemoryStart, alignment);
 }
 
 s32 PS4_SYSV_ABI sceKernelMapNamedFlexibleMemory(void** addr_in_out, std::size_t len, int prot,

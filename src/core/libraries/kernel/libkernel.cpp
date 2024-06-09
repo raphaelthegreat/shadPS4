@@ -248,7 +248,11 @@ void LibKernel_Register(Core::Loader::SymbolsResolver* sym) {
                  sceKernelAllocateMainDirectMemory);
     LIB_FUNCTION("pO96TwzOm5E", "libkernel", 1, "libkernel", 1, 1, sceKernelGetDirectMemorySize);
     LIB_FUNCTION("L-Q3LEjIbgA", "libkernel", 1, "libkernel", 1, 1, sceKernelMapDirectMemory);
-    LIB_FUNCTION("C0f7TJcbfac", "libkernel", 1, "libkernel", 1, 1, sceKernelAvailableDirectMemorySize);
+    LIB_FUNCTION("C0f7TJcbfac", "libkernel", 1, "libkernel", 1, 1,
+                 sceKernelAvailableDirectMemorySize);
+    LIB_FUNCTION("hwVSPCmp5tM", "libkernel", 1, "libkernel", 1, 1,
+                 sceKernelCheckedReleaseDirectMemory);
+    LIB_FUNCTION("rVjRvHJ0X6c", "libkernel", 1, "libkernel", 1, 1, sceKernelVirtualQuery);
 
     LIB_FUNCTION("WFcfL2lzido", "libkernel", 1, "libkernel", 1, 1, sceKernelQueryMemoryProtection);
     LIB_FUNCTION("BHouLQzh0X0", "libkernel", 1, "libkernel", 1, 1, sceKernelDirectMemoryQuery);

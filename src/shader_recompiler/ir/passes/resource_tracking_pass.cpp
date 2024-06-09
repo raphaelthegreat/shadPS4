@@ -255,7 +255,8 @@ void PatchImageInstruction(IR::Block& block, IR::Inst& inst, Info& info, Descrip
            producer->GetOpcode() == IR::Opcode::GetUserData);
     const auto [tsharp_handle, ssharp_handle] = [&] -> std::pair<IR::Inst*, IR::Inst*> {
         if (producer->GetOpcode() == IR::Opcode::CompositeConstructU32x2) {
-            return std::make_pair(producer->Arg(0).InstRecursive(), producer->Arg(1).InstRecursive());
+            return std::make_pair(producer->Arg(0).InstRecursive(),
+                                  producer->Arg(1).InstRecursive());
         }
         return std::make_pair(producer, nullptr);
     }();

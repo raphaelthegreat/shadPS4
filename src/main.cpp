@@ -20,6 +20,7 @@
 #include "core/libraries/libs.h"
 #include "core/libraries/videoout/video_out.h"
 #include "core/linker.h"
+#include "core/memory.h"
 #include "input/controller.h"
 #include "sdl_window.h"
 
@@ -30,6 +31,8 @@ int main(int argc, char* argv[]) {
         fmt::print("Usage: {} <elf or eboot.bin path>\n", argv[0]);
         return -1;
     }
+    // Initialize memory system as early as possible to reserve mappings.
+    const auto* memory = Core::Memory::Instance();
     const auto config_dir = Common::FS::GetUserPath(Common::FS::PathType::UserDir);
     Config::load(config_dir / "config.toml");
     Common::Log::Initialize();
@@ -110,7 +113,7 @@ int main(int argc, char* argv[]) {
     discordRPC.init();
     discordRPC.update(Discord::RPCStatus::Idling, "");
 
-    static constexpr std::chrono::microseconds FlipPeriod{100000};
+    static constexpr std::chrono::milliseconds FlipPeriod{16};
 
     while (window.isOpen()) {
         window.waitEvent();

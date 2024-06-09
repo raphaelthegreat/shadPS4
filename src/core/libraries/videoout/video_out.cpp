@@ -259,8 +259,21 @@ s32 sceVideoOutSubmitEopFlip(s32 handle, u32 buf_id, u32 mode, u32 arg, void** u
     return ORBIS_OK;
 }
 
+void PS4_SYSV_ABI sceVideoOutModeSetAny_(u32* param_1, u32 param_2) {
+    std::memset(param_1, 0xff, param_2);
+    *param_1 = param_2;
+}
+
+int PS4_SYSV_ABI sceMouseRead(int32_t handle, void* pData, int32_t num) {
+    return 0x80DF0003;
+}
+
 void RegisterLib(Core::Loader::SymbolsResolver* sym) {
     driver = std::make_unique<VideoOutDriver>(Config::getScreenWidth(), Config::getScreenHeight());
+
+    LIB_FUNCTION("x8qnXqh-tiM", "libSceMouse", 1, "libSceMouse", 0, 0, sceMouseRead);
+    LIB_FUNCTION("pjkDsgxli6c", "libSceVideoOut", 1, "libSceVideoOut", 0, 0,
+                 sceVideoOutModeSetAny_);
 
     LIB_FUNCTION("SbU3dwp80lQ", "libSceVideoOut", 1, "libSceVideoOut", 0, 0,
                  sceVideoOutGetFlipStatus);

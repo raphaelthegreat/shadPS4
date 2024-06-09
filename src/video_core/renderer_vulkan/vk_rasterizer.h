@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "video_core/amdgpu/label_manager.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 #include "video_core/renderer_vulkan/vk_stream_buffer.h"
 
@@ -29,6 +30,18 @@ public:
                         VideoCore::TextureCache& texture_cache, AmdGpu::Liverpool* liverpool);
     ~Rasterizer();
 
+    AmdGpu::LabelManager& GetManager() {
+        return label_mgr;
+    }
+
+    const Instance& GetInstance() const {
+        return instance;
+    }
+
+    Scheduler& GetScheduler() {
+        return scheduler;
+    }
+
     void Draw(bool is_indexed, u32 index_offset = 0);
 
     void DispatchDirect();
@@ -47,6 +60,7 @@ private:
     VideoCore::TextureCache& texture_cache;
     AmdGpu::Liverpool* liverpool;
     Core::MemoryManager* memory;
+    AmdGpu::LabelManager label_mgr;
     PipelineCache pipeline_cache;
     StreamBuffer vertex_index_buffer;
 };

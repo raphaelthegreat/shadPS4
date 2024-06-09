@@ -156,6 +156,26 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
             case PM4CmdNop::PayloadType::PatchedFlip: {
                 // There is no evidence that GPU CP drives flip events by parsing
                 // special NOP packets. For convenience lets assume that it does.
+                // const auto& instance = rasterizer->GetInstance();
+                // auto& scheduler = rasterizer->GetScheduler();
+                // auto fence = instance.GetDevice().createFenceUnique({});
+                // scheduler.Flush({}, {}, *fence);
+                // u32 i;
+                // for (i = 0; i < futures.size(); i++) {
+                //    if (futures[i].wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+                //    {
+                //        break;
+                //    }
+                //}
+                // if (i == futures.size()) {
+                //    futures.emplace_back();
+                //}
+
+                // futures[i] = std::async([device = instance.GetDevice(), fence = std::move(fence)]
+                // {
+                //     device.waitForFences(*fence, true, std::numeric_limits<u64>::max());
+                //     Platform::IrqC::Instance()->Signal(Platform::InterruptId::GfxFlip);
+                // });
                 Platform::IrqC::Instance()->Signal(Platform::InterruptId::GfxFlip);
                 break;
             }
@@ -299,11 +319,23 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
         }
         case PM4ItOpcode::EventWriteEos: {
             const auto* event_eos = reinterpret_cast<const PM4CmdEventWriteEos*>(header);
+            // const VAddr addr = event_eos->Address<VAddr>();
+            // rasterizer->GetManager().Signal(addr, event_eos->DataDWord(), true, []{});
             event_eos->SignalFence();
             break;
         }
         case PM4ItOpcode::EventWriteEop: {
             const auto* event_eop = reinterpret_cast<const PM4CmdEventWriteEop*>(header);
+            const VAddr addr = event_eop->Address<VAddr>();
+            // const bool is_32bit = event_eop->data_sel == DataSelect::Data32Low;
+            // const u64 value = is_32bit ? event_eop->DataDWord() : event_eop->DataQWord();
+            // if (event_eop->int_sel == InterruptSelect::IrqWhenWriteConfirm) {
+            //     rasterizer->GetManager().Signal(addr, value, is_32bit, [] {
+            //         Platform::IrqC::Instance()->Signal(Platform::InterruptId::GfxEop);
+            //     });
+            // } else {
+            //     rasterizer->GetManager().Signal(addr, value, is_32bit, []{});
+            // }
             event_eop->SignalFence();
             break;
         }
@@ -315,6 +347,15 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
             const auto* write_data = reinterpret_cast<const PM4CmdWriteData*>(header);
             ASSERT(write_data->dst_sel.Value() == 2 || write_data->dst_sel.Value() == 5);
             const u32 data_size = (header->type3.count.Value() - 2) * 4;
+            LOG_INFO(Render_Vulkan, "Writing {} bytes to {:#x}", data_size,
+                     write_data->Address<VAddr>());
+            // ASSERT(data_size == 4);
+            // u32 data;
+            // std::memcpy(&data, write_data->data, data_size);
+            // const VAddr addr = write_data->Address<VAddr>();
+            // rasterizer->GetManager().Signal(addr, data, true, [addr, data]() {
+            //     std::memcpy(reinterpret_cast<void*>(addr), &data, sizeof(data));
+            // });
             if (!write_data->wr_one_addr.Value()) {
                 std::memcpy(write_data->Address<void*>(), write_data->data, data_size);
             } else {
@@ -328,7 +369,18 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
         }
         case PM4ItOpcode::WaitRegMem: {
             const auto* wait_reg_mem = reinterpret_cast<const PM4CmdWaitRegMem*>(header);
-            ASSERT(wait_reg_mem->engine.Value() == PM4CmdWaitRegMem::Engine::Me);
+            // const VAddr addr = wait_reg_mem->Address<VAddr>();
+            // const auto* label = rasterizer->GetManager().GetLabel(addr);
+            //  If the label is already ready, don't insert the wait.
+            // if (wait_reg_mem->Test()) {
+            //     break;
+            // }
+            // ASSERT(wait_reg_mem->engine.Value() == PM4CmdWaitRegMem::Engine::Me &&
+            //        wait_reg_mem->function == PM4CmdWaitRegMem::Function::Equal &&
+            //        wait_reg_mem->ref == label->signal_value &&
+            //        wait_reg_mem->mask == std::numeric_limits<u32>::max());
+            // rasterizer->GetManager().Wait(addr, wait_reg_mem->ref);
+            // co_yield {};
             while (!wait_reg_mem->Test()) {
                 co_yield {};
             }
@@ -351,6 +403,8 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
 
         dcb = dcb.subspan(header->type3.NumWords() + 1);
     }
+
+    rasterizer->GetScheduler().Flush();
 
     if (ce_task.handle) {
         ASSERT_MSG(ce_task.handle.done(), "Partially processed CCB");

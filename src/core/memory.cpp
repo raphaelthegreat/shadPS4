@@ -13,23 +13,21 @@
 namespace Core {
 
 MemoryManager::MemoryManager() {
+    // Insert an area that covers direct memory physical block.
     dmem_map.emplace(0, DirectMemoryArea{0, SCE_KERNEL_MAIN_DMEM_SIZE});
 
-    // Insert a virtual memory area that covers the user area.
-    const size_t user_size = USER_MAX - USER_MIN - 1;
-    vma_map.emplace(USER_MIN, VirtualMemoryArea{USER_MIN, user_size});
-
-    // Insert a virtual memory area that covers the system managed area.
-    const size_t sys_size = SYSTEM_MANAGED_MAX - SYSTEM_MANAGED_MIN - 1;
-    vma_map.emplace(SYSTEM_MANAGED_MIN, VirtualMemoryArea{SYSTEM_MANAGED_MIN, sys_size});
+    // Insert a virtual memory area that covers the entire area we manage.
+    const VAddr virtual_base = impl.VirtualBase();
+    const size_t virtual_size = impl.VirtualSize();
+    vma_map.emplace(virtual_base, VirtualMemoryArea{virtual_base, virtual_size});
 }
 
 MemoryManager::~MemoryManager() = default;
 
 PAddr MemoryManager::Allocate(PAddr search_start, PAddr search_end, size_t size, u64 alignment,
                               int memory_type) {
-    fmt::print("Size = {}\n", dmem_map.begin()->second.size);
-    std::fflush(stdout);
+    std::scoped_lock lk{mutex};
+
     auto dmem_area = FindDmemArea(search_start);
 
     const auto is_suitable = [&] {
@@ -52,10 +50,28 @@ PAddr MemoryManager::Allocate(PAddr search_start, PAddr search_end, size_t size,
 }
 
 void MemoryManager::Free(PAddr phys_addr, size_t size) {
-    fmt::print("phys_addr = {:#x}\n", phys_addr);
-    std::fflush(stdout);
+    std::scoped_lock lk{mutex};
+
     const auto dmem_area = FindDmemArea(phys_addr);
-    ASSERT(dmem_area != dmem_map.end() && dmem_area->second.base == phys_addr && dmem_area->second.size == size);
+    ASSERT(dmem_area != dmem_map.end() && dmem_area->second.base == phys_addr &&
+           dmem_area->second.size == size);
+
+    // Release any dmem mappings that reference this physical block.
+    std::vector<std::pair<VAddr, u64>> remove_list;
+    for (const auto& [addr, mapping] : vma_map) {
+        if (mapping.type != VMAType::Direct) {
+            continue;
+        }
+        if (mapping.phys_base <= phys_addr && phys_addr < mapping.phys_base + mapping.size) {
+            LOG_INFO(Kernel_Vmm, "Unmaping direct mapping {:#x} with size {:#x}", addr,
+                     mapping.size);
+            // Unmaping might erase from vma_map. We can't do it here.
+            remove_list.emplace_back(addr, mapping.size);
+        }
+    }
+    for (const auto& [addr, size] : remove_list) {
+        UnmapMemory(addr, size);
+    }
 
     // Mark region as free and attempt to coalesce it with neighbours.
     auto& area = dmem_area->second;
@@ -66,7 +82,13 @@ void MemoryManager::Free(PAddr phys_addr, size_t size) {
 
 int MemoryManager::MapMemory(void** out_addr, VAddr virtual_addr, size_t size, MemoryProt prot,
                              MemoryMapFlags flags, VMAType type, std::string_view name,
-                             PAddr phys_addr, u64 alignment) {
+                             bool is_exec, PAddr phys_addr, u64 alignment) {
+    std::scoped_lock lk{mutex};
+
+    // When virtual addr is zero, force it to virtual_base. The guest cannot pass Fixed
+    // flag so we will take the branch that searches for free (or reserved) mappings.
+    virtual_addr = (virtual_addr == 0) ? impl.VirtualBase() : virtual_addr;
+
     VAddr mapped_addr = alignment > 0 ? Common::AlignUp(virtual_addr, alignment) : virtual_addr;
     SCOPE_EXIT {
         auto& new_vma = AddMapping(mapped_addr, size);
@@ -76,17 +98,10 @@ int MemoryManager::MapMemory(void** out_addr, VAddr virtual_addr, size_t size, M
         new_vma.type = type;
 
         if (type == VMAType::Direct) {
+            new_vma.phys_base = phys_addr;
             MapVulkanMemory(mapped_addr, size);
         }
     };
-
-    // When virtual addr is zero let the address space manager pick the address.
-    // Alignment matters here as we let the OS pick the address.
-    if (virtual_addr == 0) {
-        *out_addr = impl.Map(virtual_addr, size, alignment);
-        mapped_addr = std::bit_cast<VAddr>(*out_addr);
-        return ORBIS_OK;
-    }
 
     // Fixed mapping means the virtual address must exactly match the provided one.
     if (True(flags & MemoryMapFlags::Fixed) && True(flags & MemoryMapFlags::NoOverwrite)) {
@@ -103,24 +118,28 @@ int MemoryManager::MapMemory(void** out_addr, VAddr virtual_addr, size_t size, M
             it++;
         }
         ASSERT(it != vma_map.end());
-        if (alignment > 0) {
-            ASSERT_MSG(it->second.base % alignment == 0, "Free region base is not aligned");
-        }
-        mapped_addr = it->second.base;
+        const VAddr base = it->second.base;
+        mapped_addr = alignment > 0 ? Common::AlignUp(base, alignment) : base;
     }
 
     // Perform the mapping.
-    *out_addr = impl.Map(mapped_addr, size, alignment, phys_addr);
+    *out_addr = impl.Map(mapped_addr, size, alignment, phys_addr, is_exec);
     return ORBIS_OK;
 }
 
 void MemoryManager::UnmapMemory(VAddr virtual_addr, size_t size) {
+    std::scoped_lock lk{mutex};
+
     // TODO: Partial unmaps are technically supported by the guest.
     const auto it = vma_map.find(virtual_addr);
     ASSERT_MSG(it != vma_map.end() && it->first == virtual_addr,
                "Attempting to unmap partially mapped range");
 
-    if (it->second.type == VMAType::Direct) {
+    const auto type = it->second.type;
+    fmt::print("{}\n", u32(type));
+    std::fflush(stdout);
+    const PAddr phys_addr = type == VMAType::Direct ? it->second.phys_base : -1;
+    if (type == VMAType::Direct) {
         UnmapVulkanMemory(virtual_addr, size);
     }
 
@@ -132,10 +151,12 @@ void MemoryManager::UnmapMemory(VAddr virtual_addr, size_t size) {
     MergeAdjacent(vma_map, it);
 
     // Unmap the memory region.
-    impl.Unmap(virtual_addr, size);
+    impl.Unmap(virtual_addr, size, phys_addr);
 }
 
 int MemoryManager::QueryProtection(VAddr addr, void** start, void** end, u32* prot) {
+    std::scoped_lock lk{mutex};
+
     const auto it = FindVMA(addr);
     const auto& vma = it->second;
     ASSERT_MSG(vma.type != VMAType::Free, "Provided address is not mapped");
@@ -146,8 +167,36 @@ int MemoryManager::QueryProtection(VAddr addr, void** start, void** end, u32* pr
     return ORBIS_OK;
 }
 
+int MemoryManager::VirtualQuery(VAddr addr, int flags,
+                                Libraries::Kernel::OrbisVirtualQueryInfo* info) {
+    auto it = FindVMA(addr);
+    if (it->second.type == VMAType::Free && flags == 1) {
+        it++;
+    }
+    if (it->second.type == VMAType::Free) {
+        LOG_WARNING(Kernel_Vmm, "VirtualQuery on free memory region");
+        return ORBIS_KERNEL_ERROR_EACCES;
+    }
+
+    const auto& vma = it->second;
+    info->start = vma.base;
+    info->end = vma.base + vma.size;
+    info->is_flexible.Assign(vma.type == VMAType::Flexible);
+    info->is_direct.Assign(vma.type == VMAType::Direct);
+    info->is_commited.Assign(vma.type != VMAType::Free);
+    if (vma.type == VMAType::Direct) {
+        const auto dmem_it = FindDmemArea(vma.phys_base);
+        ASSERT(dmem_it != dmem_map.end());
+        info->memory_type = dmem_it->second.memory_type;
+    }
+
+    return ORBIS_OK;
+}
+
 int MemoryManager::DirectMemoryQuery(PAddr addr, bool find_next,
                                      Libraries::Kernel::OrbisQueryInfo* out_info) {
+    std::scoped_lock lk{mutex};
+
     auto dmem_area = FindDmemArea(addr);
     if (dmem_area->second.is_free && find_next) {
         dmem_area++;
@@ -167,6 +216,8 @@ int MemoryManager::DirectMemoryQuery(PAddr addr, bool find_next,
 
 int MemoryManager::DirectQueryAvailable(PAddr search_start, PAddr search_end, size_t alignment,
                                         PAddr* phys_addr_out, size_t* size_out) {
+    std::scoped_lock lk{mutex};
+
     auto dmem_area = FindDmemArea(search_start);
     PAddr paddr{};
     size_t max_size{};

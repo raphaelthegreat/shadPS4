@@ -53,7 +53,7 @@ struct GraphicsPipelineKey {
         return std::memcmp(this, &key, sizeof(key)) == 0;
     }
 };
-//static_assert(std::has_unique_object_representations_v<GraphicsPipelineKey>);
+// static_assert(std::has_unique_object_representations_v<GraphicsPipelineKey>);
 
 class GraphicsPipeline {
 public:

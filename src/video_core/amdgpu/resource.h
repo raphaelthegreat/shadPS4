@@ -6,8 +6,8 @@
 #include "common/assert.h"
 #include "common/bit_field.h"
 #include "common/types.h"
-#include "video_core/amdgpu/pixel_format.h"
 #include "video_core/amdgpu/gpuaddr/gpuaddr.h"
+#include "video_core/amdgpu/pixel_format.h"
 
 namespace AmdGpu {
 
@@ -160,8 +160,7 @@ struct Image {
     }
 
     u32 NumLevels() const {
-        if (type == ImageType::Color2DMsaa ||
-            type == ImageType::Color2DMsaaArray) {
+        if (type == ImageType::Color2DMsaa || type == ImageType::Color2DMsaaArray) {
             return 1;
         }
         return last_level + 1;
@@ -200,8 +199,7 @@ struct Image {
             ASSERT(err == GPA_ERR_OK);
 
             size += NumLayers() * surfinfo.surfacesize;
-            if (tp.linearwidth == 1 && tp.linearheight == 1 &&
-                tp.lineardepth == 1) {
+            if (tp.linearwidth == 1 && tp.linearheight == 1 && tp.lineardepth == 1) {
                 break;
             }
         }

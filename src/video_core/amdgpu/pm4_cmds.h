@@ -285,8 +285,8 @@ struct PM4CmdEventWriteEop {
     u32 data_hi; ///< Value that will be written to memory when event occurs
 
     template <typename T>
-    T* Address() const {
-        return reinterpret_cast<T*>(address_lo | u64(address_hi) << 32);
+    T Address() const {
+        return reinterpret_cast<T>(address_lo | u64(address_hi) << 32);
     }
 
     u32 DataDWord() const {
@@ -300,15 +300,15 @@ struct PM4CmdEventWriteEop {
     void SignalFence() const {
         switch (data_sel.Value()) {
         case DataSelect::Data32Low: {
-            *Address<u32>() = DataDWord();
+            *Address<u32*>() = DataDWord();
             break;
         }
         case DataSelect::Data64: {
-            *Address<u64>() = DataQWord();
+            *Address<u64*>() = DataQWord();
             break;
         }
         case DataSelect::PerfCounter: {
-            *Address<u64>() = Common::FencedRDTSC();
+            *Address<u64*>() = Common::FencedRDTSC();
             break;
         }
         default: {
@@ -383,8 +383,9 @@ struct PM4CmdWaitRegMem {
     u32 mask;
     u32 poll_interval;
 
-    u32* Address() const {
-        return reinterpret_cast<u32*>((uintptr_t(poll_addr_hi) << 32) | poll_addr_lo);
+    template <typename T = u32*>
+    T Address() const {
+        return reinterpret_cast<T>((uintptr_t(poll_addr_hi) << 32) | poll_addr_lo);
     }
 
     bool Test() const {
@@ -443,8 +444,8 @@ struct PM4CmdWriteData {
     }
 
     template <typename T>
-    T* Address() const {
-        return reinterpret_cast<T*>(addr64);
+    T Address() const {
+        return reinterpret_cast<T>(addr64);
     }
 };
 
@@ -473,8 +474,9 @@ struct PM4CmdEventWriteEos {
         BitField<16, 16, u32> size; ///< Number of DWs to read from the GDS
     };
 
-    u32* Address() const {
-        return reinterpret_cast<u32*>(address_lo | u64(address_hi) << 32);
+    template <typename T>
+    T Address() const {
+        return reinterpret_cast<T>(address_lo | u64(address_hi) << 32);
     }
 
     u32 DataDWord() const {
@@ -484,7 +486,7 @@ struct PM4CmdEventWriteEos {
     void SignalFence() const {
         switch (command.Value()) {
         case Command::SingalFence: {
-            *Address() = DataDWord();
+            *Address<u32*>() = DataDWord();
             break;
         }
         default: {

@@ -403,4 +403,10 @@ void Translator::V_MIN_I32(const GcnInst& inst) {
     SetDst(inst.dst[0], ir.SMin(src0, src1));
 }
 
+void Translator::V_MUL_LO_U32(const GcnInst& inst) {
+    const IR::U32 src0{GetSrc(inst.src[0])};
+    const IR::U32 src1{GetSrc(inst.src[1])};
+    SetDst(inst.dst[0], ir.IMul(src0, src1));
+}
+
 } // namespace Shader::Gcn

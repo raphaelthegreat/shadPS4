@@ -613,6 +613,12 @@ void Translate(IR::Block* block, std::span<const GcnInst> inst_list, Info& info)
         case Opcode::DS_SWIZZLE_B32:
             translator.DS_SWIZZLE_B32(inst);
             break;
+        case Opcode::V_MUL_LO_U32:
+            translator.V_MUL_LO_U32(inst);
+            break;
+        case Opcode::S_BFM_B32:
+            translator.S_BFM_B32(inst);
+            break;
         case Opcode::S_NOP:
         case Opcode::S_CBRANCH_EXECZ:
         case Opcode::S_CBRANCH_SCC0:

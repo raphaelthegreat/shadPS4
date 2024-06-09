@@ -43,6 +43,14 @@ int PS4_SYSV_ABI sceKernelOpen(const char* path, int flags, u16 mode) {
             file->f.Open(file->m_host_name, Common::FS::FileAccessMode::Read);
         } else if (write && create && truncate) {
             file->f.Open(file->m_host_name, Common::FS::FileAccessMode::Write);
+        } else if (write && create && append) { // CUSA04729 (appends app0/shaderlist.txt)
+            file->f.Open(file->m_host_name, Common::FS::FileAccessMode::Append);
+        } else if (rdwr) {
+            if (create) { // Create an empty file first.
+                Common::FS::IOFile out(file->m_host_name, Common::FS::FileAccessMode::Write);
+            }
+            // RW, then scekernelWrite is called and savedata is written just fine now.
+            file->f.Open(file->m_host_name, Common::FS::FileAccessMode::ReadWrite);
         } else {
             UNREACHABLE();
         }
@@ -215,6 +223,34 @@ int PS4_SYSV_ABI sceKernelCheckReachability(const char* path) {
     return ORBIS_OK;
 }
 
+s64 PS4_SYSV_ABI sceKernelPread(int d, void* buf, size_t nbytes, s64 offset) {
+    if (d < 3) {
+        return ORBIS_KERNEL_ERROR_EPERM;
+    }
+
+    if (buf == nullptr) {
+        return ORBIS_KERNEL_ERROR_EFAULT;
+    }
+
+    if (offset < 0) {
+        return ORBIS_KERNEL_ERROR_EINVAL;
+    }
+
+    auto* h = Common::Singleton<Core::FileSys::HandleTable>::Instance();
+    auto* file = h->GetFile(d);
+
+    if (file == nullptr) {
+        return ORBIS_KERNEL_ERROR_EBADF;
+    }
+    file->m_mutex.lock();
+    if (file->f.Tell() != offset) {
+        file->f.Seek(offset);
+    }
+    u32 bytes_read = file->f.ReadRaw<u8>(buf, static_cast<u32>(nbytes));
+    file->m_mutex.unlock();
+    return bytes_read;
+}
+
 void fileSystemSymbolsRegister(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("1G3lF1Gg1k8", "libkernel", 1, "libkernel", 1, 1, sceKernelOpen);
     LIB_FUNCTION("wuCroIGjt2g", "libScePosix", 1, "libkernel", 1, 1, posix_open);
@@ -229,6 +265,7 @@ void fileSystemSymbolsRegister(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("eV9wAD2riIA", "libkernel", 1, "libkernel", 1, 1, sceKernelStat);
     LIB_FUNCTION("E6ao34wPw+U", "libScePosix", 1, "libkernel", 1, 1, posix_stat);
     LIB_FUNCTION("uWyW3v98sU4", "libkernel", 1, "libkernel", 1, 1, sceKernelCheckReachability);
+    LIB_FUNCTION("+r3rMFwItV4", "libkernel", 1, "libkernel", 1, 1, sceKernelPread);
 
     // openOrbis (to check if it is valid out of OpenOrbis
     LIB_FUNCTION("6c3rCVE-fTU", "libkernel", 1, "libkernel", 1, 1,

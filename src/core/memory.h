@@ -4,6 +4,7 @@
 #pragma once
 
 #include <functional>
+#include <mutex>
 #include <string_view>
 #include <vector>
 #include <boost/icl/split_interval_map.hpp>
@@ -11,6 +12,7 @@
 #include "common/singleton.h"
 #include "common/types.h"
 #include "core/address_space.h"
+#include "core/libraries/kernel/memory_management.h"
 #include "video_core/renderer_vulkan/vk_common.h"
 
 namespace Vulkan {
@@ -47,6 +49,7 @@ enum class VMAType : u32 {
     Flexible = 3,
     Pooled = 4,
     Stack = 5,
+    Code = 6,
 };
 
 struct DirectMemoryArea {
@@ -96,13 +99,6 @@ struct VirtualMemoryArea {
     }
 };
 
-constexpr VAddr SYSTEM_RESERVED = 0x800000000ULL;
-constexpr VAddr CODE_BASE_OFFSET = 0x100000000ULL;
-constexpr VAddr SYSTEM_MANAGED_MIN = 0x0000040000ULL;
-constexpr VAddr SYSTEM_MANAGED_MAX = 0x07FFFFBFFFULL;
-constexpr VAddr USER_MIN = 0x1000000000ULL;
-constexpr VAddr USER_MAX = 0xFBFFFFFFFFULL;
-
 class MemoryManager {
     using DMemMap = std::map<PAddr, DirectMemoryArea>;
     using DMemHandle = DMemMap::iterator;
@@ -125,11 +121,13 @@ public:
 
     int MapMemory(void** out_addr, VAddr virtual_addr, size_t size, MemoryProt prot,
                   MemoryMapFlags flags, VMAType type, std::string_view name = "",
-                  PAddr phys_addr = -1, u64 alignment = 0);
+                  bool is_exec = false, PAddr phys_addr = -1, u64 alignment = 0);
 
     void UnmapMemory(VAddr virtual_addr, size_t size);
 
     int QueryProtection(VAddr addr, void** start, void** end, u32* prot);
+
+    int VirtualQuery(VAddr addr, int flags, Libraries::Kernel::OrbisVirtualQueryInfo* info);
 
     int DirectMemoryQuery(PAddr addr, bool find_next, Libraries::Kernel::OrbisQueryInfo* out_info);
 
@@ -140,12 +138,7 @@ public:
 
 private:
     VMAHandle FindVMA(VAddr target) {
-        // Return first the VMA with base >= target.
-        const auto it = vma_map.lower_bound(target);
-        if (it != vma_map.end() && it->first == target) {
-            return it;
-        }
-        return std::prev(it);
+        return std::prev(vma_map.upper_bound(target));
     }
 
     DMemHandle FindDmemArea(PAddr target) {
@@ -186,6 +179,7 @@ private:
     AddressSpace impl;
     DMemMap dmem_map;
     VMAMap vma_map;
+    std::recursive_mutex mutex;
 
     struct MappedMemory {
         vk::UniqueBuffer buffer;

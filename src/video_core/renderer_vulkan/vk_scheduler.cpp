@@ -14,9 +14,9 @@ Scheduler::Scheduler(const Instance& instance)
 
 Scheduler::~Scheduler() = default;
 
-void Scheduler::Flush(vk::Semaphore signal, vk::Semaphore wait) {
+void Scheduler::Flush(vk::Semaphore signal, vk::Semaphore wait, vk::Fence fence) {
     // When flushing, we only send data to the worker thread; no waiting is necessary.
-    SubmitExecution(signal, wait);
+    SubmitExecution(signal, wait, fence);
 }
 
 void Scheduler::Finish(vk::Semaphore signal, vk::Semaphore wait) {
@@ -43,11 +43,13 @@ void Scheduler::AllocateWorkerCommandBuffers() {
     current_cmdbuf.begin(begin_info);
 }
 
-void Scheduler::SubmitExecution(vk::Semaphore signal_semaphore, vk::Semaphore wait_semaphore) {
+void Scheduler::SubmitExecution(vk::Semaphore signal_semaphore, vk::Semaphore wait_semaphore,
+                                vk::Fence fence) {
     const u64 signal_value = master_semaphore.NextTick();
 
     std::scoped_lock lk{submit_mutex};
-    master_semaphore.SubmitWork(current_cmdbuf, wait_semaphore, signal_semaphore, signal_value);
+    master_semaphore.SubmitWork(current_cmdbuf, wait_semaphore, signal_semaphore, fence,
+                                signal_value);
     master_semaphore.Refresh();
     AllocateWorkerCommandBuffers();
 }

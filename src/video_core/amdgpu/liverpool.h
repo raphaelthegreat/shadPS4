@@ -11,8 +11,9 @@
 
 #include <array>
 #include <coroutine>
-#include <span>
+#include <future>
 #include <mutex>
+#include <span>
 #include <thread>
 #include <queue>
 
@@ -942,6 +943,7 @@ private:
     std::jthread process_thread{};
     std::atomic<u32> num_submits{};
     std::atomic<bool> submit_done{};
+    std::vector<std::future<void>> futures;
 };
 
 static_assert(GFX6_3D_REG_INDEX(ps_program) == 0x2C08);

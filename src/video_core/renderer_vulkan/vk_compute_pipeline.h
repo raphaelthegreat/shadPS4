@@ -36,8 +36,7 @@ public:
     }
 
     void BindResources(Core::MemoryManager* memory, StreamBuffer& staging,
-                       VideoCore::TextureCache& texture_cache,
-                       AmdGpu::Liverpool* liverpool) const;
+                       VideoCore::TextureCache& texture_cache, AmdGpu::Liverpool* liverpool) const;
 
 private:
     const Instance& instance;

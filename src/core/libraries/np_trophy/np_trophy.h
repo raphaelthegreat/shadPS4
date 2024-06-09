@@ -23,7 +23,7 @@ int PS4_SYSV_ABI sceNpTrophyConfigGetTrophySetVersion();
 int PS4_SYSV_ABI sceNpTrophyConfigGetTrophyTitleDetails();
 int PS4_SYSV_ABI sceNpTrophyConfigHasGroupFeature();
 int PS4_SYSV_ABI sceNpTrophyCreateContext();
-int PS4_SYSV_ABI sceNpTrophyCreateHandle();
+int PS4_SYSV_ABI sceNpTrophyCreateHandle(s32* handle);
 int PS4_SYSV_ABI sceNpTrophyDestroyContext();
 int PS4_SYSV_ABI sceNpTrophyDestroyHandle();
 int PS4_SYSV_ABI sceNpTrophyGetGameIcon();

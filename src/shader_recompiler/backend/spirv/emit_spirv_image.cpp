@@ -30,13 +30,14 @@ Id EmitImageSampleDrefImplicitLod(EmitContext& ctx, IR::Inst* inst, const IR::Va
     throw NotImplementedException("SPIR-V Instruction");
 }
 
-Id EmitImageSampleDrefExplicitLod(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords, Id dref, Id bias_lc,
-                                  Id offset) {
+Id EmitImageSampleDrefExplicitLod(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords, Id dref,
+                                  Id bias_lc, Id offset) {
     const auto& texture = ctx.images[handle & 0xFFFF];
     const Id image = ctx.OpLoad(texture.image_type, texture.id);
     const Id sampler = ctx.OpLoad(ctx.sampler_type, ctx.samplers[handle >> 16]);
     const Id sampled_image = ctx.OpSampledImage(texture.sampled_type, image, sampler);
-    return ctx.OpImageSampleDrefExplicitLod(ctx.F32[1], sampled_image, coords, dref, spv::ImageOperandsMask::Lod, ctx.ConstF32(0.f));
+    return ctx.OpImageSampleDrefExplicitLod(ctx.F32[1], sampled_image, coords, dref,
+                                            spv::ImageOperandsMask::Lod, ctx.ConstF32(0.f));
 }
 
 Id EmitImageGather(EmitContext& ctx, IR::Inst* inst, const IR::Value& index, Id coords,

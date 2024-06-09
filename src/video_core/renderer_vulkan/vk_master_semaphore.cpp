@@ -61,7 +61,7 @@ void MasterSemaphore::Wait(u64 tick) {
 }
 
 void MasterSemaphore::SubmitWork(vk::CommandBuffer cmdbuf, vk::Semaphore wait, vk::Semaphore signal,
-                                 u64 signal_value) {
+                                 vk::Fence fence, u64 signal_value) {
     cmdbuf.end();
 
     const u32 num_signal_semaphores = signal ? 2U : 1U;
@@ -96,7 +96,7 @@ void MasterSemaphore::SubmitWork(vk::CommandBuffer cmdbuf, vk::Semaphore wait, v
     };
 
     try {
-        instance.GetGraphicsQueue().submit(submit_info);
+        instance.GetGraphicsQueue().submit(submit_info, fence);
     } catch (vk::DeviceLostError& err) {
         UNREACHABLE_MSG("Device lost during submit: {}", err.what());
     }

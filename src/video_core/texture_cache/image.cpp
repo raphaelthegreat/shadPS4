@@ -43,7 +43,8 @@ static vk::ImageUsageFlags ImageUsageFlags(const vk::Format format) {
     } else {
         if (format != vk::Format::eBc3SrgbBlock && format != vk::Format::eBc3UnormBlock &&
             format != vk::Format::eBc1RgbaUnormBlock) {
-            usage |= vk::ImageUsageFlagBits::eColorAttachment;;
+            usage |= vk::ImageUsageFlagBits::eColorAttachment;
+            ;
         }
         if (format != vk::Format::eA8B8G8R8SrgbPack32) {
             usage |= vk::ImageUsageFlagBits::eStorage;
@@ -128,14 +129,15 @@ ImageInfo::ImageInfo(const AmdGpu::Image& image) noexcept {
     resources.layers = image.NumLayers();
     texinfo = GpaTextureInfo{
         .type = static_cast<GnmTextureType>(image.type.Value()),
-        .fmt = {
-            .surfacefmt = static_cast<GnmImageFormat>(image.data_format.Value()),
-            .chantype = static_cast<GnmImgNumFormat>(image.num_format.Value()),
-            .chanx = static_cast<GnmChannel>(image.dst_sel_x.Value()),
-            .chany = static_cast<GnmChannel>(image.dst_sel_y.Value()),
-            .chanz = static_cast<GnmChannel>(image.dst_sel_z.Value()),
-            .chanw = static_cast<GnmChannel>(image.dst_sel_w.Value()),
-        },
+        .fmt =
+            {
+                .surfacefmt = static_cast<GnmImageFormat>(image.data_format.Value()),
+                .chantype = static_cast<GnmImgNumFormat>(image.num_format.Value()),
+                .chanx = static_cast<GnmChannel>(image.dst_sel_x.Value()),
+                .chany = static_cast<GnmChannel>(image.dst_sel_y.Value()),
+                .chanz = static_cast<GnmChannel>(image.dst_sel_z.Value()),
+                .chanw = static_cast<GnmChannel>(image.dst_sel_w.Value()),
+            },
         .width = static_cast<u32>(image.width.Value() + 1),
         .height = static_cast<u32>(image.height.Value() + 1),
         .pitch = image.Pitch(),

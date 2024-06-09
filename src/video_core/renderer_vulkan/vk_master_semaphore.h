@@ -48,7 +48,7 @@ public:
 
     /// Submits the provided command buffer for execution
     void SubmitWork(vk::CommandBuffer cmdbuf, vk::Semaphore wait, vk::Semaphore signal,
-                    u64 signal_value);
+                    vk::Fence fence, u64 signal_value);
 
 protected:
     const Instance& instance;

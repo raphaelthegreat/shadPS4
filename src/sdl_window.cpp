@@ -61,6 +61,8 @@ void WindowSDL::waitEvent() {
     // Called on main thread
     SDL_Event event;
 
+    using Libraries::LibPad::ScePadButton;
+    // controller->checkButton(0, ScePadButton::DOWN, true);
     if (!SDL_PollEvent(&event)) {
         return;
     }

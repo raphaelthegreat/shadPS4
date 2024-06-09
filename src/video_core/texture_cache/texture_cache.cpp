@@ -164,8 +164,8 @@ ImageView& TextureCache::FindImageView(const AmdGpu::Image& desc, bool is_storag
     Image& image = FindImage(ImageInfo{desc}, desc.Address());
 
     if (is_storage) {
-        image.Transit(vk::ImageLayout::eGeneral, vk::AccessFlagBits::eShaderWrite |
-                                                 vk::AccessFlagBits::eShaderRead);
+        image.Transit(vk::ImageLayout::eGeneral,
+                      vk::AccessFlagBits::eShaderWrite | vk::AccessFlagBits::eShaderRead);
     } else {
         image.Transit(vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits::eShaderRead);
     }
@@ -213,8 +213,9 @@ void TextureCache::RefreshImage(Image& image) {
     if (image.info.texinfo.tm == GnmTileMode::GNM_TM_DISPLAY_LINEAR_GENERAL) {
         std::memcpy(staging_data, image_data, image.info.guest_size_bytes);
     } else {
-        const GpaError res = gpaDetileTextureAll(image_data, image.info.guest_size_bytes, staging_data,
-                                                 image.info.guest_size_bytes, &image.info.texinfo);
+        const GpaError res =
+            gpaDetileTextureAll(image_data, image.info.guest_size_bytes, staging_data,
+                                image.info.guest_size_bytes, &image.info.texinfo);
         ASSERT_MSG(res == GPA_ERR_OK, "Texture detiling failed with error: {}", gpaStrError(res));
     }
     staging.Commit(image.info.guest_size_bytes);
@@ -227,6 +228,9 @@ void TextureCache::RefreshImage(Image& image) {
         // Initialize tiling parameters.
         GpaTilingParams tp = {};
         GpaError res = gpaTpInit(&tp, &image.info.texinfo, mip, 0);
+        if (res != GPA_ERR_OK) {
+            return;
+        }
         ASSERT(res == GPA_ERR_OK);
 
         // Figure out the offset of the slice0 mip in the image data and its size.
@@ -255,8 +259,8 @@ void TextureCache::RefreshImage(Image& image) {
     const auto cmdbuf = scheduler.CommandBuffer();
     image.Transit(vk::ImageLayout::eTransferDstOptimal, vk::AccessFlagBits::eTransferWrite);
 
-    cmdbuf.copyBufferToImage(staging.Handle(), image.image,
-                             vk::ImageLayout::eTransferDstOptimal, image_copies);
+    cmdbuf.copyBufferToImage(staging.Handle(), image.image, vk::ImageLayout::eTransferDstOptimal,
+                             image_copies);
 
     image.Transit(vk::ImageLayout::eGeneral,
                   vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eTransferRead);
@@ -335,7 +339,7 @@ void TextureCache::UpdatePagesCachedCount(VAddr addr, u64 size, s32 delta) {
         const u32 interval_size = interval_end_addr - interval_start_addr;
         void* addr = reinterpret_cast<void*>(interval_start_addr);
         if (delta > 0 && count == delta) {
-            //mprotect(addr, interval_size, PAGE_READONLY);
+            // mprotect(addr, interval_size, PAGE_READONLY);
         } else if (delta < 0 && count == -delta) {
             mprotect(addr, interval_size, PAGE_READWRITE);
         } else {

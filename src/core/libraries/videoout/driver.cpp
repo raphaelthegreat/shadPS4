@@ -180,26 +180,6 @@ void VideoOutDriver::Flip(std::chrono::microseconds timeout) {
         renderer->Present(req.frame);
     }
 
-    std::scoped_lock lock{mutex};
-
-    // Update flip status.
-    auto& flip_status = req.port->flip_status;
-    flip_status.count++;
-    flip_status.processTime = Libraries::Kernel::sceKernelGetProcessTime();
-    flip_status.tsc = Libraries::Kernel::sceKernelReadTsc();
-    flip_status.submitTsc = Libraries::Kernel::sceKernelReadTsc();
-    flip_status.flipArg = req.flip_arg;
-    flip_status.currentBuffer = req.index;
-    flip_status.flipPendingNum = static_cast<int>(requests.size());
-
-    // Trigger flip events for the port.
-    for (auto& event : req.port->flip_events) {
-        if (event != nullptr) {
-            event->triggerEvent(SCE_VIDEO_OUT_EVENT_FLIP, Kernel::EVFILT_VIDEO_OUT,
-                                reinterpret_cast<void*>(req.flip_arg));
-        }
-    }
-
     // Reset flip label
     req.port->buffer_labels[req.index] = 0;
 }
@@ -225,6 +205,24 @@ bool VideoOutDriver::SubmitFlip(VideoOutPort* port, s32 index, s64 flip_arg,
         .submit_tsc = Libraries::Kernel::sceKernelReadTsc(),
         .eop = is_eop,
     });
+
+    // Update flip status.
+    auto& flip_status = port->flip_status;
+    flip_status.count++;
+    flip_status.processTime = Libraries::Kernel::sceKernelGetProcessTime();
+    flip_status.tsc = Libraries::Kernel::sceKernelReadTsc();
+    flip_status.submitTsc = Libraries::Kernel::sceKernelReadTsc();
+    flip_status.flipArg = flip_arg;
+    flip_status.currentBuffer = index;
+    flip_status.flipPendingNum = static_cast<int>(requests.size());
+
+    // Trigger flip events for the port.
+    for (auto& event : port->flip_events) {
+        if (event != nullptr) {
+            event->triggerEvent(SCE_VIDEO_OUT_EVENT_FLIP, Kernel::EVFILT_VIDEO_OUT,
+                                reinterpret_cast<void*>(flip_arg));
+        }
+    }
 
     port->flip_status.flipPendingNum = static_cast<int>(requests.size());
     port->flip_status.gcQueueNum = 0;

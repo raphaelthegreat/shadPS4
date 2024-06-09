@@ -342,6 +342,7 @@ s32 saveDataMount(u32 user_id, std::string dir_name, u32 mount_mode,
     case ORBIS_SAVE_DATA_MOUNT_MODE_RDONLY:
     case ORBIS_SAVE_DATA_MOUNT_MODE_RDWR: {
         if (!std::filesystem::exists(mount_dir)) {
+            LOG_WARNING(Lib_SaveData, "Mount directory {} does not exist", mount_dir.string());
             return ORBIS_SAVE_DATA_ERROR_NOT_FOUND;
         }
         auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
@@ -377,7 +378,7 @@ s32 saveDataMount(u32 user_id, std::string dir_name, u32 mount_mode,
         strncpy(mount_result->mount_point.data, g_mount_point.c_str(), 16);
     } break;
     default:
-        UNREACHABLE();
+        // UNREACHABLE();
     }
     mount_result->required_blocks = 0;
 

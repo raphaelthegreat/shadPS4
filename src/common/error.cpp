@@ -10,6 +10,8 @@
 #include <cstring>
 #endif
 
+#include <iostream>
+#include "common/assert.h"
 #include "common/error.h"
 
 namespace Common {
@@ -20,11 +22,9 @@ std::string NativeErrorToString(int e) {
 
     DWORD res = FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_ALLOCATE_BUFFER |
                                    FORMAT_MESSAGE_IGNORE_INSERTS,
-                               nullptr, e, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                               nullptr, e, MAKELANGID(LANG_ENGLISH, SUBLANG_ENGLISH_US),
                                reinterpret_cast<LPSTR>(&err_str), 1, nullptr);
-    if (!res) {
-        return "(FormatMessageA failed to format error)";
-    }
+    ASSERT(res);
     std::string ret(err_str);
     LocalFree(err_str);
     return ret;
