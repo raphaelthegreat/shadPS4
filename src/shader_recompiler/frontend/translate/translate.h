@@ -128,6 +128,7 @@ public:
     void IMAGE_GET_RESINFO(const GcnInst& inst);
     void IMAGE_SAMPLE(const GcnInst& inst);
     void IMAGE_STORE(const GcnInst& inst);
+    void IMAGE_LOAD_MIP(const GcnInst& inst);
 
     // Export
     void EXP(const GcnInst& inst);

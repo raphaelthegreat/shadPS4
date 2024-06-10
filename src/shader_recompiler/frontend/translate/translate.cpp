@@ -309,6 +309,9 @@ void Translate(IR::Block* block, std::span<const GcnInst> inst_list, Info& info)
         case Opcode::IMAGE_STORE:
             translator.IMAGE_STORE(inst);
             break;
+        case Opcode::IMAGE_LOAD_MIP:
+            translator.IMAGE_LOAD_MIP(inst);
+            break;
         case Opcode::V_CMP_GE_I32:
             translator.V_CMP_U32(ConditionOp::GE, true, false, inst);
             break;

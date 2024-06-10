@@ -53,15 +53,8 @@ IR::Program TranslateProgram(ObjectPool<IR::Inst>& inst_pool, ObjectPool<IR::Blo
     program.blocks = GenerateBlocks(program.syntax_list);
     program.post_order_blocks = Shader::IR::PostOrder(program.syntax_list.front());
 
-    fmt::print("Pre SSA passes\n\n{}\n", Shader::IR::DumpProgram(program));
-    std::fflush(stdout);
-
     // Run optimization passes
     Shader::Optimization::SsaRewritePass(program.post_order_blocks);
-
-    fmt::print("Post SSA passes\n\n{}\n", Shader::IR::DumpProgram(program));
-    std::fflush(stdout);
-
     Shader::Optimization::ResourceTrackingPass(program);
     Shader::Optimization::ConstantPropagationPass(program.post_order_blocks);
     Shader::Optimization::IdentityRemovalPass(program.blocks);
@@ -69,7 +62,6 @@ IR::Program TranslateProgram(ObjectPool<IR::Inst>& inst_pool, ObjectPool<IR::Blo
     Shader::Optimization::CollectShaderInfoPass(program);
 
     fmt::print("Post passes\n\n{}\n", Shader::IR::DumpProgram(program));
-    std::fflush(stdout);
 
     return program;
 }

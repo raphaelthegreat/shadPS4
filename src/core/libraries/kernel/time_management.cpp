@@ -3,6 +3,7 @@
 
 #include <thread>
 #include <pthread.h>
+#include "common/assert.h"
 #include "common/native_clock.h"
 #include "core/libraries/kernel/time_management.h"
 #include "core/libraries/libs.h"
@@ -37,11 +38,13 @@ u64 PS4_SYSV_ABI sceKernelReadTsc() {
 }
 
 int PS4_SYSV_ABI sceKernelUsleep(u32 microseconds) {
+    ASSERT(microseconds >= 1000);
     std::this_thread::sleep_for(std::chrono::microseconds(microseconds));
     return 0;
 }
 
 int PS4_SYSV_ABI posix_usleep(u32 microseconds) {
+    ASSERT(microseconds >= 1000);
     std::this_thread::sleep_for(std::chrono::microseconds(microseconds));
     return 0;
 }
@@ -81,7 +84,7 @@ int PS4_SYSV_ABI gettimeofday(struct timeval* tv, struct timezone* tz) {
     static int tzflag = 0;
 
     if (NULL != tv) {
-        GetSystemTimeAsFileTime(&ft);
+        GetSystemTimePreciseAsFileTime(&ft);
 
         tmpres |= ft.dwHighDateTime;
         tmpres <<= 32;

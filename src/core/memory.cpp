@@ -136,8 +136,6 @@ void MemoryManager::UnmapMemory(VAddr virtual_addr, size_t size) {
                "Attempting to unmap partially mapped range");
 
     const auto type = it->second.type;
-    fmt::print("{}\n", u32(type));
-    std::fflush(stdout);
     const PAddr phys_addr = type == VMAType::Direct ? it->second.phys_base : -1;
     if (type == VMAType::Direct) {
         UnmapVulkanMemory(virtual_addr, size);

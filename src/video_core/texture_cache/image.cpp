@@ -117,7 +117,7 @@ ImageInfo::ImageInfo(const AmdGpu::Liverpool::DepthBuffer& buffer,
 }
 
 ImageInfo::ImageInfo(const AmdGpu::Image& image) noexcept {
-    is_tiled = image.IsTiled();
+    is_tiled = false&&image.IsTiled();
     tiling_mode = image.GetTilingMode();
     pixel_format = LiverpoolToVK::SurfaceFormat(image.GetDataFmt(), image.GetNumberFmt());
     type = ConvertImageType(image.type);

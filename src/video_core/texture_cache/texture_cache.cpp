@@ -5,6 +5,7 @@
 #include "common/assert.h"
 #include "common/config.h"
 #include "common/error.h"
+#include "common/scope_exit.h"
 #include "core/virtual_memory.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -207,10 +208,11 @@ ImageView& TextureCache::DepthTarget(const AmdGpu::Liverpool::DepthBuffer& buffe
 void TextureCache::RefreshImage(Image& image) {
     // Mark image as validated.
     image.flags &= ~ImageFlagBits::CpuModified;
-
+    LOG_INFO(Render_Vulkan, "Upload!!");
     const u8* image_data = reinterpret_cast<const u8*>(image.cpu_addr);
     const auto [staging_data, offset, _] = staging.Map(image.info.guest_size_bytes, 16);
-    if (image.info.texinfo.tm == GnmTileMode::GNM_TM_DISPLAY_LINEAR_GENERAL) {
+    SCOPE_EXIT { staging.Commit(image.info.guest_size_bytes); };
+    if (!image.info.is_tiled) {
         std::memcpy(staging_data, image_data, image.info.guest_size_bytes);
     } else {
         const GpaError res =
@@ -218,13 +220,12 @@ void TextureCache::RefreshImage(Image& image) {
                                 image.info.guest_size_bytes, &image.info.texinfo);
         ASSERT_MSG(res == GPA_ERR_OK, "Texture detiling failed with error: {}", gpaStrError(res));
     }
-    staging.Commit(image.info.guest_size_bytes);
 
     // The mipmaps of each slice are next to each other in memory. So we iterate each layer
     // and detile its mipmaps. Vulkan allows us to copy to the same mipmap of multiple layers at
     // once, so we try to upload in that order.
     boost::container::small_vector<vk::BufferImageCopy, 50> image_copies;
-    for (u32 mip = 0; mip < image.info.resources.levels; mip++) {
+    for (u32 mip = 0; mip < 1; mip++) {
         // Initialize tiling parameters.
         GpaTilingParams tp = {};
         GpaError res = gpaTpInit(&tp, &image.info.texinfo, mip, 0);

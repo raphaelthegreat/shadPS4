@@ -303,7 +303,7 @@ void PatchImageInstruction(IR::Block& block, IR::Inst& inst, Info& info, Descrip
         case AmdGpu::ImageType::Cube:
             return {PatchCubeCoord(ir, body->Arg(0), body->Arg(1), body->Arg(2)), body->Arg(3)};
         default:
-            UNREACHABLE();
+            UNREACHABLE_MSG("Unknown image type {}", image.type.Value());
         }
     }();
     inst.SetArg(1, coords);
@@ -312,6 +312,9 @@ void PatchImageInstruction(IR::Block& block, IR::Inst& inst, Info& info, Descrip
         // Final argument contains lod_clamp
         const u32 arg_pos = inst_info.is_depth ? 5 : 4;
         inst.SetArg(arg_pos, arg);
+    }
+    if (inst_info.explicit_lod && inst.GetOpcode() == IR::Opcode::ImageFetch) {
+        inst.SetArg(3, arg);
     }
 }
 
