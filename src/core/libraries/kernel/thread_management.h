@@ -9,6 +9,7 @@
 #include <vector>
 #include <pthread.h>
 #include <sched.h>
+#include <condition_variable>
 #include "common/types.h"
 
 namespace Core::Loader {
@@ -51,12 +52,16 @@ struct PthreadInternal {
     ScePthreadAttr attr;
     PthreadEntryFunc entry;
     void* arg;
+    u32 id;
     std::atomic_bool is_started;
     std::atomic_bool is_detached;
     std::atomic_bool is_almost_done;
     std::atomic_bool is_free;
     using Destructor = std::pair<OrbisPthreadKey, PthreadKeyDestructor>;
     std::vector<Destructor> key_destructors;
+    using Cleaner = std::pair<void*, PthreadKeyDestructor>;
+    std::vector<Cleaner> cleaners;
+    bool was_interrupted{};
 };
 
 struct PthreadAttrInternal {
@@ -71,7 +76,7 @@ struct PthreadAttrInternal {
 struct PthreadMutexInternal {
     u8 reserved[256];
     std::string name;
-    pthread_mutex_t pth_mutex;
+    std::recursive_mutex mutex;
 };
 
 struct PthreadMutexattrInternal {
@@ -83,7 +88,7 @@ struct PthreadMutexattrInternal {
 struct PthreadCondInternal {
     u8 reserved[256];
     std::string name;
-    pthread_cond_t cond;
+    std::condition_variable_any cv;
 };
 
 struct PthreadCondAttrInternal {

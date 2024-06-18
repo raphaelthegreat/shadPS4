@@ -20,8 +20,12 @@ int PS4_SYSV_ABI sceDiscMapIsRequestOnHDD() {
     return ORBIS_DISC_MAP_ERROR_NO_BITMAP_INFO;
 }
 
-int PS4_SYSV_ABI Func_7C980FFB0AA27E7A() {
-    LOG_ERROR(Lib_DiscMap, "(STUBBED) called");
+int PS4_SYSV_ABI Func_7C980FFB0AA27E7A(const char* path, s64 param2, s64 param3,
+                                       s64* pflags, s64* pret1, s64* pret2) {
+    LOG_WARNING(Lib_DiscMap, "(STUBBED) called");
+    *pflags = 0;
+    *pret1 = 0;
+    *pret2 = 0;
     return ORBIS_OK;
 }
 

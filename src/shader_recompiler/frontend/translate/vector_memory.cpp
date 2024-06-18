@@ -142,7 +142,7 @@ void Translator::IMAGE_STORE(const GcnInst& inst) {
         ir.CompositeConstruct(ir.GetVectorReg(addr_reg), ir.GetVectorReg(addr_reg + 1),
                               ir.GetVectorReg(addr_reg + 2), ir.GetVectorReg(addr_reg + 3));
 
-    ASSERT(mimg.dmask == 0xF);
+    //ASSERT(mimg.dmask == 0xF);
     const IR::Value value = ir.CompositeConstruct(
         ir.GetVectorReg<IR::F32>(data_reg), ir.GetVectorReg<IR::F32>(data_reg + 1),
         ir.GetVectorReg<IR::F32>(data_reg + 2), ir.GetVectorReg<IR::F32>(data_reg + 3));

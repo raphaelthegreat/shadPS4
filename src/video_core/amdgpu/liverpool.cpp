@@ -157,7 +157,8 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
         const u32 type = header->type;
         if (type != 3) {
             // No other types of packets were spotted so far
-            UNREACHABLE_MSG("Invalid PM4 type {}", type);
+            LOG_CRITICAL(Render_Vulkan, "Invalid PM3 type {}", type);
+            //UNREACHABLE_MSG("Invalid PM4 type {}", type);
         }
 
         const u32 count = header->type3.NumWords();

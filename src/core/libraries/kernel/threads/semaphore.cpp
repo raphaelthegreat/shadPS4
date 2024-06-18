@@ -5,7 +5,6 @@
 #include <mutex>
 #include <boost/intrusive/list.hpp>
 #include <pthread.h>
-#include "common/assert.h"
 #include "common/logging/log.h"
 #include "common/scope_exit.h"
 #include "core/libraries/error_codes.h"
@@ -19,14 +18,23 @@ using ListBaseHook =
 class Semaphore {
 public:
     Semaphore(s32 init_count, s32 max_count, const char* name, bool is_fifo)
-        : name{name}, token_count{init_count}, max_count{max_count}, is_fifo{is_fifo} {}
+        : name{name}, token_count{init_count}, max_count{max_count}, init_count{init_count}, is_fifo{is_fifo} {}
+    ~Semaphore() {
+        for (auto& waiter : wait_list) {
+            waiter.was_deleted = true;
+            waiter.cv.notify_one();
+        }
+        while (!wait_list.empty()) {
+            ;
+        }
+    }
 
-    bool Wait(bool can_block, s32 need_count, u64* timeout) {
+    int Wait(bool can_block, s32 need_count, u64* timeout) {
         if (HasAvailableTokens(need_count)) {
-            return true;
+            return SCE_OK;
         }
         if (!can_block) {
-            return false;
+            return SCE_KERNEL_ERROR_EBUSY;
         }
 
         // Create waiting thread object and add it into the list of waiters.
@@ -55,8 +63,19 @@ public:
             token_count -= waiter.need_count;
             waiter.cv.notify_one();
         }
-
         return true;
+    }
+
+    int Cancel(s32 set_count, s32* num_waiters) {
+        if (num_waiters) {
+            *num_waiters = wait_list.size();
+        }
+        for (auto& waiter : wait_list) {
+            waiter.was_cancled = true;
+            waiter.cv.notify_one();
+        }
+        token_count = set_count < 0 ? init_count : set_count;
+        return ORBIS_OK;
     }
 
 private:
@@ -65,6 +84,8 @@ private:
         std::condition_variable cv;
         u32 priority;
         s32 need_count;
+        bool was_deleted{};
+        bool was_cancled{};
 
         explicit WaitingThread(s32 need_count, bool is_fifo) : need_count{need_count} {
             if (is_fifo) {
@@ -77,12 +98,25 @@ private:
             priority = param.sched_priority;
         }
 
+        int GetResult(bool timed_out) {
+            if (timed_out) {
+                return SCE_KERNEL_ERROR_ETIMEDOUT;
+            }
+            if (was_deleted) {
+                return SCE_KERNEL_ERROR_EACCES;
+            }
+            if (was_cancled) {
+                return SCE_KERNEL_ERROR_ECANCELED;
+            }
+            return SCE_OK;
+        }
+
         bool Wait(u64* timeout) {
             std::unique_lock lk{mutex};
             if (!timeout) {
                 // Wait indefinitely until we are woken up.
                 cv.wait(lk);
-                return true;
+                return GetResult(false);
             }
             // Wait until timeout runs out, recording how much remaining time there was.
             const auto start = std::chrono::high_resolution_clock::now();
@@ -91,7 +125,7 @@ private:
             const auto time =
                 std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
             *timeout -= time;
-            return status != std::cv_status::timeout;
+            return GetResult(status == std::cv_status::timeout);
         }
 
         bool operator<(const WaitingThread& other) const {
@@ -136,6 +170,7 @@ private:
     std::atomic<s32> token_count;
     std::mutex mutex;
     s32 max_count;
+    s32 init_count;
     bool is_fifo;
 };
 
@@ -152,8 +187,7 @@ s32 PS4_SYSV_ABI sceKernelCreateSema(OrbisKernelSema* sem, const char* pName, u3
 }
 
 s32 PS4_SYSV_ABI sceKernelWaitSema(OrbisKernelSema sem, s32 needCount, u64* pTimeout) {
-    ASSERT(sem->Wait(true, needCount, pTimeout));
-    return ORBIS_OK;
+    return sem->Wait(true, needCount, pTimeout);
 }
 
 s32 PS4_SYSV_ABI sceKernelSignalSema(OrbisKernelSema sem, s32 signalCount) {
@@ -164,9 +198,18 @@ s32 PS4_SYSV_ABI sceKernelSignalSema(OrbisKernelSema sem, s32 signalCount) {
 }
 
 s32 PS4_SYSV_ABI sceKernelPollSema(OrbisKernelSema sem, s32 needCount) {
-    if (!sem->Wait(false, needCount, nullptr)) {
-        return ORBIS_KERNEL_ERROR_EBUSY;
+    return sem->Wait(false, needCount, nullptr);
+}
+
+int PS4_SYSV_ABI sceKernelCancelSema(OrbisKernelSema sem, s32 setCount, s32 *pNumWaitThreads) {
+    return sem->Cancel(setCount, pNumWaitThreads);
+}
+
+int PS4_SYSV_ABI sceKernelDeleteSema(OrbisKernelSema sem) {
+    if (!sem) {
+        return SCE_KERNEL_ERROR_ESRCH;
     }
+    delete sem;
     return ORBIS_OK;
 }
 
@@ -175,6 +218,8 @@ void SemaphoreSymbolsRegister(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("Zxa0VhQVTsk", "libkernel", 1, "libkernel", 1, 1, sceKernelWaitSema);
     LIB_FUNCTION("4czppHBiriw", "libkernel", 1, "libkernel", 1, 1, sceKernelSignalSema);
     LIB_FUNCTION("12wOHk8ywb0", "libkernel", 1, "libkernel", 1, 1, sceKernelPollSema);
+    LIB_FUNCTION("4DM06U2BNEY", "libkernel", 1, "libkernel", 1, 1, sceKernelCancelSema);
+    LIB_FUNCTION("R1Jvn8bSCW8", "libkernel", 1, "libkernel", 1, 1, sceKernelDeleteSema);
 }
 
 } // namespace Libraries::Kernel

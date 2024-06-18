@@ -2,8 +2,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #pragma once
+
 #include <condition_variable>
 #include <mutex>
+#include <boost/intrusive/list.hpp>
 #include "common/types.h"
 
 namespace Libraries::Kernel {
@@ -39,4 +41,21 @@ private:
     QueueMode m_queue_mode = QueueMode::Fifo;
     u64 m_bits = 0;
 };
+
+using ListBaseHook =
+    boost::intrusive::list_base_hook<boost::intrusive::link_mode<boost::intrusive::normal_link>>;
+
+class EventFlag {
+    explicit EventFlag(std::string_view name, u32 attr, u64 init_pattern) : name{name} {}
+
+private:
+    struct WaitingThread : public ListBaseHook {
+        u64 bpattern;
+        u64 rpattern;
+        u32 waitmode;
+    };
+
+    std::string name;
+};
+
 } // namespace Libraries::Kernel

@@ -101,9 +101,13 @@ int PS4_SYSV_ABI sceGnmAreSubmitsAllowed() {
     return submission_lock == 0;
 }
 
-int PS4_SYSV_ABI sceGnmBeginWorkload() {
-    LOG_ERROR(Lib_GnmDriver, "(STUBBED) called");
-    return ORBIS_OK;
+int PS4_SYSV_ABI sceGnmBeginWorkload(u32 param_1, u64* param_2) {
+    LOG_ERROR(Lib_GnmDriver, "called");
+    if (param_2 != nullptr) {
+        *param_2 = (u64)(-(u32)(param_1 < 0x10) & 1);
+        return 0xf < param_1;
+    }
+    return (bool)3;
 }
 
 s32 PS4_SYSV_ABI sceGnmComputeWaitOnAddress(u32* cmdbuf, u32 size, uintptr_t addr, u32 mask,
@@ -137,9 +141,15 @@ int PS4_SYSV_ABI sceGnmComputeWaitSemaphore() {
     return ORBIS_OK;
 }
 
-int PS4_SYSV_ABI sceGnmCreateWorkloadStream() {
+int PS4_SYSV_ABI sceGnmCreateWorkloadStream(u64 param_1, u32* param_2) {
     LOG_ERROR(Lib_GnmDriver, "(STUBBED) called");
-    return ORBIS_OK;
+
+    u8 uVar1 = 3;
+    if ((param_1 != 0) && (param_2 != nullptr)) {
+        uVar1 = 0;
+        *param_2 = 1;
+    }
+    return uVar1;
 }
 
 int PS4_SYSV_ABI sceGnmDebuggerGetAddressWatch() {
@@ -491,9 +501,12 @@ int PS4_SYSV_ABI sceGnmDriverTriggerCapture() {
     return ORBIS_OK;
 }
 
-int PS4_SYSV_ABI sceGnmEndWorkload() {
-    LOG_ERROR(Lib_GnmDriver, "(STUBBED) called");
-    return ORBIS_OK;
+int PS4_SYSV_ABI sceGnmEndWorkload(u64 param_1) {
+    LOG_ERROR(Lib_GnmDriver, "called");
+    if (param_1 != 0) {
+        return (0xf < (u8)((u64)param_1 >> 0x38)) * 2;
+    }
+    return 2;
 }
 
 int PS4_SYSV_ABI sceGnmFindResourcesPublic() {
@@ -684,9 +697,32 @@ int PS4_SYSV_ABI sceGnmInsertSetColorMarker() {
     return ORBIS_OK;
 }
 
-int PS4_SYSV_ABI sceGnmInsertSetMarker() {
-    LOG_ERROR(Lib_GnmDriver, "(STUBBED) called");
+int PS4_SYSV_ABI sceGnmInsertSetMarker(u32* param_1, s32 param_2, char *param_3) {
+    LOG_INFO(Lib_GnmDriver, "called");
     return ORBIS_OK;
+    int iVar1;
+    int iVar2;
+    uint uVar3;
+    size_t sVar4;
+    uint uVar5;
+    u64 uVar6;
+    if ((param_1 != (uint *)0x0) && (param_3 != (char *)0x0)) {
+        sVar4 = strlen(param_3);
+        iVar2 = (int)sVar4;
+        uVar3 = (iVar2 + 0xcU) >> 3;
+        uVar5 = (iVar2 + 8U) >> 2;
+        if (uVar5 + 2 + uVar3 * 2 == param_2) {
+            iVar1 = uVar5 + uVar3 * 2;
+            uVar3 = iVar2 + 1;
+            *param_1 = iVar1 * 0x10000 | 0xc0001000;
+            param_1[1] = 0x68750003;
+            memcpy(param_1 + 2,param_3,(ulong)uVar3);
+            uVar6 = 0;
+            memset((void *)((long)(param_1 + 2) + (ulong)uVar3),0,(ulong)(iVar1 * 4 - uVar3));
+            return ORBIS_OK;
+        }
+    }
+    return -1;
 }
 
 int PS4_SYSV_ABI sceGnmInsertThreadTraceMarker() {
@@ -840,8 +876,8 @@ int PS4_SYSV_ABI sceGnmRequestMipStatsReportAndReset() {
     return ORBIS_OK;
 }
 
-int PS4_SYSV_ABI sceGnmResetVgtControl() {
-    LOG_ERROR(Lib_GnmDriver, "(STUBBED) called");
+int PS4_SYSV_ABI sceGnmResetVgtControl(u32* cmdbuf, s32 param_2, u32 param_3, u32 param_4, u32 param_5) {
+    LOG_INFO(Lib_GnmDriver, "called");
     return ORBIS_OK;
 }
 
@@ -1125,9 +1161,16 @@ int PS4_SYSV_ABI sceGnmSetupMipStatsReport() {
     return ORBIS_OK;
 }
 
-int PS4_SYSV_ABI sceGnmSetVgtControl() {
-    LOG_ERROR(Lib_GnmDriver, "(STUBBED) called");
-    return ORBIS_OK;
+int PS4_SYSV_ABI sceGnmSetVgtControl(u32* cmdbuf, s32 param_2, u32 param_3, u32 param_4, u32 param_5) {
+    LOG_INFO(Lib_GnmDriver, "called");
+
+    if (cmdbuf && (param_2 == 3) && (param_3 < 0x100) && (param_5 | param_4) < 2) {
+        *cmdbuf = 0xc0016900;
+        cmdbuf[1] = 0x2aa;
+        cmdbuf[2] = (param_4 & 1) << 0x10 | param_3 & 0xffff;
+        return ORBIS_OK;
+    }
+    return -1;
 }
 
 s32 PS4_SYSV_ABI sceGnmSetVsShader(u32* cmdbuf, u32 size, const u32* vs_regs, u32 shader_modifier) {

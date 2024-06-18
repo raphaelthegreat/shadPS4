@@ -124,6 +124,10 @@ public:
         instance = instance_;
     }
 
+    size_t GetTotalFlexibleUsage() const noexcept {
+        return total_flexible_usage;
+    }
+
     PAddr Allocate(PAddr search_start, PAddr search_end, size_t size, u64 alignment,
                    int memory_type);
 

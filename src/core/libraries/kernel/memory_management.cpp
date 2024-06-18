@@ -173,6 +173,12 @@ int PS4_SYSV_ABI sceKernelDirectMemoryQuery(u64 offset, int flags, OrbisQueryInf
     return memory->DirectMemoryQuery(offset, flags == 1, query_info);
 }
 
+s32 PS4_SYSV_ABI sceKernelAvailableFlexibleMemorySize(size_t *sizeOut) {
+    auto* memory = Core::Memory::Instance();
+    *sizeOut = 448_MB - memory->GetTotalFlexibleUsage();
+    return ORBIS_OK;
+}
+
 void PS4_SYSV_ABI _sceKernelRtldSetApplicationHeapAPI(void* func) {
     auto* linker = Common::Singleton<Core::Linker>::Instance();
     linker->SetHeapApiFunc(func);

@@ -25,6 +25,7 @@
 #include <windows.h>
 #else
 #include <sys/mman.h>
+#include <signal.h>
 #endif
 #include <core/file_format/psf.h>
 
@@ -185,6 +186,7 @@ s32 PS4_SYSV_ABI sceKernelLoadStartModule(const char* moduleFileName, size_t arg
     linker->RelocateAnyImports(module);
 
     // If the new module has a TLS image, trigger its load when TlsGetAddr is called.
+    module->tls.image_size = 0;
     if (module->tls.image_size != 0) {
         linker->AdvanceGenerationCounter();
     }
@@ -288,10 +290,165 @@ int PS4_SYSV_ABI sceKernelUuidCreate(OrbisKernelUuid* orbisUuid) {
     return 0;
 }
 
+using SceKernelExceptionHandler = PS4_SYSV_ABI void(*)(int, void*);
+
+static std::array<SceKernelExceptionHandler, 32> Handlers{};
+
+struct Mcontext { /* mcontext_t (0x480) */
+    u64 mc_onstack;
+    u64 mc_rdi;
+    u64 mc_rsi;
+    u64 mc_rdx;
+    u64 mc_rcx;
+    u64 mc_r8;
+    u64 mc_r9;
+    u64 mc_rax;
+    u64 mc_rbx;
+    u64 mc_rbp;
+    u64 mc_r10;
+    u64 mc_r11;
+    u64 mc_r12;
+    u64 mc_r13;
+    u64 mc_r14;
+    u64 mc_r15;
+    int mc_trapno;
+    u16 mc_fs;
+    u16 mc_gs;
+    u64 mc_addr;
+    int mc_flags;
+    u16 mc_es;
+    u16 mc_ds;
+    u64 mc_err;
+    u64 mc_rip;
+    u64 mc_cs;
+    u64 mc_rflags;
+    u64 mc_rsp;
+    u64 mc_ss;
+    u64 mc_len;
+    u64 mc_fpformat;
+    u64 mc_ownedfp;
+    u64 mc_lbrfrom;
+    u64 mc_lbrto;
+    u64 mc_aux1;
+    u64 mc_aux2;
+    u64 mc_fpstate[104];
+    u64 mc_fsbase;
+    u64 mc_gsbase;
+    u64 mc_spare[6];
+};
+
+struct Stack { /* stack_t */
+    void * ss_sp;
+    size_t ss_size;
+    int ss_flags;
+    int _align;
+};
+
+struct Sigset { /* sigset_t (0x10) */
+    u64 bits[2];
+};
+
+struct Ucontext { /* ucontext_t (0x500) */
+    struct Sigset uc_sigmask;
+    int field1_0x10[12];
+    struct Mcontext uc_mcontext;
+    struct Ucontext * uc_link;
+    struct Stack uc_stack;
+    int uc_flags;
+    int __spare[4];
+    int field7_0x4f4[3];
+};
+
+void SigactionHandler(int signum, siginfo_t* inf, ucontext_t* raw_context) {
+    auto& handler = Handlers[29];
+    if (handler) {
+        auto ctx = Ucontext{};
+        auto& regs = raw_context->uc_mcontext.gregs;
+        ctx.uc_mcontext.mc_r8 = regs[REG_R8];
+        ctx.uc_mcontext.mc_r9 = regs[REG_R9];
+        ctx.uc_mcontext.mc_r10 = regs[REG_R10];
+        ctx.uc_mcontext.mc_r11 = regs[REG_R11];
+        ctx.uc_mcontext.mc_r12 = regs[REG_R12];
+        ctx.uc_mcontext.mc_r13 = regs[REG_R13];
+        ctx.uc_mcontext.mc_r14 = regs[REG_R14];
+        ctx.uc_mcontext.mc_r15 = regs[REG_R15];
+        ctx.uc_mcontext.mc_rdi = regs[REG_RDI];
+        ctx.uc_mcontext.mc_rsi = regs[REG_RSI];
+        ctx.uc_mcontext.mc_rbp = regs[REG_RBP];
+        ctx.uc_mcontext.mc_rbx = regs[REG_RBX];
+        ctx.uc_mcontext.mc_rdx = regs[REG_RDX];
+        ctx.uc_mcontext.mc_rax = regs[REG_RAX];
+        ctx.uc_mcontext.mc_rcx = regs[REG_RCX];
+        ctx.uc_mcontext.mc_rsp = regs[REG_RSP];
+        ctx.uc_mcontext.mc_fs = (regs[REG_CSGSFS] >> 32) & 0xFFFF;
+        ctx.uc_mcontext.mc_gs = (regs[REG_CSGSFS] >> 16) & 0xFFFF;
+        handler(30, &ctx);
+    }
+}
+
+static std::mutex mtx;
+
+int PS4_SYSV_ABI sceKernelInstallExceptionHandler(s32 signum, SceKernelExceptionHandler handler) {
+    std::scoped_lock lk{mtx};
+    ASSERT(signum == 30);
+    if (Handlers[29]) {
+        UNREACHABLE();
+        return 0;
+    }
+    Handlers[29] = handler;
+    struct sigaction act = {};
+    act.sa_flags = SA_SIGINFO | SA_RESTART;
+    act.sa_sigaction = reinterpret_cast<decltype(act.sa_sigaction)>(SigactionHandler);
+    sigaction(SIGUSR1, &act, nullptr);
+    return 0;
+}
+
+int PS4_SYSV_ABI sceKernelRemoveExceptionHandler(s32 signum) {
+    std::scoped_lock lk{mtx};
+    if (!Handlers[signum - 1]) {
+        return 0;
+    }
+    ASSERT(signum == 30);
+    Handlers[29] = nullptr;
+    struct sigaction act = {};
+    act.sa_flags = SA_SIGINFO | SA_RESTART;
+    act.sa_sigaction = nullptr;
+    sigaction(SIGUSR1, &act, nullptr);
+    return 0;
+}
+
+int PS4_SYSV_ABI sceKernelRaiseException(ScePthread thread, int signum) {
+    std::scoped_lock lk{mtx};
+    thread->was_interrupted = true;
+    LOG_ERROR(Lib_Kernel, "Raising exception");
+    ASSERT_MSG(signum == 30, "Attempting to raise non user defined signal!");
+    pthread_kill(thread->pth, SIGUSR1);
+    return 0;
+}
+
+int PS4_SYSV_ABI _sigprocmask(int _how, const Sigset* set, Sigset* old) {
+    if (set) {
+        LOG_ERROR(Lib_Kernel, "SIGPROCMASK bits[0] = {}", set->bits[0]);
+    }
+    return 0;
+}
+
+u32 PS4_SYSV_ABI getpagesize() {
+    return 16_KB;
+}
+
+int PS4_SYSV_ABI posix_mprotect(void *addr, size_t len, int prot) {
+    return mprotect(addr, len, prot);
+}
+
 void LibKernel_Register(Core::Loader::SymbolsResolver* sym) {
     // obj
     LIB_OBJ("f7uOxY9mM1U", "libkernel", 1, "libkernel", 1, 1, &g_stack_chk_guard);
     // memory
+    LIB_FUNCTION("YQOfxL4QfeU", "libScePosix", 1, "libkernel", 1, 1, posix_mprotect);
+    LIB_FUNCTION("k+AXqu2-eBc", "libkernel", 1, "libkernel", 1, 1, getpagesize);
+    LIB_FUNCTION("k+AXqu2-eBc", "libScePosix", 1, "libkernel", 1, 1, getpagesize);
+    LIB_FUNCTION("6xVpy0Fdq+I", "libkernel", 1, "libkernel", 1, 1, _sigprocmask);
     LIB_FUNCTION("OMDRKKAZ8I4", "libkernel", 1, "libkernel", 1, 1, sceKernelDebugRaiseException);
     LIB_FUNCTION("rTXw65xmLIA", "libkernel", 1, "libkernel", 1, 1, sceKernelAllocateDirectMemory);
     LIB_FUNCTION("B+vc2AO2Zrc", "libkernel", 1, "libkernel", 1, 1,
@@ -308,6 +465,7 @@ void LibKernel_Register(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("cQke9UuBQOk", "libkernel", 1, "libkernel", 1, 1, sceKernelMunmap);
     LIB_FUNCTION("mL8NDH86iQI", "libkernel", 1, "libkernel", 1, 1, sceKernelMapNamedFlexibleMemory);
     LIB_FUNCTION("IWIBBdTHit4", "libkernel", 1, "libkernel", 1, 1, sceKernelMapFlexibleMemory);
+    LIB_FUNCTION("aNz11fnnzi4", "libkernel", 1, "libkernel", 1, 1, sceKernelAvailableFlexibleMemorySize);
     LIB_FUNCTION("p5EcQeEeJAE", "libkernel", 1, "libkernel", 1, 1,
                  _sceKernelRtldSetApplicationHeapAPI);
     LIB_FUNCTION("wzvqT4UqKX8", "libkernel", 1, "libkernel", 1, 1, sceKernelLoadStartModule);
@@ -348,6 +506,11 @@ void LibKernel_Register(Core::Loader::SymbolsResolver* sym) {
                  sceLibcHeapGetTraceInfo);
     LIB_FUNCTION("FxVZqBAA7ks", "libkernel", 1, "libkernel", 1, 1, ps4__write);
     LIB_FUNCTION("6XG4B33N09g", "libScePosix", 1, "libkernel", 1, 1, sched_yield);
+
+    // unity
+    LIB_FUNCTION("il03nluKfMk", "libkernel_unity", 1, "libkernel", 1, 1, sceKernelRaiseException);
+    LIB_FUNCTION("WkwEd3N7w0Y", "libkernel_unity", 1, "libkernel", 1, 1, sceKernelInstallExceptionHandler);
+    LIB_FUNCTION("Qhv5ARAoOEc", "libkernel_unity", 1, "libkernel", 1, 1, sceKernelRemoveExceptionHandler);
 }
 
 } // namespace Libraries::Kernel

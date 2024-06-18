@@ -523,7 +523,8 @@ endif()
 create_target_directory_groups(shadps4)
 
 target_link_libraries(shadps4 PRIVATE magic_enum::magic_enum fmt::fmt toml11::toml11 tsl::robin_map xbyak Tracy::TracyClient)
-target_link_libraries(shadps4 PRIVATE boost vma sirit vulkan-headers xxhash Zydis SPIRV glslang SDL3-shared)
+target_link_libraries(shadps4 PRIVATE boost_container vma sirit vulkan-headers xxhash Zydis SPIRV glslang SDL3-shared)
+target_include_directories(shadps4 PRIVATE ${Boost_INCLUDE_DIRS})
 
 if (NOT ENABLE_QT_GUI)
   target_link_libraries(shadps4 PRIVATE SDL3-shared)

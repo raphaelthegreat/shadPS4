@@ -9,6 +9,10 @@ int EventFlagInternal::Wait(u64 bits, WaitMode wait_mode, ClearMode clear_mode, 
                             u32* ptr_micros) {
     std::unique_lock lock{m_mutex};
 
+    if (m_name == "resumeEvent") {
+        printf("wait\n");
+    }
+
     uint32_t micros = 0;
     bool infinitely = true;
     if (ptr_micros != nullptr) {
@@ -78,7 +82,9 @@ int EventFlagInternal::Poll(u64 bits, WaitMode wait_mode, ClearMode clear_mode, 
 
 void EventFlagInternal::Set(u64 bits) {
     std::unique_lock lock{m_mutex};
-
+    if (m_name == "resumeEvent") {
+        printf("set\n");
+    }
     while (m_status != Status::Set) {
         m_mutex.unlock();
         std::this_thread::sleep_for(std::chrono::microseconds(10));
@@ -92,6 +98,11 @@ void EventFlagInternal::Set(u64 bits) {
 
 void EventFlagInternal::Clear(u64 bits) {
     std::unique_lock lock{m_mutex};
+
+    if (m_name == "resumeEvent") {
+        printf("clear\n");
+    }
+
     while (m_status != Status::Set) {
         m_mutex.unlock();
         std::this_thread::sleep_for(std::chrono::microseconds(10));

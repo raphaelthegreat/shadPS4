@@ -572,6 +572,9 @@ void Translate(IR::Block* block, std::span<const GcnInst> inst_list, Info& info)
         case Opcode::S_AND_B64:
             translator.S_AND_B64(false, inst);
             break;
+        case Opcode::S_NOT_B64:
+            translator.S_NOT_B64(inst);
+            break;
         case Opcode::S_NAND_B64:
             translator.S_AND_B64(true, inst);
             break;
@@ -611,6 +614,9 @@ void Translate(IR::Block* block, std::span<const GcnInst> inst_list, Info& info)
         case Opcode::S_AND_B32:
             translator.S_AND_B32(inst);
             break;
+        case Opcode::S_OR_B32:
+            translator.S_OR_B32(inst);
+            break;
         case Opcode::S_LSHR_B32:
             translator.S_LSHR_B32(inst);
             break;
@@ -641,6 +647,12 @@ void Translate(IR::Block* block, std::span<const GcnInst> inst_list, Info& info)
         case Opcode::S_BFM_B32:
             translator.S_BFM_B32(inst);
             break;
+        case Opcode::V_MIN_U32:
+            translator.V_MIN_U32(inst);
+            break;
+        case Opcode::V_CMP_NE_U64:
+            translator.V_CMP_NE_U64(inst);
+            break;
         case Opcode::S_NOP:
         case Opcode::S_CBRANCH_EXECZ:
         case Opcode::S_CBRANCH_SCC0:
@@ -654,7 +666,8 @@ void Translate(IR::Block* block, std::span<const GcnInst> inst_list, Info& info)
             break;
         default:
             const u32 opcode = u32(inst.opcode);
-            UNREACHABLE_MSG("Unknown opcode {}", opcode);
+            //UNREACHABLE_MSG("Unknown opcode {}", opcode);
+            LOG_CRITICAL(Render_Vulkan, "Unknown opcode {}", opcode);
         }
     }
 }
