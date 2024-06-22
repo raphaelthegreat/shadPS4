@@ -93,7 +93,7 @@ struct EqueueEvent {
         if (event.filter == Kernel::EVFILT_HRTIMER) {
             // For HR timers we don't want to waste time on spawning waiters. Instead, we will check
             // for time out condition every time caller fetches the event status.
-            const auto now_clock = std::chrono::high_resolution_clock::now();
+            const auto now_clock = std::chrono::steady_clock::now();
             const auto now_time_us =
                 std::chrono::time_point_cast<std::chrono::microseconds>(now_clock);
             const auto delta = (now_time_us - filter.added_time_us).count();

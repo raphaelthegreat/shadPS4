@@ -11,7 +11,7 @@ EqueueInternal::~EqueueInternal() = default;
 int EqueueInternal::addEvent(EqueueEvent& event) {
     std::scoped_lock lock{m_mutex};
 
-    const auto start_clock = std::chrono::high_resolution_clock::now();
+    const auto start_clock = std::chrono::steady_clock::now();
     event.filter.added_time_us =
         std::chrono::time_point_cast<std::chrono::microseconds>(start_clock);
 
