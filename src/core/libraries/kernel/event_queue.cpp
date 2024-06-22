@@ -8,13 +8,19 @@ namespace Libraries::Kernel {
 
 EqueueInternal::~EqueueInternal() = default;
 
-int EqueueInternal::addEvent(const EqueueEvent& event) {
+int EqueueInternal::addEvent(EqueueEvent& event) {
     std::scoped_lock lock{m_mutex};
 
-    ASSERT(!event.isTriggered);
+    const auto start_clock = std::chrono::high_resolution_clock::now();
+    event.filter.added_time_us =
+        std::chrono::time_point_cast<std::chrono::microseconds>(start_clock);
 
-    // TODO check if event is already exists and return it. Currently we just add in m_events array
-    m_events.push_back(event);
+    const auto& it = std::ranges::find(m_events, event);
+    if (it != m_events.cend()) {
+        *it = event;
+    } else {
+        m_events.push_back(event);
+    }
     return 0;
 }
 
@@ -50,8 +56,8 @@ bool EqueueInternal::triggerEvent(u64 ident, s16 filter, void* trigger_data) {
         std::scoped_lock lock{m_mutex};
 
         for (auto& event : m_events) {
-            if (event.event.ident == ident) { // event filter?
-                event.trigger(trigger_data);
+            if (event.event.ident == ident && event.event.filter == filter) {
+                event.Trigger(trigger_data);
             }
         }
     }
@@ -64,9 +70,9 @@ int EqueueInternal::getTriggeredEvents(SceKernelEvent* ev, int num) {
     int ret = 0;
 
     for (auto& event : m_events) {
-        if (event.isTriggered) {
+        if (event.IsTriggered()) {
             ev[ret++] = event.event;
-            event.reset();
+            event.Reset();
         }
     }
 

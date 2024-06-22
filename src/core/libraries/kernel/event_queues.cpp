@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "common/assert.h"
+#include "common/debug.h"
 #include "common/logging/log.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/kernel/event_queues.h"
@@ -43,7 +44,9 @@ int PS4_SYSV_ABI sceKernelDeleteEqueue(SceKernelEqueue eq) {
 
 int PS4_SYSV_ABI sceKernelWaitEqueue(SceKernelEqueue eq, SceKernelEvent* ev, int num, int* out,
                                      SceKernelUseconds* timo) {
-    LOG_INFO(Kernel_Event, "num = {}", num);
+    HLE_TRACE;
+    TRACE_HINT(eq->GetName());
+    LOG_INFO(Kernel_Event, "equeue = {} num = {}", eq->GetName(), num);
 
     if (eq == nullptr) {
         return ORBIS_KERNEL_ERROR_EBADF;
@@ -84,7 +87,6 @@ int PS4_SYSV_ABI sceKernelAddUserEvent(SceKernelEqueue eq, int id) {
     }
 
     Kernel::EqueueEvent event{};
-    event.isTriggered = false;
     event.event.ident = id;
     event.event.filter = Kernel::EVFILT_USER;
     event.event.udata = 0;
@@ -101,13 +103,34 @@ int PS4_SYSV_ABI sceKernelAddUserEventEdge(SceKernelEqueue eq, int id) {
     }
 
     Kernel::EqueueEvent event{};
-    event.isTriggered = false;
     event.event.ident = id;
     event.event.filter = Kernel::EVFILT_USER;
     event.event.udata = 0;
     event.event.flags = 0x21;
     event.event.fflags = 0;
     event.event.data = 0;
+
+    return eq->addEvent(event);
+}
+
+s32 PS4_SYSV_ABI sceKernelAddHRTimerEvent(SceKernelEqueue eq, int id, timespec* ts, void* udata) {
+    if (eq == nullptr) {
+        return ORBIS_KERNEL_ERROR_EBADF;
+    }
+
+    if (ts->tv_sec > 100 || ts->tv_nsec < 100'000) {
+        return ORBIS_KERNEL_ERROR_EINVAL;
+    }
+    ASSERT(ts->tv_nsec > 1000); // assume 1us granularity
+    const auto total_us = ts->tv_sec * 1000'000 + ts->tv_nsec / 1000;
+
+    Kernel::EqueueEvent event{};
+    event.event.ident = id;
+    event.event.filter = Kernel::EVFILT_HRTIMER;
+    event.event.flags = 0x11;
+    event.event.fflags = 0;
+    event.event.data = total_us;
+    event.event.udata = udata;
 
     return eq->addEvent(event);
 }

@@ -70,24 +70,44 @@ struct SceKernelEvent {
 
 struct Filter {
     void* data = nullptr;
+    std::chrono::time_point<std::chrono::steady_clock, std::chrono::microseconds> added_time_us;
 };
 
 struct EqueueEvent {
-    bool isTriggered = false;
     SceKernelEvent event;
     Filter filter;
 
-    void reset() {
-        isTriggered = false;
+    void Reset() {
+        is_triggered = false;
         event.fflags = 0;
         event.data = 0;
     }
 
-    void trigger(void* data) {
-        isTriggered = true;
+    void Trigger(void* data) {
+        is_triggered = true;
         event.fflags++;
         event.data = reinterpret_cast<uintptr_t>(data);
     }
+
+    bool IsTriggered() const {
+        if (event.filter == Kernel::EVFILT_HRTIMER) {
+            // For HR timers we don't want to waste time on spawning waiters. Instead, we will check
+            // for time out condition every time caller fetches the event status.
+            const auto now_clock = std::chrono::high_resolution_clock::now();
+            const auto now_time_us =
+                std::chrono::time_point_cast<std::chrono::microseconds>(now_clock);
+            const auto delta = (now_time_us - filter.added_time_us).count();
+            return (s64(event.data) - delta) <= 0;
+        }
+        return is_triggered;
+    }
+
+    bool operator==(const EqueueEvent& ev) const {
+        return ev.event.ident == event.ident;
+    }
+
+private:
+    bool is_triggered = false;
 };
 
 class EqueueInternal {
@@ -97,7 +117,10 @@ public:
     void setName(const std::string& m_name) {
         this->m_name = m_name;
     }
-    int addEvent(const EqueueEvent& event);
+    const auto& GetName() const {
+        return m_name;
+    }
+    int addEvent(EqueueEvent& event);
     int removeEvent(u64 id);
     int waitForEvents(SceKernelEvent* ev, int num, u32 micros);
     bool triggerEvent(u64 ident, s16 filter, void* trigger_data);
