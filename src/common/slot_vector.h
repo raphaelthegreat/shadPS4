@@ -54,6 +54,13 @@ public:
         return values[id.index].object;
     }
 
+    bool is_allocated(SlotId id) const {
+        if (id && id.index / 64 < stored_bitset.size()) {
+            return ((stored_bitset[id.index / 64] >> (id.index % 64)) & 1) != 0;
+        }
+        return false;
+    }
+
     template <typename... Args>
     [[nodiscard]] SlotId insert(Args&&... args) noexcept {
         const u32 index = FreeValueIndex();
