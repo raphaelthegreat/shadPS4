@@ -365,9 +365,17 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
             }
             break;
         }
+        case PM4ItOpcode::SetBase:
+        case PM4ItOpcode::DrawIndirect:
+        case PM4ItOpcode::DispatchIndirect:
+        case PM4ItOpcode::IndexBufferSize: {
+            break;
+        }
         default:
+            if (u32(opcode) != 0x42) {
             UNREACHABLE_MSG("Unknown PM4 type 3 opcode {:#x} with count {}",
                             static_cast<u32>(opcode), count);
+            }
         }
         dcb = dcb.subspan(header->type3.NumWords() + 1);
     }
@@ -458,6 +466,9 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb) {
             release_mem->SignalFence(Platform::InterruptId::Compute0RelMem); // <---
             break;
         }
+        case PM4ItOpcode::DmaData: {
+            break;
+        }
         default:
             UNREACHABLE_MSG("Unknown PM4 type 3 opcode {:#x} with count {}",
                             static_cast<u32>(opcode), count);
@@ -485,7 +496,7 @@ void Liverpool::SubmitGfx(std::span<const u32> dcb, std::span<const u32> ccb) {
 }
 
 void Liverpool::SubmitAsc(u32 vqid, std::span<const u32> acb) {
-    ASSERT_MSG(vqid > 0 && vqid < NumTotalQueues, "Invalid virtual ASC queue index");
+    ASSERT_MSG(vqid >= 0 && vqid < NumTotalQueues, "Invalid virtual ASC queue index");
     auto& queue = mapped_queues[vqid];
 
     const auto& task = ProcessCompute(acb);

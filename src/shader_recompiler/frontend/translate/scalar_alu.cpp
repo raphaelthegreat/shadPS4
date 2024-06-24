@@ -138,7 +138,7 @@ void Translator::S_MOV_B64(const GcnInst& inst) {
     }
 }
 
-void Translator::S_OR_B64(bool negate, const GcnInst& inst) {
+void Translator::S_OR_B64(NegateMode negate, const GcnInst& inst) {
     const auto get_src = [&](const InstOperand& operand) {
         switch (operand.field) {
         case OperandField::VccLo:
@@ -151,9 +151,12 @@ void Translator::S_OR_B64(bool negate, const GcnInst& inst) {
     };
 
     const IR::U1 src0{get_src(inst.src[0])};
-    const IR::U1 src1{get_src(inst.src[1])};
+    IR::U1 src1{get_src(inst.src[1])};
+    if (negate == NegateMode::Src1) {
+        src1 = ir.LogicalNot(src1);
+    }
     IR::U1 result = ir.LogicalOr(src0, src1);
-    if (negate) {
+    if (negate == NegateMode::Final) {
         result = ir.LogicalNot(result);
     }
     ir.SetScc(result);
@@ -169,7 +172,7 @@ void Translator::S_OR_B64(bool negate, const GcnInst& inst) {
     }
 }
 
-void Translator::S_AND_B64(bool negate, const GcnInst& inst) {
+void Translator::S_AND_B64(NegateMode negate, const GcnInst& inst) {
     const auto get_src = [&](const InstOperand& operand) {
         switch (operand.field) {
         case OperandField::VccLo:
@@ -183,9 +186,12 @@ void Translator::S_AND_B64(bool negate, const GcnInst& inst) {
         }
     };
     const IR::U1 src0{get_src(inst.src[0])};
-    const IR::U1 src1{get_src(inst.src[1])};
+    IR::U1 src1{get_src(inst.src[1])};
+    if (negate == NegateMode::Src1) {
+        src1 = ir.LogicalNot(src1);
+    }
     IR::U1 result = ir.LogicalAnd(src0, src1);
-    if (negate) {
+    if (negate == NegateMode::Final) {
         result = ir.LogicalNot(result);
     }
     ir.SetScc(result);

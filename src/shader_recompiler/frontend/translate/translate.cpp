@@ -105,7 +105,11 @@ IR::U32F32 Translator::GetSrc(const InstOperand& operand, bool force_flt) {
         }
         break;
     case OperandField::ConstFloatPos_1_0:
-        value = ir.Imm32(1.f);
+        if (force_flt) {
+            value = ir.Imm32(1.f);
+        } else {
+            value = ir.Imm32(std::bit_cast<u32>(1.f));
+        }
         break;
     case OperandField::ConstFloatPos_0_5:
         value = ir.Imm32(0.5f);
@@ -592,19 +596,22 @@ void Translate(IR::Block* block, std::span<const GcnInst> inst_list, Info& info)
             translator.V_CMP_U32(ConditionOp::TRU, false, true, inst);
             break;
         case Opcode::S_OR_B64:
-            translator.S_OR_B64(false, inst);
+            translator.S_OR_B64(NegateMode::None, inst);
             break;
         case Opcode::S_NOR_B64:
-            translator.S_OR_B64(true, inst);
+            translator.S_OR_B64(NegateMode::Final, inst);
+            break;
+        case Opcode::S_ORN2_B64:
+            translator.S_OR_B64(NegateMode::Src1, inst);
             break;
         case Opcode::S_AND_B64:
-            translator.S_AND_B64(false, inst);
+            translator.S_AND_B64(NegateMode::None, inst);
+            break;
+        case Opcode::S_NAND_B64:
+            translator.S_AND_B64(NegateMode::Final, inst);
             break;
         case Opcode::S_NOT_B64:
             translator.S_NOT_B64(inst);
-            break;
-        case Opcode::S_NAND_B64:
-            translator.S_AND_B64(true, inst);
             break;
         case Opcode::V_LSHRREV_B32:
             translator.V_LSHRREV_B32(inst);

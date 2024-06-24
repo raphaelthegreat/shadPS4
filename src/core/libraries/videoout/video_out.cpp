@@ -53,6 +53,7 @@ s32 PS4_SYSV_ABI sceVideoOutAddFlipEvent(Kernel::SceKernelEqueue eq, s32 handle,
     event.event.udata = udata;
     event.event.fflags = 0;
     event.event.data = 0;
+    event.event.flags = Kernel::EV_CLEAR;
     event.filter.data = port;
 
     port->flip_events.push_back(eq);
@@ -77,6 +78,7 @@ s32 PS4_SYSV_ABI sceVideoOutAddVblankEvent(Kernel::SceKernelEqueue eq, s32 handl
     event.event.udata = udata;
     event.event.fflags = 0;
     event.event.data = 0;
+    event.event.flags = Kernel::EV_CLEAR;
     event.filter.data = port;
 
     port->vblank_events.push_back(eq);

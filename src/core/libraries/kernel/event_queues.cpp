@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include "common/alignment.h"
 #include "common/assert.h"
 #include "common/debug.h"
 #include "common/logging/log.h"
@@ -46,7 +47,7 @@ int PS4_SYSV_ABI sceKernelWaitEqueue(SceKernelEqueue eq, SceKernelEvent* ev, int
                                      SceKernelUseconds* timo) {
     HLE_TRACE;
     TRACE_HINT(eq->GetName());
-    LOG_INFO(Kernel_Event, "equeue = {} num = {}", eq->GetName(), num);
+    //LOG_INFO(Kernel_Event, "equeue = {} num = {}", eq->GetName(), num);
 
     if (eq == nullptr) {
         return ORBIS_KERNEL_ERROR_EBADF;
@@ -68,9 +69,11 @@ int PS4_SYSV_ABI sceKernelWaitEqueue(SceKernelEqueue eq, SceKernelEvent* ev, int
         // Only events that have already arrived at the time of this function call can be received
         if (*timo == 0) {
             *out = eq->getTriggeredEvents(ev, num);
+            return ORBIS_OK;
         } else {
             // Wait until an event arrives with timing out
-            *out = eq->waitForEvents(ev, num, *timo);
+            const u32 timeout = Common::AlignUp(*timo, 1000);
+            *out = eq->waitForEvents(ev, num, timeout);
         }
     }
 
@@ -106,7 +109,7 @@ int PS4_SYSV_ABI sceKernelAddUserEventEdge(SceKernelEqueue eq, int id) {
     event.event.ident = id;
     event.event.filter = Kernel::EVFILT_USER;
     event.event.udata = 0;
-    event.event.flags = 0x21;
+    event.event.flags = 0x1 | Kernel::EV_CLEAR;
     event.event.fflags = 0;
     event.event.data = 0;
 

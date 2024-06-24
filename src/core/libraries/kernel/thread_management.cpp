@@ -331,7 +331,7 @@ int PS4_SYSV_ABI scePthreadAttrGetstacksize(const ScePthreadAttr* attr, size_t* 
 }
 
 int PS4_SYSV_ABI scePthreadAttrSetstackaddr(ScePthreadAttr* attr, void* addr) {
-
+    return ORBIS_OK;
     if (addr == nullptr || attr == nullptr || *attr == nullptr) {
         return SCE_KERNEL_ERROR_EINVAL;
     }
@@ -947,9 +947,9 @@ int PS4_SYSV_ABI scePthreadCreate(ScePthread* thread, const ScePthreadAttr* attr
     }
 
     if (result == 0) {
-        while (!(*thread)->is_started) {
-            std::this_thread::sleep_for(std::chrono::microseconds(1000));
-        }
+        //while (!(*thread)->is_started) {
+        //    std::this_thread::sleep_for(std::chrono::microseconds(2000));
+        //}
     }
     LOG_INFO(Kernel_Pthread, "thread create name = {}", (*thread)->name);
 
@@ -1072,8 +1072,10 @@ int PS4_SYSV_ABI scePthreadCondWait(ScePthreadCond* cond, ScePthreadMutex* mutex
         return SCE_KERNEL_ERROR_EINTR;
     case EAGAIN:
         return SCE_KERNEL_ERROR_EAGAIN;
-    default:
+    case EINVAL:
         return SCE_KERNEL_ERROR_EINVAL;
+    default:
+        UNREACHABLE();
     }
 }
 
@@ -1278,10 +1280,20 @@ int PS4_SYSV_ABI scePthreadOnce(int* once_control, void (*init_routine)(void)) {
 
 [[noreturn]] void PS4_SYSV_ABI scePthreadExit(void* value_ptr) {
     pthread_exit(value_ptr);
-    UNREACHABLE();
+}
+
+int scePthreadSetprio() {
+    return 0;
+}
+
+void _sigprocmask() {
+    return;
 }
 
 void pthreadSymbolsRegister(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("6xVpy0Fdq+I", "libkernel", 1, "libkernel", 1, 1, _sigprocmask);
+    LIB_FUNCTION("W0Hpm2X0uPE", "libkernel", 1, "libkernel", 1, 1, scePthreadSetprio);
+    LIB_FUNCTION("1tKyG7RlMJo", "libkernel", 1, "libkernel", 1, 1, scePthreadSetprio);
     LIB_FUNCTION("lZzFeSxPl08", "libScePosix", 1, "libkernel", 1, 1, posix_pthread_setcancelstate);
     LIB_FUNCTION("0TyVk4MSLt0", "libScePosix", 1, "libkernel", 1, 1, posix_pthread_cond_init);
     LIB_FUNCTION("2MOy+rUfuhQ", "libScePosix", 1, "libkernel", 1, 1, posix_pthread_cond_signal);

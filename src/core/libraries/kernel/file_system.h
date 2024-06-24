@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include "common/types.h"
 #include "core/libraries/kernel/time_management.h"
 

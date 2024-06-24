@@ -110,9 +110,12 @@ int PS4_SYSV_ABI sceKernelMapNamedDirectMemory(void** addr, u64 len, int prot, i
         }
     }
 
-    const VAddr in_addr = reinterpret_cast<VAddr>(*addr);
+    VAddr in_addr = reinterpret_cast<VAddr>(*addr);
     const auto mem_prot = static_cast<Core::MemoryProt>(prot);
     const auto map_flags = static_cast<Core::MemoryMapFlags>(flags);
+    if (False(map_flags & Core::MemoryMapFlags::Fixed) && in_addr == 0) {
+        in_addr = 0x880000000ULL;
+    }
     auto* memory = Core::Memory::Instance();
     return memory->MapMemory(addr, in_addr, len, mem_prot, map_flags, Core::VMAType::Direct, "",
                              false, directMemoryStart, alignment);

@@ -161,6 +161,7 @@ void Module::LoadModuleToMemory(u32& max_tls_index) {
             tls.image_size = GetAlignedSize(elf_pheader[i]);
             if (tls.image_size != 0) {
                 tls.modid = ++max_tls_index;
+                add_segment(elf_pheader[i]);
             }
             LOG_INFO(Core_Linker, "TLS virtual address = {:#x}", tls.image_virtual_addr);
             LOG_INFO(Core_Linker, "TLS image size      = {}", tls.image_size);

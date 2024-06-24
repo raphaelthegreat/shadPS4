@@ -91,6 +91,7 @@ struct EqueueEvent {
 
     bool IsTriggered() const {
         if (event.filter == Kernel::EVFILT_HRTIMER) {
+            std::this_thread::sleep_for(std::chrono::microseconds(800));
             // For HR timers we don't want to waste time on spawning waiters. Instead, we will check
             // for time out condition every time caller fetches the event status.
             const auto now_clock = std::chrono::steady_clock::now();

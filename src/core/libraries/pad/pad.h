@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include "common/types.h"
 
 namespace Core::Loader {

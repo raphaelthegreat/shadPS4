@@ -103,10 +103,10 @@ void Emulator::Run(const std::filesystem::path& file) {
         if (std::filesystem::is_directory(sce_module_folder)) {
             for (const auto& entry : std::filesystem::directory_iterator(sce_module_folder)) {
                 if (entry.path().filename() == "libc.prx" ||
-                    entry.path().filename() == "libSceFios2.prx" ||
+                    entry.path().filename() == "libSceFios2.prx" /*||
                     entry.path().filename() == "libSceAudioLatencyEstimation.prx" ||
                     entry.path().filename() == "libSceJobManager.prx" ||
-                    entry.path().filename() == "libSceS3DConversion.prx") {
+                    entry.path().filename() == "libSceS3DConversion.prx"*/) {
                     found = true;
                     LOG_INFO(Loader, "Loading {}", entry.path().string().c_str());
                     linker->LoadModule(entry.path());
@@ -123,7 +123,7 @@ void Emulator::Run(const std::filesystem::path& file) {
         std::jthread([this](std::stop_token stop_token) { linker->Execute(); });
 
     // Begin main window loop until the application exits
-    static constexpr std::chrono::microseconds FlipPeriod{10};
+    static constexpr std::chrono::milliseconds FlipPeriod{16};
 
     while (window.isOpen()) {
         window.waitEvent();
@@ -139,7 +139,8 @@ void Emulator::LoadSystemModules(const std::filesystem::path& file) {
     const auto& sys_module_path = Common::FS::GetUserPath(Common::FS::PathType::SysModuleDir);
     for (const auto& entry : std::filesystem::directory_iterator(sys_module_path)) {
         if (entry.path().filename() == "libSceNgs2.sprx" ||
-            entry.path().filename() == "libSceLibcInternal.sprx") {
+            entry.path().filename() == "libSceLibcInternal.sprx" ||
+            entry.path().filename() == "libSceDiscMap.sprx") {
             LOG_INFO(Loader, "Loading {}", entry.path().string().c_str());
             linker->LoadModule(entry.path());
         }

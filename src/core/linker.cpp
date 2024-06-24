@@ -68,9 +68,9 @@ void Linker::Execute() {
     }
 
     // Configure used flexible memory size.
-    if (u64* flexible_size = GetProcParam()->mem_param->flexible_memory_size) {
-        memory->SetTotalFlexibleSize(*flexible_size);
-    }
+    //if (u64* flexible_size = GetProcParam()->mem_param->flexible_memory_size) {
+    //    memory->SetTotalFlexibleSize(*flexible_size);
+    //}
 
     // Init primary thread.
     Common::SetCurrentThreadName("GAME_MainThread");

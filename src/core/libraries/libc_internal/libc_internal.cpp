@@ -60,6 +60,7 @@ char* PS4_SYSV_ABI internal_strncpy(char* dest, const char* src, std::size_t cou
 }
 
 void RegisterlibSceLibcInternal(Core::Loader::SymbolsResolver* sym) {
+    return;
     LIB_FUNCTION("NFLs+dRJGNg", "libSceLibcInternal", 1, "libSceLibcInternal", 1, 1,
                  internal_memcpy_s);
     LIB_FUNCTION("Q3VBxCXhUHs", "libSceLibcInternal", 1, "libSceLibcInternal", 1, 1,

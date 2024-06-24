@@ -1,9 +1,11 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <thread>
 #include "common/assert.h"
 #include "common/logging/log.h"
 #include "common/singleton.h"
+#include "common/string_util.h"
 #include "core/file_sys/fs.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/kernel/file_system.h"
@@ -79,6 +81,14 @@ int PS4_SYSV_ABI sceKernelOpen(const char* path, int flags, u16 mode) {
         }
     } else {
         file->m_guest_name = path;
+        if (file->m_guest_name.starts_with("/app0/data")) {
+            auto new_path = std::string(path);
+            new_path[6] = 'D';
+            file->m_guest_name = new_path;
+        }
+        if (file->m_guest_name.contains("data_trico")) {
+            file->m_guest_name = Common::ToLower(file->m_guest_name);
+        }
         file->m_host_name = mnt->GetHostFile(file->m_guest_name);
         if (read) {
             file->f.Open(file->m_host_name, Common::FS::FileAccessMode::Read);
@@ -125,7 +135,7 @@ int PS4_SYSV_ABI sceKernelClose(int d) {
         file->f.Close();
     }
     file->is_opened = false;
-    LOG_INFO(Kernel_Fs, "Closing {}", file->m_guest_name);
+    //LOG_INFO(Kernel_Fs, "Closing {}", file->m_guest_name);
     h->DeleteHandle(d);
     return SCE_OK;
 }
@@ -173,6 +183,8 @@ s64 PS4_SYSV_ABI sceKernelLseek(int d, s64 offset, int whence) {
     auto* h = Common::Singleton<Core::FileSys::HandleTable>::Instance();
     auto* file = h->GetFile(d);
 
+    LOG_INFO(Kernel_Fs, "Seeking in {} to offset {} with origin {}", file->m_guest_name, offset, whence);
+
     file->m_mutex.lock();
     Common::FS::SeekOrigin origin;
     if (whence == 0) {
@@ -201,7 +213,6 @@ s64 PS4_SYSV_ABI sceKernelRead(int d, void* buf, size_t nbytes) {
     if (buf == nullptr) {
         return SCE_KERNEL_ERROR_EFAULT;
     }
-
     auto* h = Common::Singleton<Core::FileSys::HandleTable>::Instance();
     auto* file = h->GetFile(d);
     if (file == nullptr) {
@@ -209,6 +220,7 @@ s64 PS4_SYSV_ABI sceKernelRead(int d, void* buf, size_t nbytes) {
     }
     file->m_mutex.lock();
     u32 bytes_read = file->f.ReadRaw<u8>(buf, static_cast<u32>(nbytes));
+    LOG_INFO(Kernel_Fs, "Reading from {} nbytes = {}, bytes_read = {}", file->m_guest_name, nbytes, bytes_read);
     file->m_mutex.unlock();
     return bytes_read;
 }
