@@ -27,7 +27,7 @@ vk::StencilOp StencilOp(Liverpool::StencilFunc op) {
     case Liverpool::StencilFunc::SubWrap:
         return vk::StencilOp::eDecrementAndWrap;
     default:
-        UNREACHABLE();
+        //UNREACHABLE();
         return vk::StencilOp::eKeep;
     }
 }

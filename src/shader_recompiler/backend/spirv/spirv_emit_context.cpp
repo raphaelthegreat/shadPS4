@@ -124,6 +124,7 @@ Id GetAttributeType(EmitContext& ctx, AmdGpu::NumberFormat fmt) {
     case AmdGpu::NumberFormat::Uint:
         return ctx.U32[4];
     case AmdGpu::NumberFormat::Sscaled:
+    case AmdGpu::NumberFormat::Snorm:
         return ctx.F32[4];
     case AmdGpu::NumberFormat::Uscaled:
         return ctx.F32[4];
@@ -137,6 +138,7 @@ EmitContext::SpirvAttribute EmitContext::GetAttributeInfo(AmdGpu::NumberFormat f
     switch (fmt) {
     case AmdGpu::NumberFormat::Float:
     case AmdGpu::NumberFormat::Unorm:
+    case AmdGpu::NumberFormat::Snorm:
         return {id, input_f32, F32[1], 4};
     case AmdGpu::NumberFormat::Uint:
         return {id, input_u32, U32[1], 4};

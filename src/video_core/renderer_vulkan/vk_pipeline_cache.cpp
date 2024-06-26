@@ -165,9 +165,13 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline() {
     std::array<const Shader::Info*, MaxShaderStages> infos{};
 
     for (u32 i = 0; i < MaxShaderStages; i++) {
+        const u64 hash = graphics_key.stage_hashes[i];
         if (!graphics_key.stage_hashes[i]) {
             stages[i] = VK_NULL_HANDLE;
             continue;
+        }
+        if (hash == 0x42dcc8fa || hash == 0x611b4c11 || hash == 0x26c6509f) {
+            return nullptr;
         }
         auto* pgm = regs.ProgramForStage(i);
         const auto code = pgm->Code();
@@ -180,7 +184,6 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline() {
 
         // Dump shader code if requested.
         const auto stage = Shader::Stage{i};
-        const u64 hash = graphics_key.stage_hashes[i];
         if (Config::dumpShaders()) {
             DumpShader(code, hash, stage, "bin");
         }
@@ -189,22 +192,26 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline() {
         inst_pool.ReleaseContents();
 
         // Recompile shader to IR.
-        LOG_INFO(Render_Vulkan, "Compiling {} shader {:#x}", stage, hash);
-        const Shader::Info info = MakeShaderInfo(stage, pgm->user_data, regs);
-        programs[i] = Shader::TranslateProgram(inst_pool, block_pool, code, std::move(info));
+        try {
+            LOG_INFO(Render_Vulkan, "Compiling {} shader {:#x}", stage, hash);
+            const Shader::Info info = MakeShaderInfo(stage, pgm->user_data, regs);
+            programs[i] = Shader::TranslateProgram(inst_pool, block_pool, code, std::move(info));
 
-        // Compile IR to SPIR-V
-        auto spv_code = Shader::Backend::SPIRV::EmitSPIRV(profile, programs[i], binding);
-        stages[i] = CompileSPV(spv_code, instance.GetDevice());
-        infos[i] = &programs[i].info;
+            // Compile IR to SPIR-V
+            auto spv_code = Shader::Backend::SPIRV::EmitSPIRV(profile, programs[i], binding);
+            stages[i] = CompileSPV(spv_code, instance.GetDevice());
+            infos[i] = &programs[i].info;
+
+            if (Config::dumpShaders()) {
+                DumpShader(spv_code, hash, stage, "spv");
+            }
+        } catch (const Shader::Exception& e) {
+            UNREACHABLE_MSG("Shader compilation failed {}", e.what());
+        }
 
         // Set module name to hash in renderdoc
         const auto name = fmt::format("{}_{:#x}", stage, hash);
         Vulkan::SetObjectName(instance.GetDevice(), stages[i], name);
-
-        if (Config::dumpShaders()) {
-            DumpShader(spv_code, hash, stage, "spv");
-        }
     }
 
     return std::make_unique<GraphicsPipeline>(instance, scheduler, graphics_key, *pipeline_cache,

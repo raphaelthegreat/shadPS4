@@ -70,6 +70,11 @@ int PS4_SYSV_ABI sceKernelOpen(const char* path, int flags, u16 mode) {
         }
     } else {
         file->m_guest_name = path;
+        if (file->m_guest_name.contains("data")) {
+            auto new_path = file->m_guest_name;
+            new_path[6] = 'D';
+            file->m_guest_name = new_path;
+        }
         file->m_host_name = mnt->GetHostFile(file->m_guest_name);
         if (read) {
             file->f.Open(file->m_host_name, Common::FS::FileAccessMode::Read);
