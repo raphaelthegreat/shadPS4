@@ -70,9 +70,11 @@ int PS4_SYSV_ABI sceAppContentAppParamGetInt(OrbisAppContentAppParamId paramId, 
     case ORBIS_APP_CONTENT_APPPARAM_ID_USER_DEFINED_PARAM_4:
         *value = param_sfo->GetInteger("USER_DEFINED_PARAM_4");
         break;
+    default:
+        LOG_ERROR(Lib_AppContent, " paramId = {}, value = {}", paramId, *value);
+        return *value == -1 ? 0x80D90005 : ORBIS_OK;
     }
-    LOG_ERROR(Lib_AppContent, " paramId = {}, value = {}", paramId, *value);
-    return *value == -1 ? 0x80D90005 : ORBIS_OK;
+    return ORBIS_OK;
 }
 
 int PS4_SYSV_ABI sceAppContentAppParamGetString() {

@@ -78,7 +78,7 @@ int SDLAudio::AudioOutOpen(int type, u32 samples_num, u32 freq,
             fmt.channels = port.channels_num;
             fmt.freq = 48000;
             port.stream =
-                SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_OUTPUT, &fmt, NULL, NULL);
+                SDL_OpenAudioDeviceStream(SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK, &fmt, NULL, NULL);
             SDL_ResumeAudioDevice(SDL_GetAudioStreamDevice(port.stream));
             return id + 1;
         }
@@ -88,7 +88,6 @@ int SDLAudio::AudioOutOpen(int type, u32 samples_num, u32 freq,
 }
 
 s32 SDLAudio::AudioOutOutput(s32 handle, const void* ptr) {
-    std::scoped_lock lock{m_mutex};
     auto& port = portsOut[handle - 1];
     if (!port.isOpen) {
         return ORBIS_AUDIO_OUT_ERROR_INVALID_PORT;
@@ -100,9 +99,13 @@ s32 SDLAudio::AudioOutOutput(s32 handle, const void* ptr) {
     int result = SDL_PutAudioStreamData(port.stream, ptr,
                                         port.samples_num * port.sample_size * port.channels_num);
     // TODO find a correct value 8192 is estimated
-    while (SDL_GetAudioStreamAvailable(port.stream) > 8192) {
-        SDL_Delay(0);
-    }
+    int num = 0;
+    const auto func = [&] { num = SDL_GetAudioStreamAvailable(port.stream); return num > 24576; };
+    func();
+    //LOG_INFO(Lib_AudioOut, "Stream available {}", num);
+    //while (func()) {
+    //    SDL_Delay(0);
+    //}
 
     return result;
 }

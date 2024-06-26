@@ -250,6 +250,7 @@ int PS4_SYSV_ABI scePadRead(s32 handle, OrbisPadData* pData, s32 num) {
     }
 
     for (int i = 0; i < ret_num; i++) {
+        std::memset(&pData[i], 0, sizeof(OrbisPadData));
         pData[i].buttons = states[i].buttonsState;
         pData[i].leftStick.x = states[i].axes[static_cast<int>(Input::Axis::LeftX)];
         pData[i].leftStick.y = states[i].axes[static_cast<int>(Input::Axis::LeftY)];

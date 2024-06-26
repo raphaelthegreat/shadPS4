@@ -162,7 +162,6 @@ int PS4_SYSV_ABI sceAudioOutGetLastOutputTime() {
 }
 
 int PS4_SYSV_ABI sceAudioOutGetPortState(s32 handle, OrbisAudioOutPortState* state) {
-
     int type = 0;
     int channels_num = 0;
 

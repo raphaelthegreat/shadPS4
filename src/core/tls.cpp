@@ -121,6 +121,7 @@ static void PatchFsAccess(u8* code, const TLSPattern& tls_pattern, Xbyak::CodeGe
     static constexpr u32 PthreadKeyDataSize = 16;
     ASSERT(slot >= PthreadKeySecondLevelSize);
 
+    const u32 slt = slot;
     const u32 idx1st = slot / PthreadKeySecondLevelSize;
     const u32 idx2nd = slot % PthreadKeySecondLevelSize;
     const auto target_reg = Xbyak::Reg64(tls_pattern.target_reg);
@@ -156,8 +157,8 @@ void PatchTLS(u64 segment_addr, u64 segment_size, Xbyak::CodeGenerator& c) {
             u64 offset = 0;
             if (tls_pattern.imm_size == 4) {
                 std::memcpy(&offset, code + tls_pattern.pattern_size, sizeof(u32));
-                LOG_INFO(Core_Linker, "PATTERN32 FOUND at {}, reg: {} offset: {:#x}",
-                         fmt::ptr(code), tls_pattern.target_reg, offset);
+                //LOG_INFO(Core_Linker, "PATTERN32 FOUND at {}, reg: {} offset: {:#x}",
+                //        fmt::ptr(code), tls_pattern.target_reg, offset);
             } else {
                 std::memcpy(&offset, code + tls_pattern.pattern_size, sizeof(u64));
                 LOG_INFO(Core_Linker, "PATTERN64 FOUND at {}, reg: {} offset: {:#x}",

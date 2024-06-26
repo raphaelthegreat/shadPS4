@@ -23,7 +23,7 @@ std::string_view StageName(Stage stage) {
     case Stage::Compute:
         return "cs";
     }
-    throw InvalidArgument("Invalid stage {}", u32(stage));
+    UNREACHABLE_MSG("Invalid stage {}", u32(stage));
 }
 
 template <typename... Args>
@@ -65,7 +65,7 @@ Id EmitContext::Def(const IR::Value& value) {
     case IR::Type::F64:
         return Constant(F64[1], value.F64());
     default:
-        throw NotImplementedException("Immediate type {}", value.Type());
+        UNREACHABLE_MSG("Immediate type {}", value.Type());
     }
 }
 
@@ -124,19 +124,21 @@ Id GetAttributeType(EmitContext& ctx, AmdGpu::NumberFormat fmt) {
     case AmdGpu::NumberFormat::Uint:
         return ctx.U32[4];
     case AmdGpu::NumberFormat::Sscaled:
+    case AmdGpu::NumberFormat::Snorm:
         return ctx.F32[4];
     case AmdGpu::NumberFormat::Uscaled:
         return ctx.F32[4];
     default:
         break;
     }
-    throw InvalidArgument("Invalid attribute type {}", fmt);
+    UNREACHABLE_MSG("Invalid attribute type {}", fmt);
 }
 
 EmitContext::SpirvAttribute EmitContext::GetAttributeInfo(AmdGpu::NumberFormat fmt, Id id) {
     switch (fmt) {
     case AmdGpu::NumberFormat::Float:
     case AmdGpu::NumberFormat::Unorm:
+    case AmdGpu::NumberFormat::Snorm:
         return {id, input_f32, F32[1], 4};
     case AmdGpu::NumberFormat::Uint:
         return {id, input_u32, U32[1], 4};
@@ -149,7 +151,7 @@ EmitContext::SpirvAttribute EmitContext::GetAttributeInfo(AmdGpu::NumberFormat f
     default:
         break;
     }
-    throw InvalidArgument("Invalid attribute type {}", fmt);
+    UNREACHABLE_MSG("Invalid attribute type {}", fmt);
 }
 
 Id MakeDefaultValue(EmitContext& ctx, u32 default_value) {
@@ -304,11 +306,11 @@ Id ImageType(EmitContext& ctx, const ImageResource& desc, Id sampled_type) {
     case AmdGpu::ImageType::Cube:
         return ctx.TypeImage(sampled_type, spv::Dim::Cube, false, false, false, sampled, format);
     case AmdGpu::ImageType::Buffer:
-        throw NotImplementedException("Image buffer");
+        UNREACHABLE_MSG("Image buffer");
     default:
         break;
     }
-    throw InvalidArgument("Invalid texture type {}", desc.type);
+    UNREACHABLE_MSG("Invalid texture type {}", desc.type);
 }
 
 void EmitContext::DefineImagesAndSamplers(const Info& info) {

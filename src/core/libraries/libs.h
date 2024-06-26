@@ -15,6 +15,10 @@ struct StringLiteral {
     }
 
     char value[N];
+
+    constexpr std::string_view Name() const noexcept {
+        return std::string_view{value};
+    }
 };
 
 template <StringLiteral name, class F, F f>
@@ -23,13 +27,14 @@ struct wrapper_impl;
 template <StringLiteral name, class R, class... Args, PS4_SYSV_ABI R (*f)(Args...)>
 struct wrapper_impl<name, PS4_SYSV_ABI R (*)(Args...), f> {
     static R PS4_SYSV_ABI wrap(Args... args) {
-        if (std::string_view(name.value) != "scePthreadEqual" &&
-            std::string_view(name.value) != "sceUserServiceGetEvent") {
+        if (name.Name() != "scePthreadEqual" && name.Name() != "sceUserServiceGetEvent" &&
+            !name.Name().contains("mutex") && !name.Name().contains("Mutex")) {
             //LOG_WARNING(Core_Linker, "Function {} called", name.value);
         }
         if constexpr (std::is_same_v<R, s32> || std::is_same_v<R, u32>) {
             const u32 ret = f(args...);
-            if (ret != 0 && std::string_view(name.value) != "scePthreadEqual") {
+            if (ret != 0 && name.Name() != "scePthreadEqual" &&
+                name.Name() != "sceUserServiceGetEvent") {
                 LOG_WARNING(Core_Linker, "Function {} returned {:#x}", name.value, ret);
             }
             return ret;
@@ -42,8 +47,8 @@ struct wrapper_impl<name, PS4_SYSV_ABI R (*)(Args...), f> {
 template <StringLiteral name, class F, F f>
 constexpr auto wrapper = wrapper_impl<name, F, f>::wrap;
 
-//#define W(foo) wrapper<#foo, decltype(&foo), foo>
-#define W(foo) foo
+#define W(foo) wrapper<#foo, decltype(&foo), foo>
+//#define W(foo) foo
 
 #define LIB_FUNCTION(nid, lib, libversion, mod, moduleVersionMajor, moduleVersionMinor, function)  \
     {                                                                                              \

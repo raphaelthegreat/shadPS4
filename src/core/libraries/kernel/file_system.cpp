@@ -145,7 +145,7 @@ int PS4_SYSV_ABI posix_close(int d) {
     return ORBIS_OK;
 }
 
-size_t PS4_SYSV_ABI sceKernelWrite(int d, void* buf, size_t nbytes) {
+size_t PS4_SYSV_ABI sceKernelWrite(int d, const void* buf, size_t nbytes) {
     if (buf == nullptr) {
         return SCE_KERNEL_ERROR_EFAULT;
     }
@@ -167,6 +167,20 @@ size_t PS4_SYSV_ABI sceKernelWrite(int d, void* buf, size_t nbytes) {
     file->m_mutex.unlock();
     return bytes_write;
 }
+
+size_t PS4_SYSV_ABI sceKernelPwrite(int d, const void *buf, size_t nbytes, size_t offset) {
+    auto* h = Common::Singleton<Core::FileSys::HandleTable>::Instance();
+    auto* file = h->GetFile(d);
+    if (file == nullptr) {
+        return SCE_KERNEL_ERROR_EBADF;
+    }
+    file->m_mutex.lock();
+    file->f.Seek(offset);
+    u32 bytes_write = file->f.WriteRaw<u8>(buf, static_cast<u32>(nbytes));
+    file->m_mutex.unlock();
+    return bytes_write;
+}
+
 size_t PS4_SYSV_ABI _readv(int d, const SceKernelIovec* iov, int iovcnt) {
     auto* h = Common::Singleton<Core::FileSys::HandleTable>::Instance();
     auto* file = h->GetFile(d);
@@ -210,9 +224,6 @@ s64 PS4_SYSV_ABI posix_lseek(int d, s64 offset, int whence) {
 }
 
 s64 PS4_SYSV_ABI sceKernelRead(int d, void* buf, size_t nbytes) {
-    if (buf == nullptr) {
-        return SCE_KERNEL_ERROR_EFAULT;
-    }
     auto* h = Common::Singleton<Core::FileSys::HandleTable>::Instance();
     auto* file = h->GetFile(d);
     if (file == nullptr) {
@@ -401,6 +412,7 @@ void fileSystemSymbolsRegister(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("wuCroIGjt2g", "libScePosix", 1, "libkernel", 1, 1, posix_open);
     LIB_FUNCTION("UK2Tl2DWUns", "libkernel", 1, "libkernel", 1, 1, sceKernelClose);
     LIB_FUNCTION("bY-PO6JhzhQ", "libScePosix", 1, "libkernel", 1, 1, posix_close);
+    LIB_FUNCTION("nKWi-N2HBV4", "libkernel", 1, "libkernel", 1, 1, sceKernelPwrite);
     LIB_FUNCTION("4wSze92BhLI", "libkernel", 1, "libkernel", 1, 1, sceKernelWrite);
 
     LIB_FUNCTION("+WRlkKjZvag", "libkernel", 1, "libkernel", 1, 1, _readv);

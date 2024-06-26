@@ -281,6 +281,8 @@ bool Linker::Resolve(const std::string& name, Loader::SymbolType sym_type, Modul
 void* Linker::TlsGetAddr(u64 module_index, u64 offset) {
     std::scoped_lock lk{mutex};
 
+    LOG_INFO(Core_Linker, "TlsGetAddr module_index = {}, offset = {}", module_index, offset);
+
     DtvEntry* dtv_table = GetTcbBase()->tcb_dtv;
     if (dtv_table[0].counter != dtv_generation_counter) {
         // Generation counter changed, a dynamic module was either loaded or unloaded.
@@ -354,7 +356,7 @@ void Linker::InitTlsForThread(bool is_primary) {
     // Copy init images to TLS thread blocks and map them to DTV slots.
     for (u32 i = 0; i < num_static_modules; i++) {
         auto* module = m_modules[i].get();
-        if (module->tls.image_size == 0) {
+        if (module->tls.init_image_size == 0) {
             continue;
         }
         u8* dest = reinterpret_cast<u8*>(addr + static_tls_size - module->tls.offset);

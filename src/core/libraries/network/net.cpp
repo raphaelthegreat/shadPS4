@@ -1,12 +1,74 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <thread>
 #include "common/logging/log.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/libs.h"
 #include "core/libraries/network/net.h"
+#include <arpa/inet.h>
 
 namespace Libraries::Net {
+
+static u32 net_errno{};
+
+struct SceNetSockaddr {
+    u8 sa_len;
+    u8 sa_family;
+    std::array<u8, 14> sa_data;
+};
+
+static constexpr SceNetSockaddr default_addr = {
+    .sa_len = sizeof(SceNetSockaddr),
+    .sa_family = AF_INET,
+    .sa_data = {80,0,1,1,1,1,0,0,0,0,0,0,0,0},
+    };
+
+#define SCE_NET_DEBUG_NAME_LEN_MAX 31
+typedef int		SceUID;
+typedef int SceNetId;
+
+typedef uint32_t SceNetInAddr_t;
+typedef uint16_t SceNetInPort_t;
+typedef uint8_t SceNetSaFamily_t;
+typedef uint32_t SceNetSocklen_t;
+
+typedef struct SceNetInAddr {
+    SceNetInAddr_t s_addr;
+} SceNetInAddr;
+
+typedef struct SceNetSockInfo {
+    char name[SCE_NET_DEBUG_NAME_LEN_MAX + 1];
+    SceUID pid;
+    SceNetId s;
+    int8_t socket_type;
+    int8_t policy;
+    int8_t priority;
+    int8_t reserved8;
+    int recv_queue_length;
+    int send_queue_length;
+    SceNetInAddr local_adr;
+    SceNetInAddr remote_adr;
+    SceNetInPort_t local_port;
+    SceNetInPort_t remote_port;
+    SceNetInPort_t local_vport;
+    SceNetInPort_t remote_vport;
+    int state;
+    int flags;
+    int tx_bps;
+    int rx_bps;
+    int max_tx_bps;
+    int max_rx_bps;
+    int tx_vbps;
+    int rx_vbps;
+    int recv_buffer_size;
+    int send_buffer_size;
+    int reserved6[8];
+    int tx_drops;
+    int rx_drops;
+    int tx_wait;
+    int reserved[2];
+} SceNetSockInfo;
 
 int PS4_SYSV_ABI in6addr_any() {
     LOG_ERROR(Lib_Net, "(STUBBED) called");
@@ -48,9 +110,18 @@ int PS4_SYSV_ABI sce_net_in6addr_nodelocal_allnodes() {
     return ORBIS_OK;
 }
 
-int PS4_SYSV_ABI sceNetAccept() {
-    LOG_ERROR(Lib_Net, "(STUBBED) called");
-    return ORBIS_OK;
+int PS4_SYSV_ABI sceNetAccept(SceNetId s,
+                              SceNetSockaddr *addr,
+                              SceNetSocklen_t *paddrlen) {
+    LOG_WARNING(Lib_Net, "(STUBBED) called");
+    std::this_thread::sleep_for(std::chrono::microseconds(1));
+    if (addr != nullptr) {
+        *addr = default_addr;
+    }
+    if (paddrlen != nullptr) {
+        *paddrlen = sizeof(SceNetSockaddr);
+    }
+    return 0;
 }
 
 int PS4_SYSV_ABI sceNetAddrConfig6GetInfo() {
@@ -540,7 +611,7 @@ int PS4_SYSV_ABI sceNetEpollControl() {
 
 int PS4_SYSV_ABI sceNetEpollCreate() {
     LOG_ERROR(Lib_Net, "(STUBBED) called");
-    return ORBIS_OK;
+    return 3;
 }
 
 int PS4_SYSV_ABI sceNetEpollDestroy() {
@@ -553,9 +624,9 @@ int PS4_SYSV_ABI sceNetEpollWait() {
     return ORBIS_OK;
 }
 
-int PS4_SYSV_ABI sceNetErrnoLoc() {
+u32* PS4_SYSV_ABI sceNetErrnoLoc() {
     LOG_ERROR(Lib_Net, "(STUBBED) called");
-    return ORBIS_OK;
+    return &net_errno;
 }
 
 int PS4_SYSV_ABI sceNetEtherNtostr() {
@@ -668,13 +739,34 @@ int PS4_SYSV_ABI sceNetGetSockInfo6() {
     return ORBIS_OK;
 }
 
-int PS4_SYSV_ABI sceNetGetsockname() {
+int PS4_SYSV_ABI sceNetGetsockname(SceNetId s,
+                                   SceNetSockaddr *addr,
+                                   SceNetSocklen_t *paddrlen) {
     LOG_ERROR(Lib_Net, "(STUBBED) called");
+    if (addr != nullptr) {
+        *addr = default_addr;
+    }
+    if (paddrlen != nullptr) {
+        *paddrlen = sizeof(SceNetSockaddr);
+    }
     return ORBIS_OK;
 }
 
-int PS4_SYSV_ABI sceNetGetsockopt() {
+constexpr u32 SCE_NET_SO_SNDBUF = 0x1001;
+constexpr u32 SCE_NET_SO_RCVBUF = 0x1002;
+
+int PS4_SYSV_ABI sceNetGetsockopt(u32 s, int level, int optname, int* optval, u32 *optlen) {
     LOG_ERROR(Lib_Net, "(STUBBED) called");
+    if (optval != nullptr) {
+        switch (optname) {
+        case SCE_NET_SO_SNDBUF:
+            *optval = 32768;
+            break;
+        case SCE_NET_SO_RCVBUF:
+            *optval = 65536;
+            break;
+        }
+    }
     return ORBIS_OK;
 }
 
@@ -693,9 +785,9 @@ int PS4_SYSV_ABI sceNetGetSystemTime() {
     return ORBIS_OK;
 }
 
-int PS4_SYSV_ABI sceNetHtonl() {
-    LOG_ERROR(Lib_Net, "(STUBBED) called");
-    return ORBIS_OK;
+u32 PS4_SYSV_ABI sceNetHtonl(u32 host32) {
+    LOG_WARNING(Lib_Net, "(STUBBED) called");
+    return htonl(host32);
 }
 
 int PS4_SYSV_ABI sceNetHtonll() {
@@ -703,14 +795,15 @@ int PS4_SYSV_ABI sceNetHtonll() {
     return ORBIS_OK;
 }
 
-int PS4_SYSV_ABI sceNetHtons() {
-    LOG_ERROR(Lib_Net, "(STUBBED) called");
-    return ORBIS_OK;
+u16 PS4_SYSV_ABI sceNetHtons(u16 host16) {
+    LOG_WARNING(Lib_Net, "(STUBBED) called");
+    return htons(host16);
 }
 
-int PS4_SYSV_ABI sceNetInetNtop() {
-    LOG_ERROR(Lib_Net, "(STUBBED) called");
-    return ORBIS_OK;
+const char* PS4_SYSV_ABI sceNetInetNtop(int af, const void* src, char* dst, size_t size) {
+    const char* s = inet_ntop(af, src, dst, size);
+    LOG_WARNING(Lib_Net, "called s = {}", s);
+    return s;
 }
 
 int PS4_SYSV_ABI sceNetInetNtopWithScopeId() {
@@ -773,24 +866,24 @@ int PS4_SYSV_ABI sceNetMemoryFree() {
     return ORBIS_OK;
 }
 
-int PS4_SYSV_ABI sceNetNtohl() {
+u32 PS4_SYSV_ABI sceNetNtohl(u32 net32) {
+    LOG_WARNING(Lib_Net, "(STUBBED) called");
+    return ntohl(net32);
+}
+
+u64 PS4_SYSV_ABI sceNetNtohll(u64 net64) {
     LOG_ERROR(Lib_Net, "(STUBBED) called");
     return ORBIS_OK;
 }
 
-int PS4_SYSV_ABI sceNetNtohll() {
-    LOG_ERROR(Lib_Net, "(STUBBED) called");
-    return ORBIS_OK;
-}
-
-int PS4_SYSV_ABI sceNetNtohs() {
-    LOG_ERROR(Lib_Net, "(STUBBED) called");
-    return ORBIS_OK;
+u16 PS4_SYSV_ABI sceNetNtohs(u16 net16) {
+    LOG_WARNING(Lib_Net, "(STUBBED) called");
+    return ntohs(net16);
 }
 
 int PS4_SYSV_ABI sceNetPoolCreate(const char* name, int size, int flags) {
     LOG_ERROR(Lib_Net, "(DUMMY) name = {} size = {} flags = {} ", std::string(name), size, flags);
-    return ORBIS_OK;
+    return 2;
 }
 
 int PS4_SYSV_ABI sceNetPoolDestroy() {
@@ -813,8 +906,19 @@ int PS4_SYSV_ABI sceNetRecv() {
     return ORBIS_OK;
 }
 
-int PS4_SYSV_ABI sceNetRecvfrom() {
-    LOG_ERROR(Lib_Net, "(STUBBED) called");
+int PS4_SYSV_ABI sceNetRecvfrom(SceNetId s,
+                                void *buf,
+                                size_t len,
+                                int flags,
+                                SceNetSockaddr *addr,
+                                SceNetSocklen_t *paddrlen) {
+    LOG_WARNING(Lib_Net, "(STUBBED) called");
+    if (addr != nullptr) {
+        *addr = default_addr;
+    }
+    if (paddrlen != nullptr) {
+        *paddrlen = sizeof(SceNetSockaddr);
+    }
     return ORBIS_OK;
 }
 
@@ -850,7 +954,7 @@ int PS4_SYSV_ABI sceNetResolverConnectDestroy() {
 
 int PS4_SYSV_ABI sceNetResolverCreate() {
     LOG_ERROR(Lib_Net, "(STUBBED) called");
-    return ORBIS_OK;
+    return 111;
 }
 
 int PS4_SYSV_ABI sceNetResolverDestroy() {
@@ -863,7 +967,12 @@ int PS4_SYSV_ABI sceNetResolverGetError() {
     return ORBIS_OK;
 }
 
-int PS4_SYSV_ABI sceNetResolverStartAton() {
+int PS4_SYSV_ABI sceNetResolverStartAton(u32 rid, const void *addr, char *hostname,
+                                         int hostname_len, int timeout, int retry, int flags) {
+    static constexpr std::string_view HostName = "123.site.com";
+    std::memset(hostname, 0, hostname_len);
+    std::memcpy(hostname, HostName.data(), std::min<size_t>(HostName.size(), hostname_len));
+    std::this_thread::sleep_for(std::chrono::microseconds(100));
     LOG_ERROR(Lib_Net, "(STUBBED) called");
     return ORBIS_OK;
 }
@@ -1103,7 +1212,13 @@ int PS4_SYSV_ABI sceNetEmulationSet() {
     return ORBIS_OK;
 }
 
+void recvfrom() {
+    printf("bad\n");
+    return;
+}
+
 void RegisterlibSceNet(Core::Loader::SymbolsResolver* sym) {
+    LIB_FUNCTION("gPcQ3OrFBUA", "libkernel", 1, "libkernel", 1, 1, recvfrom);
     LIB_FUNCTION("ZRAJo-A-ukc", "libSceNet", 1, "libSceNet", 1, 1, in6addr_any);
     LIB_FUNCTION("XCuA-GqjA-k", "libSceNet", 1, "libSceNet", 1, 1, in6addr_loopback);
     LIB_FUNCTION("VZgoeBxPXUQ", "libSceNet", 1, "libSceNet", 1, 1, sce_net_dummy);
@@ -1235,7 +1350,6 @@ void RegisterlibSceNet(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("TwjkDIPdZ1Q", "libSceNet", 1, "libSceNet", 1, 1, sceNetDuplicateIpStart);
     LIB_FUNCTION("QCbvCx9HL30", "libSceNet", 1, "libSceNet", 1, 1, sceNetDuplicateIpStop);
     LIB_FUNCTION("w21YgGGNtBk", "libSceNet", 1, "libSceNet", 1, 1, sceNetEpollAbort);
-    LIB_FUNCTION("ZVw46bsasAk", "libSceNet", 1, "libSceNet", 1, 1, sceNetEpollControl);
     LIB_FUNCTION("SF47kB2MNTo", "libSceNet", 1, "libSceNet", 1, 1, sceNetEpollCreate);
     LIB_FUNCTION("Inp1lfL+Jdw", "libSceNet", 1, "libSceNet", 1, 1, sceNetEpollDestroy);
     LIB_FUNCTION("drjIbDbA7UQ", "libSceNet", 1, "libSceNet", 1, 1, sceNetEpollWait);

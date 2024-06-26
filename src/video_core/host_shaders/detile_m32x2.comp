@@ -6,7 +6,7 @@
 layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
 
 layout(std430, binding = 0) buffer input_buf {
-    uint in_data[];
+    uvec2 in_data[];
 };
 layout(rg32ui, binding = 1) uniform writeonly uimage2D output_img;
 
@@ -36,13 +36,12 @@ void main() {
     uint row = bitfieldExtract(packed_pos, 0, 4);
 
     uint block_ofs = 2 * gl_GlobalInvocationID.x;
-    uint p0 = in_data[block_ofs + 0];
-    uint p1 = in_data[block_ofs + 1];
+    uvec2 p = in_data[gl_GlobalInvocationID.x];
 
     uint tiles_per_pitch = (info.pitch >> 3) >> 2; // log2(MICRO_TILE_DIM) / 4
     ivec2 img_pos = MICRO_TILE_DIM * ivec2(
         gl_WorkGroupID.x % tiles_per_pitch,
         gl_WorkGroupID.x / tiles_per_pitch
     );
-    imageStore(output_img, img_pos + ivec2(col, row), uvec4(p0, p1, 0, 0));
+    imageStore(output_img, img_pos + ivec2(col, row), uvec4(p, 0, 0));
 }

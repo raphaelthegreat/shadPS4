@@ -190,6 +190,9 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline() {
 
         // Recompile shader to IR.
         LOG_INFO(Render_Vulkan, "Compiling {} shader {:#x}", stage, hash);
+        if (hash == 0xca44a90f) {
+            printf("ff\n");
+        }
         const Shader::Info info = MakeShaderInfo(stage, pgm->user_data, regs);
         programs[i] = Shader::TranslateProgram(inst_pool, block_pool, code, std::move(info));
 

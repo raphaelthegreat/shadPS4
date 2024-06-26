@@ -27,7 +27,7 @@ vk::StencilOp StencilOp(Liverpool::StencilFunc op) {
     case Liverpool::StencilFunc::SubWrap:
         return vk::StencilOp::eDecrementAndWrap;
     default:
-        UNREACHABLE();
+        //UNREACHABLE();
         return vk::StencilOp::eKeep;
     }
 }
@@ -353,6 +353,9 @@ vk::Format SurfaceFormat(AmdGpu::DataFormat data_format, AmdGpu::NumberFormat nu
     }
     if (data_format == AmdGpu::DataFormat::FormatBc2 && num_format == AmdGpu::NumberFormat::Unorm) {
         return vk::Format::eBc2UnormBlock;
+    }
+    if (data_format == AmdGpu::DataFormat::Format16_16 && num_format == AmdGpu::NumberFormat::Snorm) {
+        return vk::Format::eR16G16Snorm;
     }
     UNREACHABLE_MSG("Unknown data_format={} and num_format={}", u32(data_format), u32(num_format));
 }

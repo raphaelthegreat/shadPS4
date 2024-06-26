@@ -288,10 +288,15 @@ int PS4_SYSV_ABI sceKernelUuidCreate(OrbisKernelUuid* orbisUuid) {
     return 0;
 }
 
+int PS4_SYSV_ABI sceKernelDebugRaiseExceptionOnReleaseMode() {
+    return 0;
+}
+
 void LibKernel_Register(Core::Loader::SymbolsResolver* sym) {
     // obj
     LIB_OBJ("f7uOxY9mM1U", "libkernel", 1, "libkernel", 1, 1, &g_stack_chk_guard);
     // memory
+    LIB_FUNCTION("zE-wXIZjLoM", "libkernel", 1, "libkernel", 1, 1, sceKernelDebugRaiseExceptionOnReleaseMode);
     LIB_FUNCTION("OMDRKKAZ8I4", "libkernel", 1, "libkernel", 1, 1, sceKernelDebugRaiseException);
     LIB_FUNCTION("rTXw65xmLIA", "libkernel", 1, "libkernel", 1, 1, sceKernelAllocateDirectMemory);
     LIB_FUNCTION("B+vc2AO2Zrc", "libkernel", 1, "libkernel", 1, 1,

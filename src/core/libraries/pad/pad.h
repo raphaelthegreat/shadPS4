@@ -188,7 +188,7 @@ struct OrbisPadData {
     u8 reserve[2];
     u8 deviceUniqueDataLen;
     u8 deviceUniqueData[ORBIS_PAD_MAX_DEVICE_UNIQUE_DATA_SIZE];
-};
+} __attribute__((packed));
 
 struct OrbisPadTouchPadInformation {
     float pixelDensity;

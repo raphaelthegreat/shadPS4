@@ -73,6 +73,7 @@ struct PthreadMutexInternal {
     u8 reserved[256];
     std::string name;
     pthread_mutex_t pth_mutex;
+    ScePthread owner;
     std::unique_ptr<tracy::LockableCtx> tracy_lock;
 };
 

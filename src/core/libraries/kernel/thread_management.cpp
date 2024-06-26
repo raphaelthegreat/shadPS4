@@ -4,6 +4,7 @@
 #include <mutex>
 #include <thread>
 #include <semaphore.h>
+#include "common/alignment.h"
 #include "common/assert.h"
 #include "common/error.h"
 #include "common/logging/log.h"
@@ -17,6 +18,8 @@
 #ifdef _WIN64
 #include <windows.h>
 #endif
+
+#include <sys/mman.h>
 
 namespace Libraries::Kernel {
 
@@ -46,7 +49,8 @@ void init_pthreads() {
 }
 
 void pthreadInitSelfMainThread() {
-    g_pthread_self = new PthreadInternal{};
+    auto* pthread_pool = g_pthread_cxt->GetPthreadPool();
+    g_pthread_self = pthread_pool->Create();
     scePthreadAttrInit(&g_pthread_self->attr);
     g_pthread_self->pth = pthread_self();
     g_pthread_self->name = "Main_Thread";
@@ -538,8 +542,9 @@ int PS4_SYSV_ABI scePthreadMutexLock(ScePthreadMutex* mutex) {
     (*mutex)->tracy_lock->BeforeLock();
 
     int result = pthread_mutex_lock(&(*mutex)->pth_mutex);
+    (*mutex)->owner = scePthreadSelf();
     if (result != 0) {
-        LOG_TRACE(Kernel_Pthread, "Locked name={}, result={}", (*mutex)->name, result);
+        LOG_WARNING(Kernel_Pthread, "Locked name={}, result={}", (*mutex)->name, result);
     }
 
     (*mutex)->tracy_lock->AfterLock();
@@ -688,6 +693,7 @@ int PS4_SYSV_ABI scePthreadCondTimedwait(ScePthreadCond* cond, ScePthreadMutex* 
     if (mutex == nullptr || *mutex == nullptr) {
         return SCE_KERNEL_ERROR_EINVAL;
     }
+    ASSERT(usec >= 1000 || usec == 0);
     timespec time{};
     time.tv_sec = usec / 1000000;
     time.tv_nsec = ((usec % 1000000) * 1000);
@@ -933,8 +939,14 @@ int PS4_SYSV_ABI scePthreadCreate(ScePthread* thread, const ScePthreadAttr* attr
 
     if (result == 0) {
         if (name != NULL) {
-            (*thread)->name = name;
+            if (std::string_view{name} == "HavokWorkerThread") {
+                static int counter = 0;
+                (*thread)->name = fmt::format("HavokThr{}", counter++);
+            } else {
+                (*thread)->name = name;
+            }
         } else {
+
             (*thread)->name = "no-name";
         }
         (*thread)->entry = start_routine;
@@ -946,11 +958,6 @@ int PS4_SYSV_ABI scePthreadCreate(ScePthread* thread, const ScePthreadAttr* attr
         result = pthread_create(&(*thread)->pth, &(*attr)->pth_attr, run_thread, *thread);
     }
 
-    if (result == 0) {
-        //while (!(*thread)->is_started) {
-        //    std::this_thread::sleep_for(std::chrono::microseconds(2000));
-        //}
-    }
     LOG_INFO(Kernel_Pthread, "thread create name = {}", (*thread)->name);
 
     switch (result) {
@@ -979,8 +986,13 @@ ScePthread PThreadPool::Create() {
         }
     }
 
-    auto* ret = new PthreadInternal{};
+    static u8* hint_addr = reinterpret_cast<u8*>(0xA00000000ULL);
+    auto* ret = reinterpret_cast<PthreadInternal*>(mmap(hint_addr,
+                     sizeof(PthreadInternal), PROT_READ | PROT_WRITE,
+                                                        MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED, -1, 0));
+    hint_addr += Common::AlignUp(sizeof(PthreadInternal), 4_KB);
 
+    std::construct_at(ret);
     ret->is_free = false;
     ret->is_detached = false;
     ret->is_almost_done = false;
