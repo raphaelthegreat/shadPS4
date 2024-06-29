@@ -111,7 +111,7 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
 
 void Rasterizer::DispatchDirect() {
     RENDERER_TRACE;
-
+    return;
     const auto cmdbuf = scheduler.CommandBuffer();
     const auto& cs_program = liverpool->regs.cs_program;
     const ComputePipeline* pipeline = pipeline_cache.GetComputePipeline();
@@ -119,6 +119,10 @@ void Rasterizer::DispatchDirect() {
 
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline->Handle());
     cmdbuf.dispatch(cs_program.dim_x, cs_program.dim_y, cs_program.dim_z);
+}
+
+void Rasterizer::Flush() {
+    scheduler.Flush();
 }
 
 u32 Rasterizer::SetupIndexBuffer(bool& is_indexed, u32 index_offset) {

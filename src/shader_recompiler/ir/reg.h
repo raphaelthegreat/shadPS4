@@ -38,6 +38,7 @@ union TextureInstInfo {
     BitField<2, 1, u32> has_lod_clamp;
     BitField<3, 1, u32> force_level0;
     BitField<4, 1, u32> explicit_lod;
+    BitField<5, 4, AmdGpu::ImageType> type;
 };
 
 union BufferInstInfo {

@@ -48,43 +48,6 @@ struct Buffer {
     }
 };
 
-enum class ImageType : u64 {
-    Buffer = 0,
-    Color1D = 8,
-    Color2D = 9,
-    Color3D = 10,
-    Cube = 11,
-    Color1DArray = 12,
-    Color2DArray = 13,
-    Color2DMsaa = 14,
-    Color2DMsaaArray = 15,
-};
-
-constexpr std::string_view NameOf(ImageType type) {
-    switch (type) {
-    case ImageType::Buffer:
-        return "Buffer";
-    case ImageType::Color1D:
-        return "Color1D";
-    case ImageType::Color2D:
-        return "Color2D";
-    case ImageType::Color3D:
-        return "Color3D";
-    case ImageType::Cube:
-        return "Cube";
-    case ImageType::Color1DArray:
-        return "Color1DArray";
-    case ImageType::Color2DArray:
-        return "Color2DArray";
-    case ImageType::Color2DMsaa:
-        return "Color2DMsaa";
-    case ImageType::Color2DMsaaArray:
-        return "Color2DMsaaArray";
-    default:
-        return "Unknown";
-    }
-}
-
 enum class TilingMode : u32 {
     Depth_MicroTiled = 0x5u,
     Display_Linear = 0x8u,
@@ -303,13 +266,3 @@ struct Sampler {
 };
 
 } // namespace AmdGpu
-
-template <>
-struct fmt::formatter<AmdGpu::ImageType> {
-    constexpr auto parse(format_parse_context& ctx) {
-        return ctx.begin();
-    }
-    auto format(AmdGpu::ImageType type, format_context& ctx) const {
-        return fmt::format_to(ctx.out(), "{}", AmdGpu::NameOf(type));
-    }
-};

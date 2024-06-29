@@ -43,7 +43,7 @@ int PS4_SYSV_ABI sceKernelDeleteEqueue(SceKernelEqueue eq) {
 
 int PS4_SYSV_ABI sceKernelWaitEqueue(SceKernelEqueue eq, SceKernelEvent* ev, int num, int* out,
                                      SceKernelUseconds* timo) {
-    LOG_INFO(Kernel_Event, "num = {}", num);
+    LOG_TRACE(Kernel_Event, "num = {}", num);
 
     if (eq == nullptr) {
         return ORBIS_KERNEL_ERROR_EBADF;

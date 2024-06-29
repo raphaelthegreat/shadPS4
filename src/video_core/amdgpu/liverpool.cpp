@@ -372,6 +372,10 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
         dcb = dcb.subspan(header->type3.NumWords() + 1);
     }
 
+    if (rasterizer) {
+        rasterizer->Flush();
+    }
+
     if (ce_task.handle) {
         ASSERT_MSG(ce_task.handle.done(), "Partially processed CCB");
         ce_task.handle.destroy();

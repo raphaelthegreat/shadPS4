@@ -103,7 +103,7 @@ public:
 
 class Inst : public boost::intrusive::list_base_hook<> {
 public:
-    explicit Inst(IR::Opcode op_, u32 flags_) noexcept;
+    explicit Inst(IR::Opcode op_, u64 flags_) noexcept;
     explicit Inst(const Inst& base);
     ~Inst();
 
@@ -166,7 +166,7 @@ public:
     void ReplaceOpcode(IR::Opcode opcode);
 
     template <typename FlagsType>
-        requires(sizeof(FlagsType) <= sizeof(u32) && std::is_trivially_copyable_v<FlagsType>)
+        requires(sizeof(FlagsType) <= sizeof(u64) && std::is_trivially_copyable_v<FlagsType>)
     [[nodiscard]] FlagsType Flags() const noexcept {
         FlagsType ret;
         std::memcpy(reinterpret_cast<char*>(&ret), &flags, sizeof(ret));
@@ -174,7 +174,7 @@ public:
     }
 
     template <typename FlagsType>
-        requires(sizeof(FlagsType) <= sizeof(u32) && std::is_trivially_copyable_v<FlagsType>)
+        requires(sizeof(FlagsType) <= sizeof(u64) && std::is_trivially_copyable_v<FlagsType>)
     void SetFlags(FlagsType value) noexcept {
         std::memcpy(&flags, &value, sizeof(value));
     }
@@ -201,7 +201,7 @@ private:
 
     IR::Opcode op{};
     int use_count{};
-    u32 flags{};
+    u64 flags{};
     u32 definition{};
     union {
         NonTriviallyDummy dummy{};

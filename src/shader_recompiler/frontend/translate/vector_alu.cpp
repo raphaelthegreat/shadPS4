@@ -45,8 +45,11 @@ void Translator::V_CNDMASK_B32(const GcnInst& inst) {
     };
     const bool has_flt_source =
         is_float_const(inst.src[0].field) || is_float_const(inst.src[1].field);
-    const IR::U32F32 src0 = GetSrc(inst.src[0], has_flt_source);
+    IR::U32F32 src0 = GetSrc(inst.src[0], has_flt_source);
     const IR::U32F32 src1 = GetSrc(inst.src[1], has_flt_source);
+    if (src1.Type() == IR::Type::F32 && src0.Type() == IR::Type::U32) {
+        src0 = ir.BitCast<IR::F32, IR::U32>(src0);
+    }
     const IR::Value result = ir.Select(flag, src1, src0);
     ir.SetVectorReg(dst_reg, IR::U32F32{result});
 }

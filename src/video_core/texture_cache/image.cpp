@@ -265,7 +265,8 @@ Image::Image(const Vulkan::Instance& instance_, Vulkan::Scheduler& scheduler_,
     Transit(vk::ImageLayout::eGeneral, vk::AccessFlagBits::eNone);
 }
 
-void Image::Transit(vk::ImageLayout dst_layout, vk::Flags<vk::AccessFlagBits> dst_mask) {
+void Image::Transit(vk::ImageLayout dst_layout, vk::AccessFlags dst_mask,
+                    vk::CommandBuffer cmdbuf) {
     if (dst_layout == layout && dst_mask == access_mask) {
         return;
     }
@@ -293,7 +294,10 @@ void Image::Transit(vk::ImageLayout dst_layout, vk::Flags<vk::AccessFlagBits> ds
          dst_mask == vk::AccessFlagBits::eTransferWrite)
             ? vk::PipelineStageFlagBits::eTransfer
             : vk::PipelineStageFlagBits::eAllGraphics | vk::PipelineStageFlagBits::eComputeShader;
-    const auto cmdbuf = scheduler->CommandBuffer();
+
+    if (!cmdbuf) {
+        cmdbuf = scheduler->CommandBuffer();
+    }
     cmdbuf.pipelineBarrier(pl_stage, dst_pl_stage, vk::DependencyFlagBits::eByRegion, {}, {},
                            barrier);
 

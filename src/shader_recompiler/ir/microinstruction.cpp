@@ -11,7 +11,7 @@
 
 namespace Shader::IR {
 
-Inst::Inst(IR::Opcode op_, u32 flags_) noexcept : op{op_}, flags{flags_} {
+Inst::Inst(IR::Opcode op_, u64 flags_) noexcept : op{op_}, flags{flags_} {
     if (op == Opcode::Phi) {
         std::construct_at(&phi_args);
     } else {

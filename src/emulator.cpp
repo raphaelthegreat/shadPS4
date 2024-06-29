@@ -15,6 +15,7 @@
 #include "common/logging/backend.h"
 #include "common/path_util.h"
 #include "common/singleton.h"
+#include "common/thread.h"
 #include "core/file_sys/fs.h"
 #include "core/libraries/kernel/thread_management.h"
 #include "core/libraries/libs.h"
@@ -127,6 +128,7 @@ void Emulator::Run(const std::filesystem::path& file) {
 
     // Begin main window loop until the application exits
     static constexpr std::chrono::microseconds FlipPeriod{10};
+    Common::SetCurrentThreadName("Event_Flip");
 
     while (window.isOpen()) {
         window.waitEvent();
@@ -139,7 +141,6 @@ void Emulator::Run(const std::filesystem::path& file) {
 }
 
 void Emulator::LoadSystemModules(const std::filesystem::path& file) {
-
     constexpr std::array<SysModules, 4> ModulesToLoad{
         {{"libSceNgs2.sprx", nullptr},
          {"libSceLibcInternal.sprx", &Libraries::LibcInternal::RegisterlibSceLibcInternal},

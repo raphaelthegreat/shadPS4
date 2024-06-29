@@ -60,6 +60,10 @@ public:
         return slot_images[id];
     }
 
+    [[nodiscard]] ImageView& GetImageView(ImageViewId id) {
+        return slot_image_views[id];
+    }
+
 private:
     ImageView& RegisterImageView(Image& image, const ImageViewInfo& view_info);
 
@@ -149,7 +153,7 @@ private:
 #ifdef _WIN64
     void* veh_handle{};
 #endif
-    std::mutex m_page_table;
+    std::recursive_mutex m_page_table;
 };
 
 } // namespace VideoCore

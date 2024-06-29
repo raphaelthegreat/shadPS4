@@ -170,7 +170,7 @@ std::unique_ptr<GraphicsPipeline> PipelineCache::CreateGraphicsPipeline() {
             stages[i] = VK_NULL_HANDLE;
             continue;
         }
-        if (hash == 0x42dcc8fa || hash == 0x611b4c11 || hash == 0x26c6509f) {
+        if (hash == 0x42dcc8fa || hash == 0x611b4c11 || hash == 0x26c6509f || hash == 0xc8ac2c6c || hash == 0x16299730 || hash == 0x265c84b9 || hash == 0x598b612f || hash == 0x4836fab2 || hash == 0xc94a4731 || hash == 0x80b689d7 || hash == 0xdf371df1) {
             return nullptr;
         }
         auto* pgm = regs.ProgramForStage(i);

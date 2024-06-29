@@ -93,7 +93,8 @@ TextureCache::TextureCache(const Vulkan::Instance& instance_, Vulkan::Scheduler&
     ASSERT(null_id.index == 0);
 
     ImageViewInfo view_info;
-    void(slot_image_views.insert(instance, view_info, slot_images[null_id]));
+    const ImageViewId null_view_id = slot_image_views.insert(instance, view_info, slot_images[null_id]);
+    ASSERT(null_view_id.index == 0);
 }
 
 TextureCache::~TextureCache() {
@@ -268,6 +269,7 @@ vk::Sampler TextureCache::GetSampler(const AmdGpu::Sampler& sampler) {
 }
 
 void TextureCache::RegisterImage(ImageId image_id) {
+    std::scoped_lock lk{m_page_table};
     Image& image = slot_images[image_id];
     ASSERT_MSG(False(image.flags & ImageFlagBits::Registered),
                "Trying to register an already registered image");
@@ -277,6 +279,7 @@ void TextureCache::RegisterImage(ImageId image_id) {
 }
 
 void TextureCache::UnregisterImage(ImageId image_id) {
+    std::scoped_lock lk{m_page_table};
     Image& image = slot_images[image_id];
     ASSERT_MSG(True(image.flags & ImageFlagBits::Registered),
                "Trying to unregister an already registered image");
@@ -334,7 +337,7 @@ void TextureCache::UpdatePagesCachedCount(VAddr addr, u64 size, s32 delta) {
         const u32 interval_size = interval_end_addr - interval_start_addr;
         void* addr = reinterpret_cast<void*>(interval_start_addr);
         if (delta > 0 && count == delta) {
-            mprotect(addr, interval_size, PAGE_READONLY);
+            //mprotect(addr, interval_size, PAGE_READONLY);
         } else if (delta < 0 && count == -delta) {
             mprotect(addr, interval_size, PAGE_READWRITE);
         } else {

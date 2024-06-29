@@ -213,8 +213,11 @@ void PatchBufferInstruction(IR::Block& block, IR::Inst& inst, Info& info,
     inst.SetArg(0, ir.Imm32(binding));
     ASSERT(!buffer.swizzle_enable && !buffer.add_tid_enable);
     if (inst_info.is_typed) {
+        const auto nfmt = inst_info.nfmt.Value();
+        const auto dfmt = inst_info.dmft.Value();
         ASSERT(inst_info.nfmt == AmdGpu::NumberFormat::Float &&
-               inst_info.dmft == AmdGpu::DataFormat::Format32_32_32_32);
+               (inst_info.dmft == AmdGpu::DataFormat::Format32_32_32_32 ||
+                inst_info.dmft == AmdGpu::DataFormat::Format32_32_32));
     }
     if (inst.GetOpcode() == IR::Opcode::ReadConstBuffer ||
         inst.GetOpcode() == IR::Opcode::ReadConstBufferU32) {
@@ -289,6 +292,11 @@ void PatchImageInstruction(IR::Block& block, IR::Inst& inst, Info& info, Descrip
     // Patch image handle
     IR::IREmitter ir{block, IR::Block::InstructionList::s_iterator_to(inst)};
     inst.SetArg(0, ir.Imm32(image_binding));
+
+    // No need to patch coords or lod if we are only querying.
+    if (inst.GetOpcode() == IR::Opcode::ImageQueryDimensions) {
+        return;
+    }
 
     // Now that we know the image type, adjust texture coordinate vector.
     const IR::Inst* body = inst.Arg(1).InstRecursive();

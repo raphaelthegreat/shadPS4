@@ -23,7 +23,7 @@ Block::iterator Block::PrependNewInst(iterator insertion_point, const Inst& base
 }
 
 Block::iterator Block::PrependNewInst(iterator insertion_point, Opcode op,
-                                      std::initializer_list<Value> args, u32 flags) {
+                                      std::initializer_list<Value> args, u64 flags) {
     Inst* const inst{inst_pool->Create(op, flags)};
     const auto result_it{instructions.insert(insertion_point, *inst)};
 

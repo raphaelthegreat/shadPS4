@@ -44,6 +44,9 @@ GraphicsPipeline::GraphicsPipeline(const Instance& instance_, Scheduler& schedul
     const auto& vs_info = stages[0];
     for (const auto& input : vs_info.vs_inputs) {
         const auto buffer = vs_info.ReadUd<AmdGpu::Buffer>(input.sgpr_base, input.dword_offset);
+        if (buffer.data_format.Value() == AmdGpu::DataFormat::FormatInvalid) {
+            continue;
+        }
         attributes.push_back({
             .location = input.binding,
             .binding = input.binding,
@@ -345,9 +348,14 @@ void GraphicsPipeline::BindResources(Core::MemoryManager* memory, StreamBuffer& 
 
         for (const auto& image : stage.images) {
             const auto tsharp = stage.ReadUd<AmdGpu::Image>(image.sgpr_base, image.dword_offset);
-            const auto& image_view = texture_cache.FindImageView(tsharp, image.is_storage);
-            image_infos.emplace_back(VK_NULL_HANDLE, *image_view.image_view,
-                                     vk::ImageLayout::eShaderReadOnlyOptimal);
+            if (tsharp.data_format == u64(AmdGpu::DataFormat::FormatInvalid)) {
+                image_infos.emplace_back(VK_NULL_HANDLE, *texture_cache.GetImageView(VideoCore::NULL_IMAGE_VIEW_ID).image_view,
+                                         vk::ImageLayout::eShaderReadOnlyOptimal);
+            } else {
+                const auto& image_view = texture_cache.FindImageView(tsharp, image.is_storage);
+                image_infos.emplace_back(VK_NULL_HANDLE, *image_view.image_view,
+                                         vk::ImageLayout::eShaderReadOnlyOptimal);
+            }
             set_writes.push_back({
                 .dstSet = VK_NULL_HANDLE,
                 .dstBinding = binding++,
@@ -408,6 +416,9 @@ void GraphicsPipeline::BindVertexBuffers(StreamBuffer& staging) const {
         if (buffer.GetSize() == 0) {
             continue;
         }
+        if (buffer.data_format.Value() == AmdGpu::DataFormat::FormatInvalid) {
+            continue;
+        }
         guest_buffers.emplace_back(buffer);
         ranges.emplace_back(buffer.base_address.Value(),
                             buffer.base_address.Value() + buffer.GetSize());
@@ -415,6 +426,10 @@ void GraphicsPipeline::BindVertexBuffers(StreamBuffer& staging) const {
     std::ranges::sort(ranges, [](const BufferRange& lhv, const BufferRange& rhv) {
         return lhv.base_address < rhv.base_address;
     });
+
+    if (ranges.empty()) {
+        return;
+    }
 
     boost::container::static_vector<BufferRange, MaxVertexBufferCount> ranges_merged{ranges[0]};
     for (auto range : ranges) {
