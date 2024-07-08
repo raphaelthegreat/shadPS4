@@ -179,6 +179,14 @@ s32 PS4_SYSV_ABI sceKernelAvailableFlexibleMemorySize(size_t* out_size) {
     return ORBIS_OK;
 }
 
+s32 PS4_SYSV_ABI sceKernelReserveVirtualRange(void** addr, size_t size, int flags, size_t alignment) {
+    LOG_INFO(Kernel_Vmm, "called addr = {}, size = {:#x}, flags = {:#x}, align = {:#x}",
+             fmt::ptr(*addr), size, flags, alignment);
+    auto* memory = Core::Memory::Instance();
+    const auto map_flags = static_cast<Core::MemoryMapFlags>(flags);
+    return memory->Reserve(addr, size, map_flags, alignment);
+}
+
 void PS4_SYSV_ABI _sceKernelRtldSetApplicationHeapAPI(void* func) {
     auto* linker = Common::Singleton<Core::Linker>::Instance();
     linker->SetHeapApiFunc(func);

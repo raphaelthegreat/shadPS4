@@ -92,6 +92,10 @@ struct VirtualMemoryArea {
         return addr >= base && (addr + size) < (base + this->size);
     }
 
+    bool CanBeMapped() const {
+        return type == VMAType::Free || type == VMAType::Reserved;
+    }
+
     bool CanMergeWith(const VirtualMemoryArea& next) const {
         if (disallow_merge || next.disallow_merge) {
             return false;
@@ -145,6 +149,8 @@ public:
                 MemoryMapFlags flags, uintptr_t fd, size_t offset);
 
     void UnmapMemory(VAddr virtual_addr, size_t size);
+
+    int Reserve(void** out_addr, size_t size, MemoryMapFlags flags, size_t alignment);
 
     int QueryProtection(VAddr addr, void** start, void** end, u32* prot);
 

@@ -95,30 +95,15 @@ int MemoryManager::MapMemory(void** out_addr, VAddr virtual_addr, size_t size, M
     // flag so we will take the branch that searches for free (or reserved) mappings.
     virtual_addr = (virtual_addr == 0) ? impl.VirtualBase() : virtual_addr;
     alignment = alignment > 0 ? alignment : 16_KB;
-
     VAddr mapped_addr = alignment > 0 ? Common::AlignUp(virtual_addr, alignment) : virtual_addr;
-    SCOPE_EXIT {
-        auto& new_vma = AddMapping(mapped_addr, size);
-        new_vma.disallow_merge = True(flags & MemoryMapFlags::NoCoalesce);
-        new_vma.prot = prot;
-        new_vma.name = name;
-        new_vma.type = type;
-
-        if (type == VMAType::Direct) {
-            new_vma.phys_base = phys_addr;
-            MapVulkanMemory(mapped_addr, size);
-        }
-        if (type == VMAType::Flexible) {
-            flexible_usage += size;
-        }
-    };
 
     // Fixed mapping means the virtual address must exactly match the provided one.
     if (True(flags & MemoryMapFlags::Fixed) && True(flags & MemoryMapFlags::NoOverwrite)) {
         // This should return SCE_KERNEL_ERROR_ENOMEM but shouldn't normally happen.
         const auto& vma = FindVMA(mapped_addr)->second;
         const size_t remaining_size = vma.base + vma.size - mapped_addr;
-        ASSERT_MSG(vma.type == VMAType::Free && remaining_size >= size);
+        ASSERT_MSG((vma.type == VMAType::Free || vma.type == VMAType::Reserved) &&
+                   remaining_size >= size);
     }
 
     // Find the first free area starting with provided virtual address.
@@ -141,6 +126,21 @@ int MemoryManager::MapMemory(void** out_addr, VAddr virtual_addr, size_t size, M
     // Perform the mapping.
     *out_addr = impl.Map(mapped_addr, size, alignment, phys_addr, is_exec);
     TRACK_ALLOC(*out_addr, size, "VMEM");
+
+    // Add mapping
+    auto& new_vma = AddMapping(mapped_addr, size);
+    new_vma.disallow_merge = True(flags & MemoryMapFlags::NoCoalesce);
+    new_vma.prot = prot;
+    new_vma.name = name;
+    new_vma.type = type;
+    if (type == VMAType::Direct) {
+        new_vma.phys_base = phys_addr;
+        MapVulkanMemory(mapped_addr, size);
+    }
+    if (type == VMAType::Flexible) {
+        flexible_usage += size;
+    }
+
     return ORBIS_OK;
 }
 
@@ -200,6 +200,30 @@ void MemoryManager::UnmapMemory(VAddr virtual_addr, size_t size) {
     // Unmap the memory region.
     impl.Unmap(virtual_addr, size, has_backing);
     TRACK_FREE(virtual_addr, "VMEM");
+}
+
+int MemoryManager::Reserve(void** out_addr, size_t size, MemoryMapFlags flags, size_t alignment) {
+    std::scoped_lock lk{mutex};
+    ASSERT(False(flags & MemoryMapFlags::Fixed));
+
+    VAddr virtual_addr = (*out_addr == 0) ? impl.VirtualBase() : VAddr(*out_addr);
+    auto it = FindVMA(virtual_addr);
+    // Search for the first free VMA that fits our mapping.
+    if (it->second.type != VMAType::Free || !it->second.Contains(virtual_addr, size)) {
+        while (it->second.type != VMAType::Free || it->second.size < size) {
+            it++;
+        }
+        ASSERT(it != vma_map.end());
+        const auto& vma = it->second;
+        virtual_addr = alignment > 0 ? Common::AlignUp(vma.base, alignment) : vma.base;
+    }
+
+    // Add reserved mapping.
+    *out_addr = std::bit_cast<void*>(virtual_addr);
+    auto& new_vma = AddMapping(virtual_addr, size);
+    new_vma.disallow_merge = True(flags & MemoryMapFlags::NoCoalesce);
+    new_vma.type = VMAType::Reserved;
+    return ORBIS_OK;
 }
 
 int MemoryManager::QueryProtection(VAddr addr, void** start, void** end, u32* prot) {
@@ -302,7 +326,8 @@ VirtualMemoryArea& MemoryManager::AddMapping(VAddr virtual_addr, size_t size) {
     ASSERT_MSG(vma_handle != vma_map.end(), "Virtual address not in vm_map");
 
     const VirtualMemoryArea& vma = vma_handle->second;
-    ASSERT_MSG(vma.type == VMAType::Free && vma.base <= virtual_addr,
+    ASSERT_MSG(vma.type == VMAType::Free || vma.type == VMAType::Reserved
+               && vma.base <= virtual_addr,
                "Adding a mapping to already mapped region");
 
     const VAddr start_in_vma = virtual_addr - vma.base;
