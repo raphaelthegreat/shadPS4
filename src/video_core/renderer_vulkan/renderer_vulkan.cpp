@@ -13,6 +13,10 @@
 
 #include <vk_mem_alloc.h>
 
+namespace AmdGpu {
+extern int num_submits;
+}
+
 namespace Vulkan {
 
 bool CanBlitToSwapchain(const vk::PhysicalDevice physical_device, vk::Format format) {
@@ -248,7 +252,8 @@ Frame* RendererVulkan::PrepareFrameInternal(VideoCore::Image& image) {
     cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eAllCommands,
                            vk::PipelineStageFlagBits::eAllCommands,
                            vk::DependencyFlagBits::eByRegion, {}, {}, post_barrier);
-
+    LOG_ERROR(Render_Vulkan, "Num submits on present {}", AmdGpu::num_submits);
+    AmdGpu::num_submits = 0;
     // Flush pending vulkan operations.
     scheduler.Flush(frame->render_ready);
     return frame;
