@@ -13,6 +13,7 @@ void save(const std::filesystem::path& path);
 
 bool isNeoMode();
 bool isFullscreenMode();
+bool isVsyncEnabled();
 std::string getLogFilter();
 std::string getLogType();
 

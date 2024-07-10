@@ -225,14 +225,6 @@ s32 PS4_SYSV_ABI sceVideoOutUnregisterBuffers(s32 handle, s32 attributeIndex) {
     return driver->UnregisterBuffers(port, attributeIndex);
 }
 
-void Flip(std::chrono::microseconds micros) {
-    return driver->Flip(micros);
-}
-
-void Vblank() {
-    return driver->Vblank();
-}
-
 void sceVideoOutGetBufferLabelAddress(s32 handle, uintptr_t* label_addr) {
     auto* port = driver->GetPort(handle);
     ASSERT(port);

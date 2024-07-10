@@ -33,6 +33,8 @@ public:
 
     void DispatchDirect();
 
+    void Flush();
+
 private:
     u32 SetupIndexBuffer(bool& is_indexed, u32 index_offset);
     void MapMemory(VAddr addr, size_t size);

@@ -25,8 +25,6 @@ Liverpool::~Liverpool() {
     process_thread.join();
 }
 
-int num_submits = 0;
-
 void Liverpool::Process(std::stop_token stoken) {
     Common::SetCurrentThreadName("GPU_CommandProcessor");
 
@@ -356,8 +354,10 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
             const auto* wait_reg_mem = reinterpret_cast<const PM4CmdWaitRegMem*>(header);
             ASSERT(wait_reg_mem->engine.Value() == PM4CmdWaitRegMem::Engine::Me);
             while (!wait_reg_mem->Test()) {
+                if (rasterizer) {
+                    rasterizer->Flush();
+                }
                 TracyFiberLeave;
-                num_submits++;
                 co_yield {};
                 TracyFiberEnter(dcb_task_name);
             }
@@ -416,7 +416,6 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb) {
             while (!task.handle.done()) {
                 task.handle.resume();
                 TracyFiberLeave;
-                num_submits++;
                 co_yield {};
                 TracyFiberEnter(acb_task_name);
             };
@@ -457,8 +456,10 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb) {
             const auto* wait_reg_mem = reinterpret_cast<const PM4CmdWaitRegMem*>(header);
             ASSERT(wait_reg_mem->engine.Value() == PM4CmdWaitRegMem::Engine::Me);
             while (!wait_reg_mem->Test()) {
+                if (rasterizer) {
+                    rasterizer->Flush();
+                }
                 TracyFiberLeave;
-                num_submits++;
                 co_yield {};
                 TracyFiberEnter(acb_task_name);
             }

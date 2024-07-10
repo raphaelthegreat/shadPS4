@@ -5,6 +5,7 @@
 #include <limits>
 #include "common/assert.h"
 #include "common/logging/log.h"
+#include "common/config.h"
 #include "sdl_window.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_swapchain.h"
@@ -55,7 +56,8 @@ void Swapchain::Create(u32 width_, u32 height_, vk::SurfaceKHR surface_) {
         .pQueueFamilyIndices = queue_family_indices.data(),
         .preTransform = transform,
         .compositeAlpha = composite_alpha,
-        .presentMode = vk::PresentModeKHR::eFifo,
+        .presentMode = Config::isVsyncEnabled() ? vk::PresentModeKHR::eFifo
+                                                : vk::PresentModeKHR::eMailbox,
         .clipped = true,
         .oldSwapchain = nullptr,
     };

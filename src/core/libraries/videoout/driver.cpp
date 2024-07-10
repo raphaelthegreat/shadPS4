@@ -3,11 +3,10 @@
 
 #include <pthread.h>
 #include "common/assert.h"
+#include "common/debug.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/kernel/time_management.h"
 #include "core/libraries/videoout/driver.h"
-#include "core/platform.h"
-
 #include "video_core/renderer_vulkan/renderer_vulkan.h"
 
 extern std::unique_ptr<Vulkan::RendererVulkan> renderer;
@@ -41,6 +40,7 @@ VideoOutDriver::VideoOutDriver(u32 width, u32 height) {
     main_port.resolution.fullHeight = height;
     main_port.resolution.paneWidth = width;
     main_port.resolution.paneHeight = height;
+    present_thread = std::jthread([&](std::stop_token token) { PresentThread(token); });
 }
 
 VideoOutDriver::~VideoOutDriver() = default;
@@ -160,27 +160,7 @@ int VideoOutDriver::UnregisterBuffers(VideoOutPort* port, s32 attributeIndex) {
     return ORBIS_OK;
 }
 
-void VideoOutDriver::Flip(std::chrono::microseconds timeout) {
-    Request req;
-    {
-        std::unique_lock lock{mutex};
-        submit_cond.wait_for(lock, timeout, [&] { return !requests.empty(); });
-        if (requests.empty()) {
-            renderer->ShowSplash();
-            return;
-        }
-
-        // Retrieve the request.
-        req = requests.front();
-        requests.pop();
-    }
-
-    // Whatever the game is rendering show splash if it is active
-    if (!renderer->ShowSplash(req.frame)) {
-        // Present the frame.
-        renderer->Present(req.frame);
-    }
-
+void VideoOutDriver::Flip(const Request& req) {
     std::scoped_lock lock{mutex};
 
     // Update flip status.
@@ -225,6 +205,7 @@ bool VideoOutDriver::SubmitFlip(VideoOutPort* port, s32 index, s64 flip_arg,
         return false;
     }
 
+    LOG_INFO(Lib_VideoOut, "Pushing request");
     requests.push({
         .frame = frame,
         .port = port,
@@ -253,6 +234,59 @@ void VideoOutDriver::Vblank() {
     for (auto& event : main_port.vblank_events) {
         if (event != nullptr) {
             event->triggerEvent(SCE_VIDEO_OUT_EVENT_VBLANK, Kernel::EVFILT_VIDEO_OUT, nullptr);
+        }
+    }
+}
+
+void VideoOutDriver::PresentThread(std::stop_token token) {
+    // We have a deadline of 16ms (i.e vblank) to present a frame.
+    static constexpr std::chrono::milliseconds VblankPeriod{16};
+
+    auto start = std::chrono::high_resolution_clock::now();
+    while (!token.stop_requested()) {
+        Request req{};
+        {
+            LOG_INFO(Lib_VideoOut, "[Present] Will wait for request");
+            // Wait for a new flip request.
+            std::unique_lock lock{mutex};
+            submit_cond.wait_for(lock, VblankPeriod, [&] { return !requests.empty(); });
+
+            // Retrieve the request.
+            if (!requests.empty()) {
+                LOG_INFO(Lib_VideoOut, "[Present] Got request");
+                req = requests.front();
+                requests.pop();
+            } else {
+                LOG_INFO(Lib_VideoOut, "[Present] Did not get request");
+            }
+        }
+
+        // Whatever the game is rendering show splash if it is active
+        if (!renderer->ShowSplash(req.frame)) {
+            // Present this frame or the previous one if we didn't receive any requests.
+            auto* frame = req.frame ? req.frame : nullptr;
+            if (frame) {
+                LOG_INFO(Lib_VideoOut, "[Present] Presenting frame, is_last = {}", frame == last_frame);
+                renderer->Present(frame, frame != last_frame);
+            } else {
+                LOG_INFO(Lib_VideoOut, "[Present] frame is null!");
+            }
+        }
+
+        // Record the flip if we one.
+        if (req.frame) {
+            LOG_INFO(Lib_VideoOut, "[Present] Doing flip");
+            last_frame = req.frame;
+            Flip(req);
+            FRAME_END;
+        }
+
+        // Check if we need to signal vblank.
+        const auto end = std::chrono::high_resolution_clock::now();
+        const auto passed = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        if (passed >= VblankPeriod) {
+            Vblank();
+            start = end;
         }
     }
 }

@@ -47,8 +47,9 @@ public:
     void Wait(u64 tick);
 
     /// Submits the provided command buffer for execution
-    void SubmitWork(vk::CommandBuffer cmdbuf, vk::Semaphore wait, vk::Semaphore signal,
-                    u64 signal_value);
+    void SubmitWork(vk::CommandBuffer cmdbuf, std::span<const vk::Semaphore> wait,
+                    vk::Semaphore signal,
+                    vk::Fence fence, s64 signal_value = 0);
 
 protected:
     const Instance& instance;

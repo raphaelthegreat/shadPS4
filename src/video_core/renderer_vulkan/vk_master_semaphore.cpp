@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <limits>
-#include <mutex>
+#include <boost/container/static_vector.hpp>
 #include "common/assert.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_master_semaphore.h"
@@ -60,17 +60,22 @@ void MasterSemaphore::Wait(u64 tick) {
     Refresh();
 }
 
-void MasterSemaphore::SubmitWork(vk::CommandBuffer cmdbuf, vk::Semaphore wait, vk::Semaphore signal,
-                                 u64 signal_value) {
+void MasterSemaphore::SubmitWork(vk::CommandBuffer cmdbuf, std::span<const vk::Semaphore> wait,
+                                 vk::Semaphore signal,
+                                 vk::Fence fence, s64 signal_value) {
     cmdbuf.end();
 
-    const u32 num_signal_semaphores = signal ? 2U : 1U;
-    const std::array signal_values{signal_value, u64(0)};
-    const std::array signal_semaphores{Handle(), signal};
+    boost::container::static_vector<vk::Semaphore, 2> signal_semaphores;
+    boost::container::static_vector<u64, 2> signal_values;
 
-    const u32 num_wait_semaphores = wait ? 2U : 1U;
-    const std::array wait_values{signal_value - 1, u64(1)};
-    const std::array wait_semaphores{Handle(), wait};
+    if (signal_value) {
+        signal_semaphores.emplace_back(Handle());
+        signal_values.emplace_back(signal_value);
+    }
+    if (signal) {
+        signal_semaphores.emplace_back(signal);
+        signal_values.emplace_back(1);
+    }
 
     static constexpr std::array<vk::PipelineStageFlags, 2> wait_stage_masks = {
         vk::PipelineStageFlagBits::eAllCommands,
@@ -78,25 +83,25 @@ void MasterSemaphore::SubmitWork(vk::CommandBuffer cmdbuf, vk::Semaphore wait, v
     };
 
     const vk::TimelineSemaphoreSubmitInfo timeline_si = {
-        .waitSemaphoreValueCount = num_wait_semaphores,
-        .pWaitSemaphoreValues = wait_values.data(),
-        .signalSemaphoreValueCount = num_signal_semaphores,
+        .waitSemaphoreValueCount = 0U,
+        .pWaitSemaphoreValues = nullptr,
+        .signalSemaphoreValueCount = static_cast<u32>(signal_values.size()),
         .pSignalSemaphoreValues = signal_values.data(),
     };
 
     const vk::SubmitInfo submit_info = {
-        .pNext = &timeline_si,
-        .waitSemaphoreCount = num_wait_semaphores,
-        .pWaitSemaphores = wait_semaphores.data(),
+        .pNext = signal_value ? &timeline_si : nullptr,
+        .waitSemaphoreCount = static_cast<u32>(wait.size()),
+        .pWaitSemaphores = wait.data(),
         .pWaitDstStageMask = wait_stage_masks.data(),
         .commandBufferCount = 1u,
         .pCommandBuffers = &cmdbuf,
-        .signalSemaphoreCount = num_signal_semaphores,
+        .signalSemaphoreCount = static_cast<u32>(signal_semaphores.size()),
         .pSignalSemaphores = signal_semaphores.data(),
     };
 
     try {
-        instance.GetGraphicsQueue().submit(submit_info);
+        instance.GetGraphicsQueue().submit(submit_info, fence);
     } catch (vk::DeviceLostError& err) {
         UNREACHABLE_MSG("Device lost during submit: {}", err.what());
     }

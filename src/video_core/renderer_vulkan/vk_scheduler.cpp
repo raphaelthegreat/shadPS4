@@ -97,7 +97,8 @@ void Scheduler::SubmitExecution(vk::Semaphore signal_semaphore, vk::Semaphore wa
     }
 
     EndRendering();
-    master_semaphore.SubmitWork(current_cmdbuf, wait_semaphore, signal_semaphore, signal_value);
+    master_semaphore.SubmitWork(current_cmdbuf, {},
+                                signal_semaphore, {}, signal_value);
     master_semaphore.Refresh();
     AllocateWorkerCommandBuffers();
 }

@@ -17,6 +17,7 @@ static s32 gpuId = -1; // Vulkan physical device index. Set to negative for auto
 static std::string logFilter;
 static std::string logType = "sync";
 static bool isDebugDump = false;
+static bool isVsync = true;
 static bool isLibc = true;
 static bool isShowSplash = false;
 static bool isNullGpu = false;
@@ -52,6 +53,10 @@ bool isNeoMode() {
 
 bool isFullscreenMode() {
     return isFullscreen;
+}
+
+bool isVsyncEnabled() {
+    return isVsync;
 }
 
 u32 getScreenWidth() {
@@ -233,6 +238,7 @@ void load(const std::filesystem::path& path) {
 
             screenWidth = toml::find_or<toml::integer>(gpu, "screenWidth", screenWidth);
             screenHeight = toml::find_or<toml::integer>(gpu, "screenHeight", screenHeight);
+            isVsync = toml::find_or<toml::integer>(gpu, "enableVsync", true);
             gpuId = toml::find_or<toml::integer>(gpu, "gpuId", 0);
             isNullGpu = toml::find_or<toml::boolean>(gpu, "nullGpu", false);
             shouldDumpShaders = toml::find_or<toml::boolean>(gpu, "dumpShaders", false);
@@ -315,6 +321,7 @@ void save(const std::filesystem::path& path) {
     data["GPU"]["gpuId"] = gpuId;
     data["GPU"]["screenWidth"] = screenWidth;
     data["GPU"]["screenHeight"] = screenHeight;
+    data["GPU"]["enableVsync"] = isVsync;
     data["GPU"]["nullGpu"] = isNullGpu;
     data["GPU"]["dumpShaders"] = shouldDumpShaders;
     data["GPU"]["dumpPM4"] = shouldDumpPM4;

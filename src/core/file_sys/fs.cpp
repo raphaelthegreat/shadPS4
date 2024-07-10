@@ -57,6 +57,7 @@ std::string MntPoints::GetHostFile(const std::string& guest_file) {
         }
         std::string npath = guest_file.substr(pair.guest_path.size(), guest_file.size() - 1);
         const auto host_path = pair.host_path + npath;
+        return host_path;
 #ifndef _WIN64
         const std::filesystem::path path{host_path};
         if (!std::filesystem::exists(path)) {

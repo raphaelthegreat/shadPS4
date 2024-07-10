@@ -254,4 +254,8 @@ void Rasterizer::UpdateDepthStencilState() {
     cmdbuf.setDepthBoundsTestEnable(depth.depth_bounds_enable);
 }
 
+void Rasterizer::Flush() {
+    scheduler.Flush();
+}
+
 } // namespace Vulkan

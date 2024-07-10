@@ -28,7 +28,8 @@ struct Frame {
     vk::ImageView image_view;
     vk::Semaphore render_ready;
     vk::Fence present_done;
-    vk::CommandBuffer cmdbuf;
+    vk::CommandBuffer flip_cmdbuf;
+    vk::CommandBuffer present_cmdbuf;
 };
 
 class Rasterizer;
@@ -66,7 +67,7 @@ public:
     }
 
     bool ShowSplash(Frame* frame = nullptr);
-    void Present(Frame* frame);
+    void Present(Frame* frame, bool free_frame = true);
     void RecreateFrame(Frame* frame, u32 width, u32 height);
 
 private:
