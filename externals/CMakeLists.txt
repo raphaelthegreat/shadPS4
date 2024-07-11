@@ -87,6 +87,12 @@ if (NOT TARGET glslang::glslang)
     target_include_directories(SPIRV INTERFACE "${CMAKE_CURRENT_BINARY_DIR}/glslang")
 endif()
 
+# ffmpeg
+add_library(3rdparty_ffmpeg INTERFACE)
+find_package(FFMPEG REQUIRED)
+target_include_directories(3rdparty_ffmpeg INTERFACE ${FFMPEG_INCLUDE_DIR})
+target_link_libraries(3rdparty_ffmpeg INTERFACE ${FFMPEG_LIBRARIES})
+
 # Robin-map
 if (NOT TARGET tsl::robin_map)
     add_subdirectory(robin-map)
