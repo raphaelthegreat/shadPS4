@@ -3,6 +3,7 @@
 
 #include <condition_variable>
 #include <mutex>
+#include <list>
 #include <utility>
 #include <boost/intrusive/list.hpp>
 #include <pthread.h>
@@ -37,12 +38,12 @@ public:
         }
 
         // Create waiting thread object and add it into the list of waiters.
-        WaitingThread waiter{need_count, is_fifo};
+        auto waiter = new WaitingThread(need_count, is_fifo);
         AddWaiter(waiter);
 
         // Perform the wait.
-        std::exchange(lk, std::unique_lock{waiter.mutex});
-        return waiter.Wait(lk, timeout);
+        std::exchange(lk, std::unique_lock{waiter->mutex});
+        return waiter->Wait(lk, timeout);
     }
 
     bool Signal(s32 signal_count) {
@@ -54,14 +55,14 @@ public:
 
         // Wake up threads in order of priority.
         for (auto it = wait_list.begin(); it != wait_list.end();) {
-            auto& waiter = *it;
-            if (waiter.need_count > token_count) {
+            auto* waiter = *it;
+            if (waiter->need_count > token_count) {
                 it++;
                 continue;
             }
-            std::scoped_lock lk2{waiter.mutex};
-            token_count -= waiter.need_count;
-            waiter.cv.notify_one();
+            std::scoped_lock lk2{waiter->mutex};
+            token_count -= waiter->need_count;
+            waiter->cv.notify_one();
             it = wait_list.erase(it);
         }
 
@@ -74,8 +75,8 @@ public:
             *num_waiters = wait_list.size();
         }
         for (auto& waiter : wait_list) {
-            waiter.was_cancled = true;
-            waiter.cv.notify_one();
+            waiter->was_cancled = true;
+            waiter->cv.notify_one();
         }
         wait_list.clear();
         token_count = set_count < 0 ? init_count : set_count;
@@ -138,24 +139,20 @@ public:
         }
     };
 
-    void AddWaiter(WaitingThread& waiter) {
+    void AddWaiter(WaitingThread* waiter) {
         // Insert at the end of the list for FIFO order.
         if (is_fifo) {
             wait_list.push_back(waiter);
             return;
         }
-        // Find the first with priority less then us and insert right before it.
-        auto it = wait_list.begin();
-        while (it != wait_list.end() && it->priority > waiter.priority) {
-            it++;
-        }
-        wait_list.insert(it, waiter);
+        UNREACHABLE();
     }
 
     using WaitingThreads =
         boost::intrusive::list<WaitingThread, boost::intrusive::base_hook<ListBaseHook>,
                                boost::intrusive::constant_time_size<false>>;
-    WaitingThreads wait_list;
+    //WaitingThreads wait_list;
+    std::list<WaitingThread*> wait_list;
     std::string name;
     std::atomic<s32> token_count;
     std::mutex mutex;
@@ -172,7 +169,7 @@ s32 PS4_SYSV_ABI sceKernelCreateSema(OrbisKernelSema* sem, const char* pName, u3
         LOG_ERROR(Lib_Kernel, "Semaphore creation parameters are invalid!");
         return ORBIS_KERNEL_ERROR_EINVAL;
     }
-    *sem = new Semaphore(initCount, maxCount, pName, attr == 1);
+    *sem = new Semaphore(initCount, maxCount, pName, /*attr == 1*/true);
     return ORBIS_OK;
 }
 

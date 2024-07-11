@@ -34,7 +34,7 @@ public:
     bool BindResources(Core::MemoryManager* memory, StreamBuffer& staging,
                        VideoCore::TextureCache& texture_cache) const;
 
-private:
+public:
     const Instance& instance;
     Scheduler& scheduler;
     vk::UniquePipeline pipeline;

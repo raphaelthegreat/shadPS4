@@ -77,7 +77,7 @@ void Rasterizer::DispatchDirect() {
     const auto cmdbuf = scheduler.CommandBuffer();
     const auto& cs_program = liverpool->regs.cs_program;
     const ComputePipeline* pipeline = pipeline_cache.GetComputePipeline();
-    if (!pipeline) {
+    if (!pipeline || pipeline->compute_key == 4278108063) {
         return;
     }
 

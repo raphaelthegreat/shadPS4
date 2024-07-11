@@ -148,9 +148,12 @@ struct Liverpool {
     };
 
     template <typename Shader>
-    static constexpr auto* GetBinaryInfo(const Shader& sh) {
+    static constexpr const BinaryInfo* GetBinaryInfo(const Shader& sh) {
         const auto* code = sh.template Address<u32*>();
         const auto* bininfo = std::bit_cast<const BinaryInfo*>(code + (code[1] + 1) * 2);
+        if (!bininfo->Valid()) {
+            return nullptr;
+        }
         ASSERT_MSG(bininfo->Valid(), "Invalid shader binary header");
         return bininfo;
     }

@@ -961,7 +961,12 @@ int PS4_SYSV_ABI scePthreadCreate(ScePthread* thread, const ScePthreadAttr* attr
     ASSERT(result == 0);
 
     if (name != NULL) {
-        (*thread)->name = name;
+        std::string thr_name = name;
+        if (thr_name == "AgThread") {
+            static int counter = 0;
+            thr_name += fmt::format("{}", counter++);
+        }
+        (*thread)->name = thr_name;
     } else {
         (*thread)->name = "no-name";
     }

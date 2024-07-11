@@ -6,6 +6,8 @@
 #include "common/assert.h"
 #include "common/singleton.h"
 #include "common/logging/log.h"
+#include "common/io_file.h"
+#include "common/path_util.h"
 #include "core/libraries/avplayer/avplayer.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/libs.h"
@@ -140,22 +142,76 @@ typedef struct SceAvPlayerFrameInfo {
     SceAvPlayerStreamDetails details;
 } SceAvPlayerFrameInfo;
 
+typedef struct SceAvPlayerAudioEx {
+    uint16_t	channelCount;
+    uint8_t		reserved[2];
+    uint32_t	sampleRate;
+    uint32_t	size;
+    uint8_t		languageCode[4];
+    uint8_t		reserved1[64];
+} SceAvPlayerAudioEx;
+
+typedef struct SceAvPlayerVideoEx {
+    uint32_t	width;
+    uint32_t	height;
+    float		aspectRatio;
+    uint8_t		languageCode[4];
+    uint32_t	framerate;
+    uint32_t	cropLeftOffset;
+    uint32_t	cropRightOffset;
+    uint32_t	cropTopOffset;
+    uint32_t	cropBottomOffset;
+    uint8_t		chromaBitDepth;
+    bool		videoFullRangeFlag;
+    uint8_t		reserved1[37];
+} SceAvPlayerVideoEx;
+
+typedef struct SceAvPlayerTimedTextEx {
+    uint8_t		languageCode[4];
+    uint8_t		reserved[12];
+    uint8_t		reserved1[64];
+} SceAvPlayerTimedTextEx;
+
+typedef union SceAvPlayerStreamDetailsEx {
+    SceAvPlayerAudioEx audio;
+    SceAvPlayerVideoEx video;
+    SceAvPlayerTimedTextEx subs;
+    uint8_t		reserved1[80];
+} SceAvPlayerStreamDetailsEx;
+
+typedef struct SceAvPlayerFrameInfoEx {
+    void* pData;
+    uint8_t  reserved[4];
+    uint64_t timeStamp;
+    SceAvPlayerStreamDetailsEx details;
+} SceAvPlayerFrameInfoEx;
+
 constexpr static std::array<char, 4> LANGUAGE_CODE_ENG={'E', 'N', 'G', '\0'};
 
-struct PlayerState {
-    constexpr static size_t BufferCount = 2;
+static std::chrono::microseconds CurrentTime() {
+    return std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::high_resolution_clock::now().time_since_epoch());
+}
 
+struct PlayerState {
+    constexpr static size_t RingBufferCount = 2;
+
+    SceAvPlayerMemAllocator* memory_replacement;
     AVFormatContext* format_context;
-    AVCodecContext* audio_codec_context;
-    AVCodecContext* video_codec_context;
+    AVCodecContext* audio_context;
+    AVCodecContext* video_context;
     std::queue<AVPacket*> audio_packets;
     std::queue<AVPacket*> video_packets;
     u64 last_video_timestamp;
     u64 last_audio_timestamp;
-    std::array<u16, BufferCount> audio_buffer;
-    std::array<u8, BufferCount> video_buffer;
+    u32 audio_buffer_ring_index = 0;
+    u32 audio_buffer_size = 0;
+    std::array<u8*, RingBufferCount> audio_buffer;
+    u32 video_buffer_ring_index = 0;
+    u32 video_buffer_size = 0;
+    std::array<u8*, RingBufferCount> video_buffer;
     std::vector<u16> audio_chunk;
-    std::vector<u16> video_chunk;
+    std::vector<u8> video_chunk;
     std::chrono::milliseconds duration;
     u32 num_streams;
     s32 video_stream_id = -1;
@@ -163,13 +219,13 @@ struct PlayerState {
     u32 num_channels;
     u32 num_samples;
     u32 sample_rate;
-    std::string source;
+    std::string video_playing;
+    std::queue<std::string> videos_queue;
 
-    void CreateMedia(std::string_view source_path) {
+    void SwitchVideo(const std::string& source_path) {
         // Create ffmpeg format context.
-        source = source_path;
         format_context = avformat_alloc_context();
-        avformat_open_input(&format_context, source.c_str(), nullptr, nullptr);
+        avformat_open_input(&format_context, source_path.c_str(), nullptr, nullptr);
 
         // Query stream duration.
         const auto duration_us = std::chrono::microseconds(format_context->duration);
@@ -185,9 +241,9 @@ struct PlayerState {
         if (video_stream_id >= 0) {
             AVStream* video_stream = format_context->streams[video_stream_id];
             const AVCodec* video_codec = avcodec_find_decoder(video_stream->codecpar->codec_id);
-            video_codec_context = avcodec_alloc_context3(video_codec);
-            avcodec_parameters_to_context(video_codec_context, video_stream->codecpar);
-            avcodec_open2(video_codec_context, video_codec, nullptr);
+            video_context = avcodec_alloc_context3(video_codec);
+            avcodec_parameters_to_context(video_context, video_stream->codecpar);
+            avcodec_open2(video_context, video_codec, nullptr);
             LOG_INFO(Lib_AvPlayer, "Video stream_id = {}, video codec = {}, resolution = {}x{}",
                      video_stream_id, video_codec->long_name, video_stream->codecpar->width,
                      video_stream->codecpar->height);
@@ -197,16 +253,55 @@ struct PlayerState {
         if (audio_stream_id >= 0) {
             AVStream* audio_stream = format_context->streams[audio_stream_id];
             const AVCodec* audio_codec = avcodec_find_decoder(audio_stream->codecpar->codec_id);
-            audio_codec_context = avcodec_alloc_context3(audio_codec);
-            avcodec_parameters_to_context(audio_codec_context, audio_stream->codecpar);
-            avcodec_open2(audio_codec_context, audio_codec, nullptr);
+            audio_context = avcodec_alloc_context3(audio_codec);
+            avcodec_parameters_to_context(audio_context, audio_stream->codecpar);
+            avcodec_open2(audio_context, audio_codec, nullptr);
             LOG_INFO(Lib_AvPlayer, "Audio stream_id = {}, audio codec = {}, sample rate = {}",
                      audio_stream_id, audio_codec->long_name, audio_stream->codecpar->sample_rate);
+        }
+
+        video_playing = source_path;
+    }
+
+    void FreeVideo() {
+        if (video_context) {
+            avcodec_free_context(&video_context);
+        }
+        if (audio_context) {
+            avcodec_free_context(&audio_context);
+        }
+        if (format_context) {
+            avformat_close_input(&format_context);
+        }
+
+        while (!video_packets.empty()) {
+            AVPacket *packet = video_packets.front();
+            av_packet_free(&packet);
+            video_packets.pop();
+        }
+        while (!audio_packets.empty()) {
+            AVPacket *packet = audio_packets.front();
+            av_packet_free(&packet);
+            audio_packets.pop();
+        }
+        video_playing.clear();
+    }
+
+    void Queue(const std::filesystem::path& path) {
+        if (!std::filesystem::exists(path)) {
+            LOG_INFO(Lib_AvPlayer, "Cannot find video: {}", path.string());
+            return;
+        }
+        LOG_INFO(Lib_AvPlayer, "Queued video: {}", path.string());
+        if (video_playing.empty()) {
+            SwitchVideo(path);
+        } else {
+            videos_queue.push(path);
         }
     }
 
     bool IsMediaAvailable() {
-        return !source.empty();
+        return !videos_queue.empty();
     }
 
     bool NextPacket(s32 stream_id) {
@@ -217,9 +312,9 @@ struct PlayerState {
                 AVPacket* packet = this_queue.front();
                 this_queue.pop();
                 if (stream_id == video_stream_id) {
-                    ASSERT(avcodec_send_packet(video_codec_context, packet) == 0);
+                    ASSERT(avcodec_send_packet(video_context, packet) == 0);
                 } else {
-                    ASSERT(avcodec_send_packet(audio_codec_context, packet) == 0);
+                    ASSERT(avcodec_send_packet(audio_context, packet) == 0);
                 }
                 av_packet_free(&packet);
                 return true;
@@ -240,12 +335,12 @@ struct PlayerState {
         if (audio_stream_id < 0) {
             return {};
         }
-        if (source.empty()) {
+        if (video_playing.empty()) {
             return {};
         }
         AVFrame* frame = av_frame_alloc();
         while (true) {
-            int error = avcodec_receive_frame(audio_codec_context, frame);
+            const int error = avcodec_receive_frame(audio_context, frame);
             if (error == AVERROR(EAGAIN) && NextPacket(audio_stream_id)) {
                 continue;
             }
@@ -275,19 +370,133 @@ struct PlayerState {
         av_frame_free(&frame);
         return audio_chunk;
     }
+
+    void CopyYuvDataFromFrame(AVFrame *frame, u8 *dest, const uint32_t width, const uint32_t height, bool is_p3) {
+        for (uint32_t i = 0; i < height; i++) {
+            memcpy(dest, &frame->data[0][frame->linesize[0] * i], width);
+            dest += width;
+        }
+
+        if (is_p3) {
+            for (uint32_t i = 0; i < height / 2; i++) {
+                memcpy(dest, &frame->data[1][frame->linesize[1] * i], width / 2);
+                dest += width / 2;
+            }
+            for (uint32_t i = 0; i < height / 2; i++) {
+                memcpy(dest, &frame->data[2][frame->linesize[2] * i], width / 2);
+                dest += width / 2;
+            }
+        } else {
+            // p2 format, U and V are interleaved
+            for (uint32_t i = 0; i < height / 2; i++) {
+                const uint8_t *src_u = &frame->data[1][frame->linesize[1] * i];
+                const uint8_t *src_v = &frame->data[2][frame->linesize[2] * i];
+                for (uint32_t j = 0; j < width / 2; j++) {
+                    dest[0] = src_u[j];
+                    dest[1] = src_v[j];
+                    dest += 2;
+                }
+            }
+        }
+    }
+
+    std::span<const u8> ReceiveVideo() {
+        if (video_stream_id < 0) {
+            return {};
+        }
+        if (video_playing.empty()) {
+            return {};
+        }
+
+        AVFrame *frame = av_frame_alloc();
+        while (true) {
+            const int error = avcodec_receive_frame(video_context, frame);
+            if (error == AVERROR(EAGAIN) && NextPacket(video_stream_id)) {
+                continue;
+            }
+
+            if (error != 0) {
+                if (videos_queue.empty()) {
+                    // Stop playing videos or
+                    video_playing.clear();
+                    break;
+                } else {
+                    // Play the next video (if there is any).
+                    SwitchVideo(videos_queue.front());
+                    videos_queue.pop();
+                    continue;
+                }
+            }
+
+            if (frame->format != AV_PIX_FMT_YUV420P) {
+                LOG_ERROR(Lib_AvPlayer, "Unknown video format {}", frame->format);
+            }
+
+            last_video_timestamp = av_rescale_q(frame->best_effort_timestamp,
+                                                format_context->streams[video_stream_id]->time_base,
+                                                AV_TIME_BASE_Q);
+
+            video_chunk.resize(video_context->width * video_context->height * 3 / 2);
+            CopyYuvDataFromFrame(frame, video_chunk.data(), frame->width, frame->height, false);
+            break;
+        }
+
+        av_frame_free(&frame);
+        return video_chunk;
+    }
+
+    u8* GetBuffer(SceAvPlayerStreamType media_type,
+                  u32 size, bool new_frame = true) {
+        u32& buffer_size = media_type == SCE_AVPLAYER_VIDEO ? video_buffer_size : audio_buffer_size;
+        u32& ring_index = media_type == SCE_AVPLAYER_VIDEO ? video_buffer_ring_index : audio_buffer_ring_index;
+        auto& buffers = media_type == SCE_AVPLAYER_VIDEO ? video_buffer : audio_buffer;
+
+        if (buffer_size < size) {
+            buffer_size = size;
+            for (u32 index = 0; index < RingBufferCount; index++) {
+                const auto& mem = memory_replacement;
+                if (buffers[index]) {
+                    mem->deallocateTexture(mem->objectPointer, buffers[index]);
+                }
+                buffers[index] = (u8*)mem->allocateTexture(mem->objectPointer, 0x20, size);
+            }
+        }
+
+        if (new_frame) {
+            ring_index++;
+        }
+        return buffers[ring_index % RingBufferCount];
+    }
+
+    u32 GetH264BufferSize() const {
+        return video_context->width * video_context->height * 3 / 2;
+    }
+
+    std::chrono::microseconds GetFramerate() const {
+        const AVRational rational = format_context->streams[video_stream_id]->avg_frame_rate;
+        return std::chrono::seconds(rational.den / rational.num);
+    }
 };
 
 struct PlayerInfo {
     void* handle;
     u32 num_refs;
-    std::mutex flock;
     PlayerState state;
     bool is_looped;
-    bool is_paused;
-    std::chrono::high_resolution_clock::time_point last_frame_time;
+    bool is_paused = true;
+    std::chrono::microseconds last_frame_time;
     SceAvPlayerMemAllocator memory_replacement;
     SceAvPlayerFileReplacement file_replacement;
     SceAvPlayerEventReplacement event_replacement;
+
+    PlayerInfo() {
+        state.memory_replacement = &memory_replacement;
+    }
+
+    bool HasFileReplacements() const noexcept {
+        return file_replacement.open && file_replacement.readOffset &&
+               file_replacement.close;
+    }
 
     void EventCallback(s32 event_id, s32 source_id, void* event_data) {
         if (event_replacement.eventCallback) {
@@ -299,6 +508,13 @@ struct PlayerInfo {
     s32 Open(const char* filename) {
         if (file_replacement.open) {
             return file_replacement.open(file_replacement.objectPointer, filename);
+        }
+        return 0;
+    }
+
+    s32 ReadOffset(u8* buffer, u64 pos, u32 buf_len) {
+        if (file_replacement.readOffset) {
+            return file_replacement.readOffset(file_replacement.objectPointer, buffer, pos, buf_len);
         }
         return 0;
     }
@@ -338,20 +554,47 @@ struct PlayerInfo {
 
 typedef PlayerInfo* SceAvPlayerHandle;
 
-s32 PS4_SYSV_ABI sceAvPlayerAddSource(SceAvPlayerHandle handle, const char* filename) {
-    if (!handle || !filename) {
+static std::recursive_mutex mutex;
+
+s32 PS4_SYSV_ABI sceAvPlayerAddSource(SceAvPlayerHandle player, const char* filename) {
+    std::scoped_lock lk{mutex};
+    if (!player || !filename) {
         return 0x806a0001;
     }
 
     // Open the video file and configure ffmpeg
     auto* mnt = Common::Singleton<Core::FileSys::MntPoints>::Instance();
-    ASSERT(handle->Open(filename) >= 0);
-    const auto host_path = mnt->GetHostFile(filename);
-    handle->state.CreateMedia(host_path);
+    std::filesystem::path filepath = mnt->GetHostFile(filename);
+    if (!std::filesystem::exists(filepath) && player->HasFileReplacements()) {
+        // Games can pass custom paths to avplayer that we can't open directly.
+        ASSERT(player->Open(filename) >= 0);
+        const u32 size = player->Size();
+
+        // Read the file and dump it to the directory so ffmpeg can read it.
+        const auto dump_path = Common::FS::GetUserPath(Common::FS::PathType::UserDir);
+        const auto file = std::string_view(filename);
+        const auto dump_name = file.substr(file.find_last_of('/') + 1);
+        filepath = dump_path / dump_name;
+        static constexpr u32 BufferSize = 512_KB;
+        Common::FS::IOFile temp_file{filepath, Common::FS::FileAccessMode::Write};
+        std::vector<u8> buffer(BufferSize);
+        u32 bytes_remaining = size;
+        u32 offset = 0;
+        while (bytes_remaining > 0) {
+            const u32 buf_size = std::min(BufferSize, bytes_remaining);
+            player->ReadOffset(buffer.data(), offset, buf_size);
+            temp_file.WriteRaw<u8>(buffer.data(), buf_size);
+            offset += buf_size;
+            bytes_remaining -= buf_size;
+        }
+        temp_file.Close();
+        player->Close();
+    }
+    player->state.Queue(filepath);
 
     // Notify guest about the change
-    handle->EventCallback(SCE_AVPLAYER_STATE_BUFFERING, 0, nullptr);
-    handle->EventCallback(SCE_AVPLAYER_STATE_READY, 0, nullptr);
+    player->EventCallback(SCE_AVPLAYER_STATE_BUFFERING, 0, nullptr);
+    player->EventCallback(SCE_AVPLAYER_STATE_READY, 0, nullptr);
     return ORBIS_OK;
 }
 
@@ -366,9 +609,10 @@ int PS4_SYSV_ABI sceAvPlayerChangeStream() {
 }
 
 s32 PS4_SYSV_ABI sceAvPlayerClose(SceAvPlayerHandle player) {
+    std::scoped_lock lk{mutex};
     LOG_ERROR(Lib_AvPlayer, "called");
     player->EventCallback(SCE_AVPLAYER_STATE_STOP, 0, nullptr);
-    delete player;
+    player->Deallocate(player);
     return ORBIS_OK;
 }
 
@@ -383,6 +627,7 @@ int PS4_SYSV_ABI sceAvPlayerDisableStream() {
 }
 
 s32 PS4_SYSV_ABI sceAvPlayerEnableStream(SceAvPlayerHandle player, u32 stream_id) {
+    std::scoped_lock lk{mutex};
     LOG_INFO(Lib_AvPlayer, "called stream_id = {}", stream_id);
     if (!player) {
         return 0x806a0001;
@@ -393,13 +638,36 @@ s32 PS4_SYSV_ABI sceAvPlayerEnableStream(SceAvPlayerHandle player, u32 stream_id
     return ORBIS_OK;
 }
 
-int PS4_SYSV_ABI sceAvPlayerGetAudioData() {
-    LOG_ERROR(Lib_AvPlayer, "(STUBBED) called");
-    return ORBIS_OK;
+bool PS4_SYSV_ABI sceAvPlayerGetAudioData(SceAvPlayerHandle player,
+                                          SceAvPlayerFrameInfo* audioInfo) {
+    std::scoped_lock lk{mutex};
+    LOG_INFO(Lib_AvPlayer, "called");
+    if (!player || !audioInfo) {
+        return false;
+    }
+    auto& state = player->state;
+    if (player->is_paused) {
+        return false;
+    }
+
+    const auto audio_data = state.ReceiveAudio(true);
+    if (audio_data.empty()) {
+        return false;
+    }
+
+    u8* buffer = state.GetBuffer(SCE_AVPLAYER_AUDIO, audio_data.size_bytes(), false);
+    std::memcpy(buffer, audio_data.data(), audio_data.size_bytes());
+    audioInfo->pData = buffer;
+    audioInfo->timeStamp = state.last_audio_timestamp / 1000;
+    audioInfo->details.audio.channelCount = state.num_channels;
+    audioInfo->details.audio.sampleRate = state.sample_rate;
+    audioInfo->details.audio.size = state.num_channels * state.num_samples * sizeof(u16);
+    return true;
 }
 
 s32 PS4_SYSV_ABI sceAvPlayerGetStreamInfo(SceAvPlayerHandle player, u32 stream_id,
                                           SceAvPlayerStreamInfo* argInfo) {
+    std::scoped_lock lk{mutex};
     LOG_INFO(Lib_AvPlayer, "called stream_id = {}", stream_id);
     if (!player || !argInfo) {
         return 0x806a0001;
@@ -410,8 +678,8 @@ s32 PS4_SYSV_ABI sceAvPlayerGetStreamInfo(SceAvPlayerHandle player, u32 stream_i
         argInfo->type = SCE_AVPLAYER_VIDEO;
         argInfo->duration = 5000;
         argInfo->startTime = 0;
-        argInfo->details.video.width = state.video_codec_context->width;
-        argInfo->details.video.height = state.video_codec_context->height;
+        argInfo->details.video.width = state.video_context->width;
+        argInfo->details.video.height = state.video_context->height;
         argInfo->details.video.aspectRatio = float(argInfo->details.video.width) / argInfo->details.video.height;
         std::memcpy(argInfo->details.video.languageCode, LANGUAGE_CODE_ENG.data(), 4);
         LOG_INFO(Lib_AvPlayer, "Video stream width = {}, height = {}, aspect ratio = {}",
@@ -442,12 +710,40 @@ int PS4_SYSV_ABI sceAvPlayerGetVideoData() {
     return ORBIS_OK;
 }
 
-int PS4_SYSV_ABI sceAvPlayerGetVideoDataEx() {
-    LOG_ERROR(Lib_AvPlayer, "(STUBBED) called");
-    return ORBIS_OK;
+bool PS4_SYSV_ABI sceAvPlayerGetVideoDataEx(SceAvPlayerHandle player,
+                                            SceAvPlayerFrameInfoEx *videoInfo) {
+    std::scoped_lock lk{mutex};
+    LOG_TRACE(Lib_AvPlayer, "called");
+    if (!player || !videoInfo || player->is_paused) {
+        return false;
+    }
+
+    auto& state = player->state;
+    const auto framerate = state.GetFramerate();
+    if (player->last_frame_time + framerate < CurrentTime()) {
+        player->last_frame_time += framerate;
+        u8* buffer = state.GetBuffer(SCE_AVPLAYER_VIDEO, state.GetH264BufferSize(), true);
+        const auto video_data = state.ReceiveVideo();
+        const size_t video_size = video_data.size_bytes();
+        std::memcpy(buffer, video_data.data(), video_data.size_bytes());
+        videoInfo->pData = buffer;
+    } else {
+        u8* buffer = state.GetBuffer(SCE_AVPLAYER_VIDEO, state.GetH264BufferSize(), false);
+        videoInfo->pData = buffer;
+    }
+
+    videoInfo->timeStamp = state.last_video_timestamp / 1000;
+    videoInfo->details.video.width = state.video_context->width;
+    videoInfo->details.video.height = state.video_context->height;
+    videoInfo->details.video.aspectRatio = float(state.video_context->width) / state.video_context->height;
+    videoInfo->details.video.framerate = 0;
+    std::memcpy(videoInfo->details.video.languageCode, LANGUAGE_CODE_ENG.data(), 4);
+    videoInfo->details.video.chromaBitDepth = 8;
+    return true;
 }
 
 SceAvPlayerHandle PS4_SYSV_ABI sceAvPlayerInit(SceAvPlayerInitData *pInit) {
+    std::scoped_lock lk{mutex};
     LOG_ERROR(Lib_AvPlayer, "called");
 
     // Allocate player from the provided memory callback.
@@ -459,8 +755,7 @@ SceAvPlayerHandle PS4_SYSV_ABI sceAvPlayerInit(SceAvPlayerInitData *pInit) {
     player->memory_replacement = pInit->memoryReplacement;
     player->file_replacement = pInit->fileReplacement;
     player->event_replacement = pInit->eventReplacement;
-    player->is_paused = !pInit->autoStart;
-    player->last_frame_time = std::chrono::high_resolution_clock::now();
+    player->last_frame_time = CurrentTime();
     return player;
 }
 
@@ -469,9 +764,13 @@ int PS4_SYSV_ABI sceAvPlayerInitEx() {
     return ORBIS_OK;
 }
 
-int PS4_SYSV_ABI sceAvPlayerIsActive() {
-    LOG_ERROR(Lib_AvPlayer, "(STUBBED) called");
-    return ORBIS_OK;
+bool PS4_SYSV_ABI sceAvPlayerIsActive(SceAvPlayerHandle player) {
+    std::scoped_lock lk{mutex};
+    LOG_TRACE(Lib_AvPlayer, "called");
+    if (!player) {
+        return false;
+    }
+    return !player->state.video_playing.empty();
 }
 
 int PS4_SYSV_ABI sceAvPlayerJumpToTime() {
@@ -479,8 +778,11 @@ int PS4_SYSV_ABI sceAvPlayerJumpToTime() {
     return ORBIS_OK;
 }
 
-int PS4_SYSV_ABI sceAvPlayerPause() {
-    LOG_ERROR(Lib_AvPlayer, "(STUBBED) called");
+s32 PS4_SYSV_ABI sceAvPlayerPause(SceAvPlayerHandle player) {
+    std::scoped_lock lk{mutex};
+    LOG_INFO(Lib_AvPlayer, "called");
+    player->is_paused = true;
+    player->EventCallback(SCE_AVPLAYER_STATE_PAUSE, 0, nullptr);
     return ORBIS_OK;
 }
 
@@ -494,8 +796,13 @@ int PS4_SYSV_ABI sceAvPlayerPrintf() {
     return ORBIS_OK;
 }
 
-int PS4_SYSV_ABI sceAvPlayerResume() {
-    LOG_ERROR(Lib_AvPlayer, "(STUBBED) called");
+s32 PS4_SYSV_ABI sceAvPlayerResume(SceAvPlayerHandle player) {
+    std::scoped_lock lk{mutex};
+    LOG_INFO(Lib_AvPlayer, "called");
+    if (player->is_paused) {
+        player->EventCallback(SCE_AVPLAYER_STATE_PLAY, 0, nullptr);
+    }
+    player->is_paused = false;
     return ORBIS_OK;
 }
 
@@ -519,23 +826,31 @@ int PS4_SYSV_ABI sceAvPlayerSetTrickSpeed() {
     return ORBIS_OK;
 }
 
-int PS4_SYSV_ABI sceAvPlayerStart() {
-    LOG_ERROR(Lib_AvPlayer, "(STUBBED) called");
+s32 PS4_SYSV_ABI sceAvPlayerStart(SceAvPlayerHandle player) {
+    std::scoped_lock lk{mutex};
+    LOG_INFO(Lib_AvPlayer, "called");
+    player->is_paused = false;
+    player->EventCallback(SCE_AVPLAYER_STATE_PLAY, 0, nullptr);
     return ORBIS_OK;
 }
 
-int PS4_SYSV_ABI sceAvPlayerStop() {
-    LOG_ERROR(Lib_AvPlayer, "(STUBBED) called");
+s32 PS4_SYSV_ABI sceAvPlayerStop(SceAvPlayerHandle player) {
+    std::scoped_lock lk{mutex};
+    LOG_INFO(Lib_AvPlayer, "called");
+    player->state.FreeVideo();
+    player->is_paused = true;
+    player->EventCallback(SCE_AVPLAYER_STATE_STOP, 0, nullptr);
     return ORBIS_OK;
 }
 
 s32 PS4_SYSV_ABI sceAvPlayerStreamCount(SceAvPlayerHandle handle) {
+    std::scoped_lock lk{mutex};
     if (!handle) {
         return 0x806a0001;
     }
 
     LOG_ERROR(Lib_AvPlayer, "called");
-    return handle->state.num_streams;
+    return /*handle->state.num_streams*/2;
 }
 
 int PS4_SYSV_ABI sceAvPlayerVprintf() {

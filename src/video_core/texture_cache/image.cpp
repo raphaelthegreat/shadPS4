@@ -146,7 +146,7 @@ ImageInfo::ImageInfo(const AmdGpu::Liverpool::ColorBuffer& buffer,
     is_tiled = buffer.IsTiled();
     tiling_mode = buffer.GetTilingMode();
     pixel_format = LiverpoolToVK::SurfaceFormat(buffer.info.format, buffer.NumFormat());
-    num_samples = 1 << buffer.attrib.num_fragments_log2;
+    num_samples = 1 /*<< buffer.attrib.num_fragments_log2*/;
     type = vk::ImageType::e2D;
     size.width = hint.Valid() ? hint.width : buffer.Pitch();
     size.height = hint.Valid() ? hint.height : buffer.Height();
