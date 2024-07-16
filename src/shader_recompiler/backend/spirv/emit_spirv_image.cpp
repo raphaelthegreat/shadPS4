@@ -61,9 +61,14 @@ Id EmitImageSampleDrefExplicitLod(EmitContext& ctx, IR::Inst* inst, u32 handle, 
                                             spv::ImageOperandsMask::Lod, ctx.ConstF32(0.f));
 }
 
-Id EmitImageGather(EmitContext& ctx, IR::Inst* inst, const IR::Value& index, Id coords,
+Id EmitImageGather(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords,
                    const IR::Value& offset, const IR::Value& offset2) {
-    UNREACHABLE_MSG("SPIR-V Instruction");
+    const auto& texture = ctx.images[handle & 0xFFFF];
+    const Id image = ctx.OpLoad(texture.image_type, texture.id);
+    const Id sampler = ctx.OpLoad(ctx.sampler_type, ctx.samplers[handle >> 16]);
+    const Id sampled_image = ctx.OpSampledImage(texture.sampled_type, image, sampler);
+    const u32 comp = inst->Flags<IR::TextureInstInfo>().gather_comp.Value();
+    return ctx.OpImageGather(ctx.F32[4], sampled_image, coords, ctx.ConstU32(comp));
 }
 
 Id EmitImageGatherDref(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords,

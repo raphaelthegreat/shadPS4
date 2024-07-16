@@ -59,6 +59,8 @@ IR::Program TranslateProgram(ObjectPool<IR::Inst>& inst_pool, ObjectPool<IR::Blo
     Shader::Optimization::ConstantPropagationPass(program.post_order_blocks);
     Shader::Optimization::IdentityRemovalPass(program.blocks);
     Shader::Optimization::DeadCodeEliminationPass(program);
+    Shader::Optimization::ShaderResourceTableResolvePass(program);
+    Shader::Optimization::IdentityRemovalPass(program.blocks);
     Shader::Optimization::CollectShaderInfoPass(program);
 
     fmt::print("Post passes\n\n{}\n", Shader::IR::DumpProgram(program));

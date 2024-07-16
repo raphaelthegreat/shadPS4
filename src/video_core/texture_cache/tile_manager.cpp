@@ -203,7 +203,7 @@ vk::Format DemoteImageFormatForDetiling(vk::Format format) {
     default:
         break;
     }
-    LOG_ERROR(Render_Vulkan, "Unexpected format for demotion {}", vk::to_string(format));
+    //LOG_ERROR(Render_Vulkan, "Unexpected format for demotion {}", vk::to_string(format));
     return format;
 }
 
@@ -324,8 +324,8 @@ bool TileManager::TryDetile(Image& image) {
 
     const auto* detiler = GetDetiler(image);
     if (!detiler) {
-        LOG_ERROR(Render_Vulkan, "Unsupported tiled image: {} ({})",
-                  vk::to_string(image.info.pixel_format), NameOf(image.info.tiling_mode));
+        //LOG_ERROR(Render_Vulkan, "Unsupported tiled image: {} ({})",
+        //          vk::to_string(image.info.pixel_format), NameOf(image.info.tiling_mode));
         return false;
     }
 

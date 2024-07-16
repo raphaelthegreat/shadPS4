@@ -533,4 +533,46 @@ void ResourceTrackingPass(IR::Program& program) {
     }
 }
 
+struct LoadNode {
+    const IR::Inst* inst;
+    const LoadNode* parent{};
+    boost::container::small_vector<const LoadNode*, 4> children;
+};
+
+void ShaderResourceTableResolvePass(IR::Program& program) {
+    std::vector<LoadNode> srt_tree;
+    return;
+    // We process any lingering s_load_dword instructions in order.
+    for (IR::Block* const block : program.blocks) {
+        for (IR::Inst& inst : block->Instructions()) {
+            if (inst.GetOpcode() != IR::Opcode::ReadConst) {
+                continue;
+            }
+            const IR::Inst* sgpr_base = inst.Arg(0).InstRecursive();
+            const IR::Value& base0 = sgpr_base->Arg(0);
+            const IR::Value& base1 = sgpr_base->Arg(1);
+            const u32 offset = inst.Arg(1).U32() * sizeof(u32);
+            VAddr address = 0;
+            if (base0.IsImmediate() && base1.IsImmediate()) {
+                // Replace instruction by the data it loads.
+                address = base0.U32() | (u64(base1.U32()) << 32);
+            } else {
+                const IR::Inst* prod0 = base0.InstRecursive();
+                const IR::Inst* prod1 = base1.InstRecursive();
+                ASSERT_MSG(prod0->GetOpcode() == IR::Opcode::GetUserData &&
+                           prod1->GetOpcode() == IR::Opcode::GetUserData,
+                           "Unexpected ReadConst base");
+                const auto ud_regs = program.info.user_data;
+                address = ud_regs[prod0->Arg(0).U32()] | (u64(ud_regs[prod1->Arg(0).U32()]) << 32);
+            }
+            address += offset;
+
+            // Replace ReadConst instruction with the value it is loading.
+            u32 dword;
+            std::memcpy(&dword, reinterpret_cast<const void*>(address), sizeof(u32));
+            inst.ReplaceUsesWith(IR::Value{dword});
+        }
+    }
+}
+
 } // namespace Shader::Optimization

@@ -30,10 +30,6 @@ void Translator::IMAGE_GET_RESINFO(const GcnInst& inst) {
 
 void Translator::IMAGE_SAMPLE(const GcnInst& inst) {
     const auto& mimg = inst.control.mimg;
-    if (mimg.da) {
-        LOG_WARNING(Render_Vulkan, "Image instruction declares an array");
-    }
-
     IR::VectorReg addr_reg{inst.src[0].code};
     IR::VectorReg dest_reg{inst.dst[0].code};
     const IR::ScalarReg tsharp_reg{inst.src[2].code * 4};
@@ -111,10 +107,6 @@ void Translator::IMAGE_SAMPLE(const GcnInst& inst) {
 
 void Translator::IMAGE_GATHER(const GcnInst& inst) {
     const auto& mimg = inst.control.mimg;
-    if (mimg.da) {
-        LOG_WARNING(Render_Vulkan, "Image instruction declares an array");
-    }
-
     IR::VectorReg addr_reg{inst.src[0].code};
     IR::VectorReg dest_reg{inst.dst[0].code};
     const IR::ScalarReg tsharp_reg{inst.src[2].code * 4};
@@ -157,7 +149,8 @@ void Translator::IMAGE_GATHER(const GcnInst& inst) {
     info.has_bias.Assign(flags.test(MimgModifier::LodBias));
     info.has_lod_clamp.Assign(flags.test(MimgModifier::LodClamp));
     info.force_level0.Assign(flags.test(MimgModifier::Level0));
-    info.explicit_lod.Assign(explicit_lod);
+    //info.explicit_lod.Assign(explicit_lod);
+    info.gather_comp.Assign(std::bit_width(mimg.dmask) - 1);
 
     // Issue IR instruction, leaving unknown fields blank to patch later.
     const IR::Value texel = [&]() -> IR::Value {

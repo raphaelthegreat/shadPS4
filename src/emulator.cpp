@@ -9,6 +9,7 @@
 #include <core/libraries/libc_internal/libc_internal.h>
 #include <core/libraries/rtc/rtc.h>
 #include <core/libraries/videoout/video_out.h>
+#include "core/libraries/playgo/playgo.h"
 #include <fmt/core.h>
 #include "common/config.h"
 #include "common/debug.h"
@@ -148,13 +149,12 @@ void Emulator::Run(const std::filesystem::path& file) {
 }
 
 void Emulator::LoadSystemModules(const std::filesystem::path& file) {
-    constexpr std::array<SysModules, 6> ModulesToLoad{
+    constexpr std::array<SysModules, 5> ModulesToLoad{
         {{"libSceNgs2.sprx", nullptr},
+         {"libSceFiber.sprx", nullptr},
          {"libSceLibcInternal.sprx", &Libraries::LibcInternal::RegisterlibSceLibcInternal},
          {"libSceDiscMap.sprx", &Libraries::DiscMap::RegisterlibSceDiscMap},
-         {"libSceRtc.sprx", &Libraries::Rtc::RegisterlibSceRtc},
-         {"libSceJpegEnc.sprx", nullptr},
-         {"libSceJson2.sprx", nullptr}}};
+         {"libSceRtc.sprx", &Libraries::Rtc::RegisterlibSceRtc}}};
 
     std::vector<std::filesystem::path> found_modules;
     const auto& sys_module_path = Common::FS::GetUserPath(Common::FS::PathType::SysModuleDir);

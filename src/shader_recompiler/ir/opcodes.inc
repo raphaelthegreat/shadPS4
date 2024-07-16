@@ -315,4 +315,5 @@ OPCODE(ImageAtomicExchange32,                               U32,            Opaq
 
 // Warp operations
 OPCODE(LaneId,                                              U32,                                                                                            )
+OPCODE(WarpId,                                              U32,                                                                                            )
 OPCODE(QuadShuffle,                                         U32,            U32,            U32                                                             )

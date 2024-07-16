@@ -37,6 +37,10 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL DebugUtilsCallback(
         break;
     }
 
+    if (std::string_view(callback_data->pMessage).contains("OpIMul")) {
+        printf("fbad");
+    }
+
     Common::Log::Level level{};
     switch (severity) {
     case VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT:

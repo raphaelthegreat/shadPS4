@@ -13,6 +13,7 @@ void IdentityRemovalPass(IR::BlockList& program);
 void DeadCodeEliminationPass(IR::Program& program);
 void ConstantPropagationPass(IR::BlockList& program);
 void ResourceTrackingPass(IR::Program& program);
+void ShaderResourceTableResolvePass(IR::Program& program);
 void CollectShaderInfoPass(IR::Program& program);
 
 } // namespace Shader::Optimization

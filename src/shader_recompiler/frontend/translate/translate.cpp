@@ -29,7 +29,8 @@ void Translator::EmitPrologue() {
     // Initialize user data.
     IR::ScalarReg dst_sreg = IR::ScalarReg::S0;
     for (u32 i = 0; i < info.num_user_data; i++) {
-        ir.SetScalarReg(dst_sreg++, ir.GetUserData(dst_sreg));
+        ir.SetScalarReg(dst_sreg, ir.GetUserData(dst_sreg));
+        dst_sreg++;
     }
 
     IR::VectorReg dst_vreg = IR::VectorReg::V0;
@@ -76,9 +77,6 @@ void Translator::EmitPrologue() {
 }
 
 IR::U32F32 Translator::GetSrc(const InstOperand& operand, bool force_flt) {
-    // Input modifiers work on float values.
-    force_flt |= operand.input_modifier.abs | operand.input_modifier.neg;
-
     IR::U32F32 value{};
     switch (operand.field) {
     case OperandField::ScalarGPR:
@@ -137,7 +135,11 @@ IR::U32F32 Translator::GetSrc(const InstOperand& operand, bool force_flt) {
         value = ir.Imm32(-0.5f);
         break;
     case OperandField::ConstFloatNeg_1_0:
-        value = ir.Imm32(-1.0f);
+        if (force_flt) {
+            value = ir.Imm32(-1.0f);
+        } else {
+            value = ir.Imm32(-1);
+        }
         break;
     case OperandField::ConstFloatNeg_2_0:
         value = ir.Imm32(-2.0f);
@@ -159,14 +161,17 @@ IR::U32F32 Translator::GetSrc(const InstOperand& operand, bool force_flt) {
             value = ir.GetVccHi();
         }
         break;
+    case OperandField::M0:
+        value = m0_value;
+        break;
     default:
         UNREACHABLE();
     }
 
-    if (operand.input_modifier.abs) {
+    if (operand.input_modifier.abs && force_flt) {
         value = ir.FPAbs(value);
     }
-    if (operand.input_modifier.neg) {
+    if (operand.input_modifier.neg && force_flt) {
         value = ir.FPNeg(value);
     }
     return value;
@@ -177,7 +182,7 @@ void Translator::SetDst(const InstOperand& operand, const IR::U32F32& value) {
     if (operand.output_modifier.multiplier != 0.f) {
         result = ir.FPMul(result, ir.Imm32(operand.output_modifier.multiplier));
     }
-    if (operand.output_modifier.clamp) {
+    if (operand.output_modifier.clamp && value.Type() == IR::Type::F32) {
         result = ir.FPSaturate(value);
     }
     switch (operand.field) {
@@ -190,6 +195,7 @@ void Translator::SetDst(const InstOperand& operand, const IR::U32F32& value) {
     case OperandField::VccHi:
         return ir.SetVccHi(result);
     case OperandField::M0:
+        m0_value = result;
         break;
     default:
         UNREACHABLE();
@@ -293,6 +299,12 @@ void Translate(IR::Block* block, u32 block_base, std::span<const GcnInst> inst_l
         case Opcode::S_MUL_I32:
             translator.S_MUL_I32(inst);
             break;
+        case Opcode::S_MIN_U32:
+            translator.S_MIN_U32(inst);
+            break;
+        case Opcode::S_MAX_U32:
+            translator.S_MAX_U32(inst);
+            break;
         case Opcode::V_MAD_F32:
             translator.V_MAD_F32(inst);
             break;
@@ -318,6 +330,7 @@ void Translate(IR::Block* block, u32 block_base, std::span<const GcnInst> inst_l
             translator.V_LSHLREV_B32(inst);
             break;
         case Opcode::V_ADD_I32:
+        case Opcode::V_ADDC_U32:
             translator.V_ADD_I32(inst);
             break;
         case Opcode::V_CVT_F32_I32:
@@ -411,6 +424,9 @@ void Translate(IR::Block* block, u32 block_base, std::span<const GcnInst> inst_l
         case Opcode::V_MADAK_F32: // Yes these can share the opcode
             translator.V_FMA_F32(inst);
             break;
+        case Opcode::V_MAD_U64_U32:
+            translator.V_MAD_U32(inst);
+            break;
         case Opcode::IMAGE_SAMPLE_LZ_O:
         case Opcode::IMAGE_SAMPLE_O:
         case Opcode::IMAGE_SAMPLE_C:
@@ -457,6 +473,8 @@ void Translate(IR::Block* block, u32 block_base, std::span<const GcnInst> inst_l
             translator.IMAGE_GET_LOD(inst);
             break;
         case Opcode::IMAGE_GATHER4_C:
+        case Opcode::IMAGE_GATHER4_LZ:
+        case Opcode::IMAGE_GATHER4_LZ_O:
             translator.IMAGE_GATHER(inst);
             break;
         case Opcode::IMAGE_STORE:
@@ -537,6 +555,9 @@ void Translate(IR::Block* block, u32 block_base, std::span<const GcnInst> inst_l
         case Opcode::V_CMP_NGE_F32:
             translator.V_CMP_F32(ConditionOp::LT, false, inst);
             break;
+        case Opcode::V_CMP_U_F32:
+            translator.V_CMP_F32(ConditionOp::U, false, inst);
+            break;
         case Opcode::S_CMP_LT_U32:
             translator.S_CMP(ConditionOp::LT, false, inst);
             break;
@@ -554,6 +575,9 @@ void Translate(IR::Block* block, u32 block_base, std::span<const GcnInst> inst_l
             break;
         case Opcode::S_CMP_GT_I32:
             translator.S_CMP(ConditionOp::GT, true, inst);
+            break;
+        case Opcode::S_CMP_GT_U32:
+            translator.S_CMP(ConditionOp::GT, false, inst);
             break;
         case Opcode::S_CMP_GE_I32:
             translator.S_CMP(ConditionOp::GE, true, inst);
@@ -586,6 +610,10 @@ void Translate(IR::Block* block, u32 block_base, std::span<const GcnInst> inst_l
         case Opcode::BUFFER_LOAD_DWORD:
             translator.BUFFER_LOAD_FORMAT(1, false, inst);
             break;
+        case Opcode::BUFFER_LOAD_FORMAT_XY:
+        case Opcode::BUFFER_LOAD_DWORDX2:
+            translator.BUFFER_LOAD_FORMAT(2, false, inst);
+            break;
         case Opcode::BUFFER_LOAD_FORMAT_XYZ:
         case Opcode::BUFFER_LOAD_DWORDX3:
             translator.BUFFER_LOAD_FORMAT(3, false, inst);
@@ -597,6 +625,8 @@ void Translate(IR::Block* block, u32 block_base, std::span<const GcnInst> inst_l
         case Opcode::BUFFER_STORE_FORMAT_X:
         case Opcode::BUFFER_STORE_DWORD:
             translator.BUFFER_STORE_FORMAT(1, false, inst);
+            break;
+        case Opcode::BUFFER_STORE_DWORDX2:
             break;
         case Opcode::BUFFER_STORE_DWORDX3:
             translator.BUFFER_STORE_FORMAT(3, false, inst);
@@ -649,6 +679,9 @@ void Translate(IR::Block* block, u32 block_base, std::span<const GcnInst> inst_l
             break;
         case Opcode::V_MIN3_F32:
             translator.V_MIN3_F32(inst);
+            break;
+        case Opcode::V_MIN3_I32:
+            translator.V_MIN3_I32(inst);
             break;
         case Opcode::V_MIN_LEGACY_F32:
             translator.V_MIN_F32(inst, true);
@@ -928,11 +961,20 @@ void Translate(IR::Block* block, u32 block_base, std::span<const GcnInst> inst_l
         case Opcode::DS_READ_B32:
             translator.DS_READ(32, false, false, inst);
             break;
+        case Opcode::DS_READ_B64:
+            translator.DS_READ(64, false, false, inst);
+            break;
         case Opcode::DS_READ2_B32:
             translator.DS_READ(32, false, true, inst);
             break;
+        case Opcode::DS_READ2_B64:
+            translator.DS_READ(64, false, true, inst);
+            break;
         case Opcode::DS_WRITE_B32:
             translator.DS_WRITE(32, false, false, inst);
+            break;
+        case Opcode::DS_WRITE_B64:
+            translator.DS_WRITE(64, false, false, inst);
             break;
         case Opcode::DS_WRITE2_B32:
             translator.DS_WRITE(32, false, true, inst);
@@ -942,6 +984,12 @@ void Translate(IR::Block* block, u32 block_base, std::span<const GcnInst> inst_l
             break;
         case Opcode::S_GETPC_B64:
             translator.S_GETPC_B64(block_base, inst);
+            break;
+        case Opcode::V_MBCNT_LO_U32_B32:
+            translator.V_MBCNT_U32_B32(true, inst);
+            break;
+        case Opcode::V_MBCNT_HI_U32_B32:
+            translator.V_MBCNT_U32_B32(false, inst);
             break;
         case Opcode::S_NOP:
         case Opcode::S_CBRANCH_EXECZ:
@@ -953,6 +1001,9 @@ void Translate(IR::Block* block, u32 block_base, std::span<const GcnInst> inst_l
         case Opcode::S_WQM_B64:
         case Opcode::V_INTERP_P1_F32:
         case Opcode::S_ENDPGM:
+        case Opcode::BUFFER_ATOMIC_ADD:
+        case Opcode::BUFFER_ATOMIC_UMIN:
+        case Opcode::BUFFER_ATOMIC_UMAX:
             break;
         default:
             const u32 opcode = u32(inst.opcode);

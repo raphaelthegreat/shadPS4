@@ -118,6 +118,7 @@ void EmitGetGotoVariable(EmitContext&) {
 }
 
 Id EmitReadConst(EmitContext& ctx) {
+    return Id{};
     UNREACHABLE_MSG("Unreachable instruction");
 }
 
@@ -212,14 +213,9 @@ void EmitSetAttribute(EmitContext& ctx, IR::Attribute attr, Id value, u32 elemen
 Id EmitLoadBufferF32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address) {
     const auto info = inst->Flags<IR::BufferInstInfo>();
     const auto& buffer = ctx.buffers[handle];
-    if (info.index_enable && info.offset_enable) {
-        UNREACHABLE();
-    } else if (info.index_enable) {
-        const Id ptr{
-            ctx.OpAccessChain(buffer.pointer_type, buffer.id, ctx.u32_zero_value, address)};
-        return ctx.OpLoad(buffer.data_types->Get(1), ptr);
-    }
-    UNREACHABLE();
+    const Id ptr{
+        ctx.OpAccessChain(buffer.pointer_type, buffer.id, ctx.u32_zero_value, address)};
+    return ctx.OpLoad(buffer.data_types->Get(1), ptr);
 }
 
 Id EmitLoadBufferU32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id address) {

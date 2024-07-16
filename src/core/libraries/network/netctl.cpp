@@ -79,7 +79,7 @@ int PS4_SYSV_ABI sceNetCtlUnregisterCallbackV6() {
 }
 
 int PS4_SYSV_ABI sceNetCtlCheckCallback() {
-    LOG_ERROR(Lib_NetCtl, "(STUBBED) called");
+    LOG_TRACE(Lib_NetCtl, "(STUBBED) called");
     return ORBIS_OK;
 }
 
@@ -144,12 +144,12 @@ int PS4_SYSV_ABI sceNetCtlGetIfStat() {
 }
 
 int PS4_SYSV_ABI sceNetCtlGetInfo() {
-    LOG_ERROR(Lib_NetCtl, "(STUBBED) called");
+    LOG_TRACE(Lib_NetCtl, "(STUBBED) called");
     return ORBIS_OK;
 }
 
 int PS4_SYSV_ABI sceNetCtlGetInfoIpcInt() {
-    LOG_ERROR(Lib_NetCtl, "(STUBBED) called");
+    LOG_TRACE(Lib_NetCtl, "(STUBBED) called");
     return ORBIS_OK;
 }
 
@@ -174,7 +174,7 @@ int PS4_SYSV_ABI sceNetCtlGetNetEvConfigInfoIpcInt() {
 }
 
 int PS4_SYSV_ABI sceNetCtlGetResult() {
-    LOG_ERROR(Lib_NetCtl, "(STUBBED) called");
+    LOG_TRACE(Lib_NetCtl, "(STUBBED) called");
     return ORBIS_OK;
 }
 
@@ -214,7 +214,7 @@ int PS4_SYSV_ABI sceNetCtlGetScanInfoForSsidScanIpcInt() {
 }
 
 int PS4_SYSV_ABI sceNetCtlGetState() {
-    LOG_ERROR(Lib_NetCtl, "(STUBBED) called");
+    LOG_TRACE(Lib_NetCtl, "(STUBBED) called");
     return ORBIS_OK;
 }
 

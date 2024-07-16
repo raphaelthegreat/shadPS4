@@ -273,7 +273,7 @@ Value IREmitter::LoadShared(int bit_size, bool is_signed, const U32& offset) {
     case 32:
         return Inst<U32>(Opcode::LoadSharedU32, offset);
     case 64:
-        return Inst<U64>(Opcode::LoadSharedU64, offset);
+        return Inst(Opcode::LoadSharedU64, offset);
     case 128:
         return Inst(Opcode::LoadSharedU128, offset);
     default:
@@ -350,6 +350,10 @@ void IREmitter::StoreBuffer(int num_dwords, const Value& handle, const Value& ad
 
 U32 IREmitter::LaneId() {
     return Inst<U32>(Opcode::LaneId);
+}
+
+U32 IREmitter::WarpId() {
+    return Inst<U32>(Opcode::WarpId);
 }
 
 U32 IREmitter::QuadShuffle(const U32& value, const U32& index) {

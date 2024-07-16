@@ -73,11 +73,13 @@ Shader::Info MakeShaderInfo(Shader::Stage stage, std::span<const u32, 16> user_d
     case Shader::Stage::Vertex: {
         info.num_user_data = regs.vs_program.settings.num_user_regs;
         info.num_input_vgprs = regs.vs_program.settings.vgpr_comp_cnt;
+        info.shared_memory_size = regs.vs_program.SharedMemSize();
         BuildVsOutputs(info, regs.vs_output_control);
         break;
     }
     case Shader::Stage::Fragment: {
         info.num_user_data = regs.ps_program.settings.num_user_regs;
+        info.shared_memory_size = regs.ps_program.SharedMemSize();
         for (u32 i = 0; i < regs.num_interp; i++) {
             info.ps_inputs.push_back({
                 .param_index = regs.ps_inputs[i].input_offset.Value(),

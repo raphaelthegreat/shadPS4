@@ -272,6 +272,11 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
             regs.index_buffer_type.raw = index_type->raw;
             break;
         }
+        case PM4ItOpcode::SetBase:
+        case PM4ItOpcode::DrawIndexIndirect:
+        case PM4ItOpcode::DrawIndirect: {
+            break;
+        }
         case PM4ItOpcode::DrawIndex2: {
             const auto* draw_index = reinterpret_cast<const PM4CmdDrawIndex2*>(header);
             regs.max_index_size = draw_index->max_size;
@@ -442,6 +447,10 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, int vqid) {
                 co_yield {};
                 TracyFiberEnter(acb_task_name);
             };
+            break;
+        }
+        case PM4ItOpcode::DmaData: {
+            const auto* dma_data = reinterpret_cast<const PM4DmaData*>(header);
             break;
         }
         case PM4ItOpcode::AcquireMem: {

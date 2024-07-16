@@ -70,17 +70,20 @@ struct PthreadAttrInternal {
     pthread_attr_t pth_attr;
 };
 
+struct PthreadMutexattrInternal {
+    u8 reserved[64];
+    pthread_mutexattr_t pth_mutex_attr;
+    int ptype;
+    int pprotocol;
+};
+
 struct PthreadMutexInternal {
     u8 reserved[256];
     std::string name;
     pthread_mutex_t pth_mutex;
+    ScePthread owner;
+    PthreadMutexattrInternal attr;
     std::unique_ptr<tracy::LockableCtx> tracy_lock;
-};
-
-struct PthreadMutexattrInternal {
-    u8 reserved[64];
-    pthread_mutexattr_t pth_mutex_attr;
-    int pprotocol;
 };
 
 struct PthreadCondInternal {

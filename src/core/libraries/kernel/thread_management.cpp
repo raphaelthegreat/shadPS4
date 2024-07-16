@@ -435,6 +435,8 @@ int PS4_SYSV_ABI scePthreadMutexInit(ScePthreadMutex* mutex, const ScePthreadMut
         LOG_INFO(Kernel_Pthread, "name={}, result={}", name, result);
     }
 
+    (*mutex)->attr = **attr;
+
     switch (result) {
     case 0:
         return SCE_OK;
@@ -457,7 +459,7 @@ int PS4_SYSV_ABI scePthreadMutexDestroy(ScePthreadMutex* mutex) {
 
     int result = pthread_mutex_destroy(&(*mutex)->pth_mutex);
 
-    LOG_INFO(Kernel_Pthread, "name={}, result={}", (*mutex)->name, result);
+    LOG_TRACE(Kernel_Pthread, "name={}, result={}", (*mutex)->name, result);
 
     delete *mutex;
     *mutex = nullptr;
@@ -507,6 +509,7 @@ int PS4_SYSV_ABI scePthreadMutexattrSettype(ScePthreadMutexattr* attr, int type)
         UNREACHABLE_MSG("Invalid type: {}", type);
     }
 
+    (*attr)->ptype = ptype;
     int result = pthread_mutexattr_settype(&(*attr)->pth_mutex_attr, ptype);
 
     return result == 0 ? SCE_OK : SCE_KERNEL_ERROR_EINVAL;
@@ -546,6 +549,7 @@ int PS4_SYSV_ABI scePthreadMutexLock(ScePthreadMutex* mutex) {
     (*mutex)->tracy_lock->BeforeLock();
 
     int result = pthread_mutex_lock(&(*mutex)->pth_mutex);
+    (*mutex)->owner = scePthreadSelf();
     if (result != 0) {
         LOG_TRACE(Kernel_Pthread, "Locked name={}, result={}", (*mutex)->name, result);
     }
@@ -577,7 +581,7 @@ int PS4_SYSV_ABI scePthreadMutexUnlock(ScePthreadMutex* mutex) {
         LOG_TRACE(Kernel_Pthread, "Unlocking name={}, result={}", (*mutex)->name, result);
     }
 
-    (*mutex)->tracy_lock->AfterUnlock();
+    //(*mutex)->tracy_lock->AfterUnlock();
 
     switch (result) {
     case 0:
@@ -857,6 +861,7 @@ int PS4_SYSV_ABI scePthreadMutexTimedlock(ScePthreadMutex* mutex, u64 usec) {
 
     switch (result) {
     case 0:
+        (*mutex)->owner = scePthreadSelf();
         return SCE_OK;
     case ETIMEDOUT:
         return SCE_KERNEL_ERROR_ETIMEDOUT;

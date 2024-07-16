@@ -70,7 +70,6 @@ void InitHLELibs(Core::Loader::SymbolsResolver* sym) {
     Libraries::ScreenShot::RegisterlibSceScreenShot(sym);
     Libraries::AppContent::RegisterlibSceAppContent(sym);
     Libraries::PngDec::RegisterlibScePngDec(sym);
-    Libraries::PlayGo::RegisterlibScePlayGo(sym);
     Libraries::Usbd::RegisterlibSceUsbd(sym);
     Libraries::Pad::RegisterlibScePad(sym);
     Libraries::Ajm::RegisterlibSceAjm(sym);
