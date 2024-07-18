@@ -9,7 +9,6 @@
 
 #include "common/slot_vector.h"
 #include "video_core/amdgpu/resource.h"
-#include "video_core/renderer_vulkan/vk_stream_buffer.h"
 #include "video_core/texture_cache/image.h"
 #include "video_core/texture_cache/image_view.h"
 #include "video_core/texture_cache/sampler.h"
@@ -21,6 +20,8 @@ struct BufferAttributeGroup;
 
 namespace VideoCore {
 
+class PageManager;
+
 class TextureCache {
     // This is the page shift for adding images into the hash map. It isn't related to
     // the page size of the guest or the host and is chosen for convenience. A number too
@@ -28,20 +29,9 @@ class TextureCache {
     // increase the number of images per page.
     static constexpr u64 PageBits = 20;
     static constexpr u64 PageMask = (1ULL << PageBits) - 1;
-
-    struct MetaDataInfo {
-        enum class Type {
-            CMask,
-            FMask,
-            HTile,
-        };
-
-        Type type;
-        bool is_cleared;
-    };
-
 public:
-    explicit TextureCache(const Vulkan::Instance& instance, Vulkan::Scheduler& scheduler);
+    explicit TextureCache(const Vulkan::Instance& instance, Vulkan::Scheduler& scheduler,
+                          PageManager& tracker);
     ~TextureCache();
 
     /// Invalidates any image in the logical page range.
@@ -169,24 +159,28 @@ private:
     /// Stop tracking CPU reads and writes for image
     void UntrackImage(Image& image, ImageId image_id);
 
-    /// Increase/decrease the number of surface in pages touching the specified region
-    void UpdatePagesCachedCount(VAddr addr, u64 size, s32 delta);
-
 private:
     const Vulkan::Instance& instance;
     Vulkan::Scheduler& scheduler;
-    Vulkan::StreamBuffer staging;
+    PageManager& tracker;
     TileManager tile_manager;
     Common::SlotVector<Image> slot_images;
     Common::SlotVector<ImageView> slot_image_views;
     tsl::robin_map<u64, Sampler> samplers;
     tsl::robin_pg_map<u64, std::vector<ImageId>> page_table;
     boost::icl::interval_map<VAddr, s32> cached_pages;
+
+    struct MetaDataInfo {
+        enum class Type {
+            CMask,
+            FMask,
+            HTile,
+        };
+        Type type;
+        bool is_cleared;
+    };
     tsl::robin_map<VAddr, MetaDataInfo> surface_metas;
     std::mutex mutex;
-#ifdef _WIN64
-    void* veh_handle{};
-#endif
     std::mutex m_page_table;
 };
 

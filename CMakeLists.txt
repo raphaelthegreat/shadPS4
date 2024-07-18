@@ -419,6 +419,12 @@ set(VIDEO_CORE src/video_core/amdgpu/liverpool.cpp
                src/video_core/amdgpu/pm4_cmds.h
                src/video_core/amdgpu/pm4_opcodes.h
                src/video_core/amdgpu/resource.h
+               src/video_core/buffer_cache/buffer.cpp
+               src/video_core/buffer_cache/buffer.h
+               src/video_core/buffer_cache/buffer_cache.cpp
+               src/video_core/buffer_cache/buffer_cache.h
+               src/video_core/buffer_cache/memory_tracker_base.h
+               src/video_core/buffer_cache/word_manager.h
                src/video_core/renderer_vulkan/liverpool_to_vk.cpp
                src/video_core/renderer_vulkan/liverpool_to_vk.h
                src/video_core/renderer_vulkan/renderer_vulkan.cpp
@@ -462,6 +468,8 @@ set(VIDEO_CORE src/video_core/amdgpu/liverpool.cpp
                src/video_core/texture_cache/tile_manager.cpp
                src/video_core/texture_cache/tile_manager.h
                src/video_core/texture_cache/types.h
+               src/video_core/page_manager.cpp
+               src/video_core/page_manager.h
 )
 
 set(INPUT src/input/controller.cpp
