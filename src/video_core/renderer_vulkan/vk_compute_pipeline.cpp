@@ -94,11 +94,16 @@ bool ComputePipeline::BindResources(Core::MemoryManager* memory, StreamBuffer& s
         const auto vsharp = buffer.GetVsharp(info);
         const u32 size = vsharp.GetSize();
         const VAddr address = vsharp.base_address;
-        texture_cache.OnCpuWrite(address);
-        const u32 offset = staging.Copy(address, size,
-                                        buffer.is_storage ? instance.StorageMinAlignment()
-                                                          : instance.UniformMinAlignment());
-        buffer_infos.emplace_back(staging.Handle(), offset, size);
+        if (buffer.is_storage) {
+            texture_cache.OnCpuWrite(address);
+            const auto [vk_buffer, offset] = memory->GetVulkanBuffer(address);
+            buffer_infos.emplace_back(vk_buffer, offset, size);
+        } else {
+            const u32 offset = staging.Copy(address, size,
+                                            buffer.is_storage ? instance.StorageMinAlignment()
+                                                              : instance.UniformMinAlignment());
+            buffer_infos.emplace_back(staging.Handle(), offset, size);
+        }
         set_writes.push_back({
             .dstSet = VK_NULL_HANDLE,
             .dstBinding = binding++,
