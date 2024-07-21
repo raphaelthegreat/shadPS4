@@ -12,7 +12,7 @@
 namespace Vulkan {
 class Instance;
 class Scheduler;
-}
+} // namespace Vulkan
 
 VK_DEFINE_HANDLE(VmaAllocation)
 VK_DEFINE_HANDLE(VmaAllocator)

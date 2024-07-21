@@ -346,7 +346,8 @@ void GraphicsPipeline::BuildDescSetLayout() {
 void GraphicsPipeline::BindResources(const Liverpool::Regs& regs,
                                      VideoCore::TextureCache& texture_cache,
                                      VideoCore::BufferCache& buffer_cache) const {
-    const auto& vs_info = stages[u32(Shader::Stage::Vertex)];
+    // Bind host geometry buffers.
+    const auto& vs_info = GetStage(Shader::Stage::Vertex);
     const bool has_step_rate = buffer_cache.BindVertexBuffers(vs_info);
 
     // Bind resource buffers and textures.
@@ -381,7 +382,7 @@ void GraphicsPipeline::BindResources(const Liverpool::Regs& regs,
                 push_data.AddOffset(binding, offset - offset_aligned);
                 push_flags |= StageToVkStage(stage.stage);
             }
-            buffer_infos.emplace_back(vk_buffer, offset_aligned, size);
+            buffer_infos.emplace_back(vk_buffer->buffer, offset_aligned, size);
             set_writes.push_back({
                 .dstSet = VK_NULL_HANDLE,
                 .dstBinding = binding++,

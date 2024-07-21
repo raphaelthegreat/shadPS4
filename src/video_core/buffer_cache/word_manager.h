@@ -6,8 +6,8 @@
 #include <algorithm>
 #include <span>
 #include <utility>
-#include "common/types.h"
 #include "common/div_ceil.h"
+#include "common/types.h"
 #include "video_core/page_manager.h"
 
 namespace VideoCore {

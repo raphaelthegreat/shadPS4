@@ -13,6 +13,8 @@
 #include <sys/ioctl.h>
 #include <fcntl.h>
 #include <poll.h>
+#include <signal.h>
+#include <sys/mman.h>
 #endif
 
 namespace VideoCore {
@@ -20,46 +22,76 @@ namespace VideoCore {
 constexpr size_t PAGESIZE = 4_KB;
 constexpr size_t PAGEBITS = 12;
 
+Vulkan::Rasterizer* g_rasterizer{};
+
+void GuestFaultSignalHandler(int sig, siginfo_t* info, void* raw_context) {
+    ucontext_t* ctx = reinterpret_cast<ucontext_t*>(raw_context);
+    const VAddr address = reinterpret_cast<VAddr>(info->si_addr);
+    if (ctx->uc_mcontext.gregs[REG_ERR] & 0x2) {
+        const VAddr addr_page = Common::AlignDown(address, PAGESIZE);
+        LOG_INFO(Render_Vulkan, "CPU WRITE addr = {:#x}, size = {:#x}",
+                 addr_page, PAGESIZE);
+        g_rasterizer->InvalidateMemory(addr_page, PAGESIZE);
+    } else {
+        // Read not supported!
+        UNREACHABLE();
+    }
+}
+
 struct PageManager::Impl {
     Impl(Vulkan::Rasterizer* rasterizer_) : rasterizer{rasterizer_} {
-        uffd = syscall(__NR_userfaultfd, O_CLOEXEC | O_NONBLOCK);
+        g_rasterizer = rasterizer;
+        sigset_t signal_mask;
+        sigemptyset(&signal_mask);
+        sigaddset(&signal_mask, SIGSEGV);
+
+        using HandlerType = decltype(sigaction::sa_sigaction);
+
+        struct sigaction guest_access_fault {};
+        guest_access_fault.sa_flags = SA_SIGINFO | SA_ONSTACK;
+        guest_access_fault.sa_sigaction = &GuestFaultSignalHandler;
+        guest_access_fault.sa_mask = signal_mask;
+        sigaction(SIGSEGV, &guest_access_fault, nullptr);
+        /*uffd = syscall(__NR_userfaultfd, O_CLOEXEC | O_NONBLOCK);
         ASSERT_MSG(uffd != -1, "{}", Common::GetLastErrorMsg());
 
         // Request uffdio features from kernel.
         uffdio_api api;
         api.api = UFFD_API;
-        api.features = 0;
+        api.features = UFFD_FEATURE_THREAD_ID;
         const int ret = ioctl(uffd, UFFDIO_API, &api);
         ASSERT(ret == 0 && api.api == UFFD_API);
 
         // Create uffd handler thread
-        ufd_thread = std::jthread([&](std::stop_token token) { UffdHandler(token); });
+        ufd_thread = std::jthread([&](std::stop_token token) { UffdHandler(token); });*/
     }
 
     void OnMap(VAddr address, size_t size) {
-        uffdio_register reg;
+        /*uffdio_register reg;
         reg.range.start = address;
         reg.range.len = size;
         reg.mode = UFFDIO_REGISTER_MODE_WP;
         const int ret = ioctl(uffd, UFFDIO_REGISTER, &reg);
-        ASSERT_MSG(ret != -1, "Uffdio register failed");
+        ASSERT_MSG(ret != -1, "Uffdio register failed");*/
     }
 
     void OnUnmap(VAddr address, size_t size) {
-        uffdio_range range;
+        /*uffdio_range range;
         range.start = address;
         range.len = size;
         const int ret = ioctl(uffd, UFFDIO_UNREGISTER, &range);
-        ASSERT_MSG(ret != -1, "Uffdio unregister failed");
+        ASSERT_MSG(ret != -1, "Uffdio unregister failed");*/
     }
 
     void Protect(VAddr address, size_t size, bool allow_write) {
-        uffdio_writeprotect wp;
+        /*uffdio_writeprotect wp;
         wp.range.start = address;
         wp.range.len = size;
         wp.mode = allow_write ? 0 : UFFDIO_WRITEPROTECT_MODE_WP;
         const int ret = ioctl(uffd, UFFDIO_WRITEPROTECT, &wp);
-        ASSERT_MSG(ret != -1, "Uffdio writeprotect failed");
+        ASSERT_MSG(ret != -1, "Uffdio writeprotect failed with error: {}",
+                   Common::GetLastErrorMsg());*/
+        mprotect((void*)address, size, PROT_READ | (allow_write ? PROT_WRITE : 0));
     }
 
     void UffdHandler(std::stop_token token) {
@@ -104,6 +136,8 @@ struct PageManager::Impl {
             // Notify rasterizer about the fault.
             const VAddr addr = msg.arg.pagefault.address;
             const VAddr addr_page = Common::AlignDown(addr, PAGESIZE);
+            LOG_INFO(Render_Vulkan, "CPU WRITE addr = {:#x}, size = {:#x}",
+                     addr_page, PAGESIZE);
             rasterizer->InvalidateMemory(addr_page, PAGESIZE);
         }
     }
@@ -148,8 +182,12 @@ void PageManager::UpdatePagesCachedCount(VAddr addr, u64 size, s32 delta) {
         const VAddr interval_end_addr = boost::icl::last_next(interval) << PageShift;
         const u32 interval_size = interval_end_addr - interval_start_addr;
         if (delta > 0 && count == delta) {
+            LOG_INFO(Render_Vulkan, "Protecting addr = {:#x}, size = {:#x}",
+                     interval_start_addr, interval_size);
             impl->Protect(interval_start_addr, interval_size, false);
         } else if (delta < 0 && count == -delta) {
+            LOG_INFO(Render_Vulkan, "Unprotecting addr = {:#x}, size = {:#x}",
+                     interval_start_addr, interval_size);
             impl->Protect(interval_start_addr, interval_size, true);
         } else {
             ASSERT(count >= 0);

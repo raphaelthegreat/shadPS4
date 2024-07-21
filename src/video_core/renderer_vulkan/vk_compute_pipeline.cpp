@@ -115,14 +115,17 @@ bool ComputePipeline::BindResources(VideoCore::TextureCache& texture_cache,
         }
         const u32 alignment = buffer.is_storage ? instance.StorageMinAlignment()
                                                 : instance.UniformMinAlignment();
+        LOG_INFO(Render_Vulkan, "Obtaining storage {} buffer addr = {:#x}, size = {:#x}",
+                 buffer.is_storage ? "storage" : "uniform", address, size);
         const auto [vk_buffer, offset] = buffer_cache.ObtainBuffer(address, size, true,
                                                                    buffer.is_storage);
         const u32 offset_aligned = Common::AlignDown(offset, alignment);
         if (offset != offset_aligned) {
             push_data.AddOffset(binding, offset - offset_aligned);
             push_flags = vk::ShaderStageFlagBits::eCompute;
+            UNREACHABLE();
         }
-        buffer_infos.emplace_back(vk_buffer, offset_aligned, size);
+        buffer_infos.emplace_back(vk_buffer->buffer, offset_aligned, size);
         set_writes.push_back({
             .dstSet = VK_NULL_HANDLE,
             .dstBinding = binding++,

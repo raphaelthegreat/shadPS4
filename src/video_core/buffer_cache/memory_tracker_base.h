@@ -4,8 +4,9 @@
 #pragma once
 
 #include <algorithm>
-#include <vector>
 #include <type_traits>
+#include <vector>
+#include <deque>
 #include "common/types.h"
 #include "video_core/buffer_cache/word_manager.h"
 
@@ -166,7 +167,7 @@ private:
     }
 
     PageManager* tracker;
-    std::vector<std::array<Manager, MANAGER_POOL_SIZE>> manager_pool;
+    std::deque<std::array<Manager, MANAGER_POOL_SIZE>> manager_pool;
     std::vector<Manager*> free_managers;
     std::array<Manager*, NUM_HIGH_PAGES> top_tier{};
 };

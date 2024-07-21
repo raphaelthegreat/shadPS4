@@ -3,24 +3,21 @@
 
 #pragma once
 
-#include <functional>
 #include <mutex>
 #include <string_view>
-#include <vector>
 #include <boost/icl/split_interval_map.hpp>
 #include "common/enum.h"
 #include "common/singleton.h"
 #include "common/types.h"
 #include "core/address_space.h"
-#include "core/libraries/kernel/memory_management.h"
-#include "video_core/renderer_vulkan/vk_common.h"
 
 namespace Vulkan {
-class Instance;
+class Rasterizer;
 }
 
 namespace Libraries::Kernel {
 struct OrbisQueryInfo;
+struct OrbisVirtualQueryInfo;
 }
 
 namespace Core {
@@ -120,8 +117,8 @@ public:
     explicit MemoryManager();
     ~MemoryManager();
 
-    void SetInstance(const Vulkan::Instance* instance_) {
-        instance = instance_;
+    void SetRasterizer(Vulkan::Rasterizer* rasterizer_) {
+        rasterizer = rasterizer_;
     }
 
     void SetTotalFlexibleSize(u64 size) {
@@ -157,8 +154,6 @@ public:
 
     int DirectQueryAvailable(PAddr search_start, PAddr search_end, size_t alignment,
                              PAddr* phys_addr_out, size_t* size_out);
-
-    std::pair<vk::Buffer, size_t> GetVulkanBuffer(VAddr addr);
 
 private:
     VMAHandle FindVMA(VAddr target) {
@@ -197,10 +192,6 @@ private:
 
     DMemHandle Split(DMemHandle dmem_handle, size_t offset_in_area);
 
-    void MapVulkanMemory(VAddr addr, size_t size);
-
-    void UnmapVulkanMemory(VAddr addr, size_t size);
-
 private:
     AddressSpace impl;
     DMemMap dmem_map;
@@ -208,14 +199,7 @@ private:
     std::recursive_mutex mutex;
     size_t total_flexible_size = 448_MB;
     size_t flexible_usage{};
-
-    struct MappedMemory {
-        vk::UniqueBuffer buffer;
-        vk::UniqueDeviceMemory backing;
-        size_t buffer_size;
-    };
-    std::map<VAddr, MappedMemory> mapped_memories;
-    const Vulkan::Instance* instance{};
+    Vulkan::Rasterizer* rasterizer{};
 };
 
 using Memory = Common::Singleton<MemoryManager>;

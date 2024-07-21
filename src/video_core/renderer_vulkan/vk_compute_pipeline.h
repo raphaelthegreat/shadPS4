@@ -13,7 +13,7 @@ class MemoryManager;
 namespace VideoCore {
 class TextureCache;
 class BufferCache;
-}
+} // namespace VideoCore
 
 namespace Vulkan {
 

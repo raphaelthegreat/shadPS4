@@ -19,9 +19,10 @@ static constexpr vk::BufferUsageFlags VertexIndexFlags =
     vk::BufferUsageFlagBits::eStorageBuffer;
 
 Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_,
-                       VideoCore::TextureCache& texture_cache_, AmdGpu::Liverpool* liverpool_)
+                       AmdGpu::Liverpool* liverpool_)
     : instance{instance_}, scheduler{scheduler_}, page_manager{this},
-      buffer_cache{instance, scheduler, page_manager}, texture_cache{texture_cache_},
+      buffer_cache{instance, scheduler, page_manager},
+      texture_cache{instance, scheduler, buffer_cache, page_manager},
       liverpool{liverpool_}, memory{Core::Memory::Instance()},
       pipeline_cache{instance, scheduler, liverpool},
       vertex_index_buffer{instance, scheduler, VertexIndexFlags, 4_GB, BufferType::Upload} {
@@ -29,7 +30,7 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_,
         liverpool->BindRasterizer(this);
     }
 
-    memory->SetInstance(&instance);
+    memory->SetRasterizer(this);
 }
 
 Rasterizer::~Rasterizer() = default;
@@ -45,18 +46,20 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
         return;
     }
 
-    cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->Handle());
-    pipeline->BindResources(texture_cache, buffer_cache);
+    scheduler.EndRendering();
 
+    // Bind the pipeline and its resources.
+    pipeline->BindResources(regs, texture_cache, buffer_cache);
+    cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->Handle());
+
+    cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eAllCommands,
+                           vk::PipelineStageFlagBits::eAllCommands,
+                           vk::DependencyFlagBits::eByRegion,
+                           {}, {}, {});
+
+    // Begin rendering.
     BeginRendering();
     UpdateDynamicState(*pipeline);
-
-    const u32 step_rates[] = {
-        regs.vgt_instance_step_rate_0,
-        regs.vgt_instance_step_rate_1,
-    };
-    cmdbuf.pushConstants(pipeline->GetLayout(), vk::ShaderStageFlagBits::eVertex, 0u,
-                         sizeof(step_rates), &step_rates);
     if (is_indexed) {
         cmdbuf.drawIndexed(num_indices, regs.num_instances.NumInstances(), 0, 0, 0);
     } else {
@@ -93,9 +96,14 @@ void Rasterizer::InvalidateMemory(VAddr addr, u64 size) {
     texture_cache.InvalidateMemory(addr, size);
 }
 
+void Rasterizer::MapMemory(VAddr addr, u64 size) {
+    page_manager.OnGpuMap(addr, size);
+}
+
 void Rasterizer::UnmapMemory(VAddr addr, u64 size) {
-    buffer_cache.WriteMemory(addr, size);
+    buffer_cache.InvalidateMemory(addr, size);
     texture_cache.UnmapMemory(addr, size);
+    page_manager.OnGpuUnmap(addr, size);
 }
 
 void Rasterizer::BeginRendering() {
@@ -185,15 +193,14 @@ u32 Rasterizer::SetupIndexBuffer(bool& is_indexed, u32 index_offset) {
     const u32 index_size = is_index16 ? sizeof(u16) : sizeof(u32);
 
     // Upload index data to stream buffer.
-    const auto index_address = regs.index_base_address.Address<const void*>();
+    const VAddr index_address = regs.index_base_address.Address<VAddr>();
     const u32 index_buffer_size = (index_offset + regs.num_indices) * index_size;
-    const auto [data, offset, _] = vertex_index_buffer.Map(index_buffer_size);
-    std::memcpy(data, index_address, index_buffer_size);
-    vertex_index_buffer.Commit(index_buffer_size);
-
+    const auto [buffer, offset] = buffer_cache.ObtainBuffer(index_address,
+                                                            index_buffer_size,
+                                                            true, false);
     // Bind index buffer.
     const auto cmdbuf = scheduler.CommandBuffer();
-    cmdbuf.bindIndexBuffer(vertex_index_buffer.Handle(), offset + index_offset * index_size,
+    cmdbuf.bindIndexBuffer(buffer->buffer, offset + index_offset * index_size,
                            index_type);
     return regs.num_indices;
 }

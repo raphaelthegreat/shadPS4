@@ -13,12 +13,15 @@
 namespace VideoCore {
 
 static constexpr u64 PageShift = 12;
+static constexpr u64 StreamBufferSize = 256_MB;
 
 TextureCache::TextureCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& scheduler_,
                            BufferCache& buffer_cache_, PageManager& tracker_)
     : instance{instance_}, scheduler{scheduler_}, buffer_cache{buffer_cache_}, tracker{tracker_},
-      tile_manager{instance, scheduler} {
-    const ImageId null_id = slot_images.insert(instance, scheduler, vk::Format::eR8G8B8A8Unorm, 0);
+      tile_manager{instance, scheduler}, staging{instance, scheduler, vk::BufferUsageFlagBits::eTransferSrc, StreamBufferSize,
+                                                 Vulkan::BufferType::Upload} {
+    const ImageInfo info{vk::Format::eR8G8B8A8Unorm};
+    const ImageId null_id = slot_images.insert(instance, scheduler, info, 0);
     ASSERT(null_id.index == 0);
 
     ImageViewInfo view_info;
@@ -253,6 +256,8 @@ void TextureCache::UntrackImage(Image& image, ImageId image_id) {
     if (False(image.flags & ImageFlagBits::Tracked)) {
         return;
     }
+    LOG_INFO(Render_Vulkan, "Untracking image addr = {:#x}, size = {:#x}",
+             image.cpu_addr, image.info.guest_size_bytes);
     image.flags &= ~ImageFlagBits::Tracked;
     tracker.UpdatePagesCachedCount(image.cpu_addr, image.info.guest_size_bytes, -1);
 }

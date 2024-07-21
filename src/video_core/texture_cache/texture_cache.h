@@ -30,6 +30,7 @@ class TextureCache {
     /// increase the number of images per page.
     static constexpr u64 PageBits = 20;
     static constexpr u64 PageMask = (1ULL << PageBits) - 1;
+
 public:
     explicit TextureCache(const Vulkan::Instance& instance, Vulkan::Scheduler& scheduler,
                           BufferCache& buffer_cache, PageManager& tracker);
@@ -169,6 +170,7 @@ private:
     BufferCache& buffer_cache;
     PageManager& tracker;
     TileManager tile_manager;
+    Vulkan::StreamBuffer staging;
     Common::SlotVector<Image> slot_images;
     Common::SlotVector<ImageView> slot_image_views;
     tsl::robin_map<u64, Sampler> samplers;

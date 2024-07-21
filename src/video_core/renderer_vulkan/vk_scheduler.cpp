@@ -6,6 +6,8 @@
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 
+#include <tracy/TracyVulkan.hpp>
+
 namespace Vulkan {
 
 Scheduler::Scheduler(const Instance& instance)
@@ -102,8 +104,8 @@ void Scheduler::SubmitExecution(vk::Semaphore signal_semaphore, vk::Semaphore wa
     AllocateWorkerCommandBuffers();
 
     // Apply pending operations
-    while (IsFree(pending_ops.back().gpu_tick)) {
-        pending_ops.back().callback();
+    while (!pending_ops.empty() && IsFree(pending_ops.front().gpu_tick)) {
+        pending_ops.front().callback();
         pending_ops.pop();
     }
 }

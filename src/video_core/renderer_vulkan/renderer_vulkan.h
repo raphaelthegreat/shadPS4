@@ -5,10 +5,10 @@
 
 #include <condition_variable>
 #include "video_core/amdgpu/liverpool.h"
+#include "video_core/texture_cache/texture_cache.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_swapchain.h"
-#include "video_core/texture_cache/texture_cache.h"
 
 namespace Frontend {
 class WindowSDL;
@@ -79,7 +79,7 @@ private:
     Scheduler scheduler;
     Swapchain swapchain;
     std::unique_ptr<Rasterizer> rasterizer;
-    VideoCore::TextureCache texture_cache;
+    VideoCore::TextureCache& texture_cache;
     vk::UniqueCommandPool command_pool;
     std::vector<Frame> present_frames;
     std::queue<Frame*> free_queue;

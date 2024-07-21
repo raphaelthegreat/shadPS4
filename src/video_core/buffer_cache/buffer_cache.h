@@ -5,10 +5,11 @@
 
 #include <array>
 #include <mutex>
+#include <tsl/robin_map.h>
 #include <boost/container/small_vector.hpp>
-#include "common/types.h"
 #include "common/div_ceil.h"
 #include "common/slot_vector.h"
+#include "common/types.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/buffer_cache/memory_tracker_base.h"
 #include "video_core/renderer_vulkan/vk_stream_buffer.h"
@@ -27,7 +28,7 @@ static constexpr u32 NUM_VERTEX_BUFFERS = 32;
 
 class BufferCache {
 public:
-    static constexpr u32 CACHING_PAGEBITS = 16;
+    static constexpr u32 CACHING_PAGEBITS = 14;
     static constexpr u64 CACHING_PAGESIZE = u64{1} << CACHING_PAGEBITS;
     static constexpr u64 DEVICE_PAGESIZE = 4_KB;
 
@@ -39,11 +40,9 @@ public:
     };
 
 public:
-    explicit BufferCache(const Vulkan::Instance& instance,
-                         Vulkan::Scheduler& scheduler, PageManager& tracker);
+    explicit BufferCache(const Vulkan::Instance& instance, Vulkan::Scheduler& scheduler,
+                         PageManager& tracker);
     ~BufferCache();
-
-    void WriteMemory(VAddr device_addr, u64 size);
 
     /// Invalidates any buffer in the logical page range.
     bool InvalidateMemory(VAddr device_addr, u64 size);
@@ -57,8 +56,7 @@ public:
     void BindIndexBuffer();
 
     /// Obtains a buffer for the specified region.
-    [[nodiscard]] std::pair<Buffer*, u32> ObtainBuffer(VAddr gpu_addr, u32 size,
-                                                       bool sync_buffer,
+    [[nodiscard]] std::pair<Buffer*, u32> ObtainBuffer(VAddr gpu_addr, u32 size, bool sync_buffer,
                                                        bool is_written);
 
     /// Return true when a region is registered on the cache
@@ -112,7 +110,7 @@ private:
     std::recursive_mutex mutex;
     Common::SlotVector<Buffer> slot_buffers;
     MemoryTracker memory_tracker;
-    std::array<BufferId, ((1ULL << 39) >> CACHING_PAGEBITS)> page_table;
+    tsl::robin_pg_map<u32, BufferId> page_table;
 };
 
 } // namespace VideoCore
