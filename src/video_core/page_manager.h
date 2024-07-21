@@ -8,11 +8,15 @@
 #include <boost/icl/interval_map.hpp>
 #include "common/types.h"
 
+namespace Vulkan {
+class Rasterizer;
+}
+
 namespace VideoCore {
 
 class PageManager {
 public:
-    explicit PageManager();
+    explicit PageManager(Vulkan::Rasterizer* rasterizer);
     ~PageManager();
 
     /// Register a range of mapped gpu memory.
@@ -27,6 +31,7 @@ public:
 private:
     struct Impl;
     std::unique_ptr<Impl> impl;
+    Vulkan::Rasterizer* rasterizer;
     std::mutex mutex;
     boost::icl::interval_map<VAddr, s32> cached_pages;
 };

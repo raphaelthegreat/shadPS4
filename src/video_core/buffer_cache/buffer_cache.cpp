@@ -5,17 +5,18 @@
 #include "common/alignment.h"
 #include "video_core/buffer_cache/buffer_cache.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
+#include "shader_recompiler/runtime_info.h"
 
 namespace VideoCore {
 
 static constexpr size_t StagingBufferSize = 64_MB;
 
 BufferCache::BufferCache(const Vulkan::Instance& instance_,
-                         Vulkan::Scheduler& scheduler_, PageManager* tracker)
+                         Vulkan::Scheduler& scheduler_, PageManager& tracker)
     : instance{instance_}, scheduler{scheduler_},
       staging_buffer{instance, scheduler, vk::BufferUsageFlagBits::eTransferSrc,
                      StagingBufferSize, Vulkan::BufferType::Upload},
-      memory_tracker{tracker} {
+      memory_tracker{&tracker} {
     // Ensure the first slot is used for the null buffer
     void(slot_buffers.insert(instance, 1));
 }
@@ -23,13 +24,15 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_,
 BufferCache::~BufferCache() = default;
 
 void BufferCache::WriteMemory(VAddr device_addr, u64 size) {
+    std::scoped_lock lk{mutex};
     if (memory_tracker.IsRegionGpuModified(device_addr, size)) {
         LOG_WARNING(Render_Vulkan, "Writing to GPU modified memory from CPU");
     }
     memory_tracker.MarkRegionAsCpuModified(device_addr, size);
 }
 
-bool BufferCache::OnCpuWrite(VAddr device_addr, u64 size) {
+bool BufferCache::InvalidateMemory(VAddr device_addr, u64 size) {
+    std::scoped_lock lk{mutex};
     const bool is_tracked = IsRegionRegistered(device_addr, size);
     if (!is_tracked) {
         return false;
@@ -87,6 +90,80 @@ void BufferCache::DownloadBufferMemory(Buffer& buffer, VAddr device_addr, u64 si
         const u64 dst_offset = copy.dstOffset - offset;
         std::memcpy(std::bit_cast<u8*>(copy_device_addr), staging + dst_offset, copy.size);
     }
+}
+
+bool BufferCache::BindVertexBuffers(const Shader::Info& vs_info) {
+    if (vs_info.vs_inputs.empty()) {
+        return false;
+    }
+
+    struct BufferRange {
+        VAddr base_address;
+        VAddr end_address;
+        boost::container::small_vector<AmdGpu::Buffer, 4> sharps;
+        u64 offset;
+
+        size_t GetSize() const noexcept {
+            return end_address - base_address;
+        }
+    };
+
+    // Calculate buffers memory overlaps
+    bool has_step_rate = false;
+    boost::container::static_vector<BufferRange, NUM_VERTEX_BUFFERS> ranges{};
+    for (const auto& input : vs_info.vs_inputs) {
+        if (input.instance_step_rate == Shader::Info::VsInput::InstanceIdType::OverStepRate0 ||
+            input.instance_step_rate == Shader::Info::VsInput::InstanceIdType::OverStepRate1) {
+            has_step_rate = true;
+            continue;
+        }
+        const auto buffer = vs_info.ReadUd<AmdGpu::Buffer>(input.sgpr_base, input.dword_offset);
+        if (buffer.GetSize() == 0) {
+            continue;
+        }
+        const VAddr end_address = buffer.base_address + buffer.GetSize();
+        auto& range = ranges.emplace_back(buffer.base_address, end_address);
+        range.sharps.emplace_back(buffer);
+    }
+
+    // Sort ranges on base address and merge overlapping regions.
+    std::ranges::sort(ranges, [](const BufferRange& lhv, const BufferRange& rhv) {
+        return lhv.base_address < rhv.base_address;
+    });
+
+    boost::container::static_vector<BufferRange, NUM_VERTEX_BUFFERS> ranges_merged{ranges[0]};
+    for (const auto& range : ranges) {
+        auto& prev_range = ranges_merged.back();
+        // Avoid merging ranges if they can be separate buffers in the cache.
+        const u32 distance = range.base_address - prev_range.end_address;
+        if (distance > VideoCore::BufferCache::CACHING_PAGESIZE) {
+            ranges_merged.emplace_back(range);
+            continue;
+        }
+        prev_range.end_address = std::max(prev_range.end_address, range.end_address);
+        prev_range.sharps.emplace_back(range.sharps.back());
+    }
+
+    // Bind vertex buffers
+    boost::container::static_vector<vk::Buffer, NUM_VERTEX_BUFFERS> host_buffers;
+    boost::container::static_vector<vk::DeviceSize, NUM_VERTEX_BUFFERS> host_offsets;
+    for (auto& range : ranges_merged) {
+        const auto [vk_buffer, offset] = ObtainBuffer(range.base_address,
+                                                      range.GetSize(),
+                                                      true, false);
+        // Assign any binding that overlap this range.
+        for (const auto& buffer : range.sharps) {
+            host_buffers.emplace_back(vk_buffer->buffer);
+            host_offsets.emplace_back(offset + buffer.base_address - range.base_address);
+        }
+    }
+
+    if (!host_buffers.empty()) {
+        const auto cmdbuf = scheduler.CommandBuffer();
+        cmdbuf.bindVertexBuffers(0, host_buffers, host_offsets);
+    }
+
+    return has_step_rate;
 }
 
 std::pair<Buffer*, u32> BufferCache::ObtainBuffer(
@@ -317,7 +394,9 @@ void BufferCache::DeleteBuffer(BufferId buffer_id, bool do_not_mark) {
         memory_tracker.MarkRegionAsCpuModified(buffer.CpuAddr(), buffer.SizeBytes());
     }
     Unregister(buffer_id);
-    slot_buffers.erase(buffer_id);
+    scheduler.DeferOperation([this, buffer_id] {
+        slot_buffers.erase(buffer_id);
+    });
 }
 
 } // namespace VideoCore

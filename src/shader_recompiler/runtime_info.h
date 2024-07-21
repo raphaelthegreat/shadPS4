@@ -102,6 +102,17 @@ struct SamplerResource {
 };
 using SamplerResourceList = boost::container::static_vector<SamplerResource, 16>;
 
+struct PushConstants {
+    u32 step_rate0;
+    u32 step_rate1;
+    std::array<u8, 16> buf_offsets;
+
+    void AddOffset(u32 binding, u32 offset) {
+        ASSERT(offset < 16);
+        buf_offsets[binding >> 1] |= offset << (binding & 1);
+    }
+};
+
 struct Info {
     struct VsInput {
         enum InstanceIdType : u8 {

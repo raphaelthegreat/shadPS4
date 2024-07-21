@@ -12,6 +12,7 @@ class MemoryManager;
 
 namespace VideoCore {
 class TextureCache;
+class BufferCache;
 }
 
 namespace Vulkan {
@@ -31,8 +32,8 @@ public:
         return *pipeline;
     }
 
-    bool BindResources(Core::MemoryManager* memory, StreamBuffer& staging,
-                       VideoCore::TextureCache& texture_cache) const;
+    bool BindResources(VideoCore::TextureCache& texture_cache,
+                       VideoCore::BufferCache& buffer_cache) const;
 
 private:
     const Instance& instance;

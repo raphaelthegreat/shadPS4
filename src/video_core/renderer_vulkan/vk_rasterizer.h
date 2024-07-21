@@ -3,8 +3,10 @@
 
 #pragma once
 
+#include "video_core/buffer_cache/buffer_cache.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 #include "video_core/renderer_vulkan/vk_stream_buffer.h"
+#include "video_core/page_manager.h"
 
 namespace AmdGpu {
 struct Liverpool;
@@ -36,6 +38,9 @@ public:
     void ScopeMarkerBegin(const std::string& str);
     void ScopeMarkerEnd();
 
+    void InvalidateMemory(VAddr addr, u64 size);
+    void UnmapMemory(VAddr addr, u64 size);
+
 private:
     u32 SetupIndexBuffer(bool& is_indexed, u32 index_offset);
     void MapMemory(VAddr addr, size_t size);
@@ -49,6 +54,8 @@ private:
 private:
     const Instance& instance;
     Scheduler& scheduler;
+    VideoCore::PageManager page_manager;
+    VideoCore::BufferCache buffer_cache;
     VideoCore::TextureCache& texture_cache;
     AmdGpu::Liverpool* liverpool;
     Core::MemoryManager* memory;

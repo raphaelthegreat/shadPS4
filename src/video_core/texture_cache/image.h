@@ -36,6 +36,7 @@ DECLARE_ENUM_FLAG_OPERATORS(ImageFlagBits)
 
 struct ImageInfo {
     ImageInfo() = default;
+    explicit ImageInfo(vk::Format format) : pixel_format{format} {}
     explicit ImageInfo(const Libraries::VideoOut::BufferAttributeGroup& group) noexcept;
     explicit ImageInfo(const AmdGpu::Liverpool::ColorBuffer& buffer,
                        const AmdGpu::Liverpool::CbDbExtent& hint = {}) noexcept;
@@ -66,7 +67,7 @@ struct ImageInfo {
 
     bool is_tiled = false;
     vk::Format pixel_format = vk::Format::eUndefined;
-    vk::ImageType type = vk::ImageType::e1D;
+    vk::ImageType type = vk::ImageType::e2D;
     SubresourceExtent resources;
     Extent3D size{1, 1, 1};
     u32 num_samples = 1;

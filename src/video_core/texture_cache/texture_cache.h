@@ -21,21 +21,25 @@ struct BufferAttributeGroup;
 namespace VideoCore {
 
 class PageManager;
+class BufferCache;
 
 class TextureCache {
-    // This is the page shift for adding images into the hash map. It isn't related to
-    // the page size of the guest or the host and is chosen for convenience. A number too
-    // small will increase the number of hash map lookups per image, while too large will
-    // increase the number of images per page.
+    /// This is the page shift for adding images into the hash map. It isn't related to
+    /// the page size of the guest or the host and is chosen for convenience. A number too
+    /// small will increase the number of hash map lookups per image, while too large will
+    /// increase the number of images per page.
     static constexpr u64 PageBits = 20;
     static constexpr u64 PageMask = (1ULL << PageBits) - 1;
 public:
     explicit TextureCache(const Vulkan::Instance& instance, Vulkan::Scheduler& scheduler,
-                          PageManager& tracker);
+                          BufferCache& buffer_cache, PageManager& tracker);
     ~TextureCache();
 
     /// Invalidates any image in the logical page range.
-    void OnCpuWrite(VAddr address);
+    void InvalidateMemory(VAddr address, size_t size);
+
+    /// Evicts any images that overlap the unmapped range.
+    void UnmapMemory(VAddr cpu_addr, size_t size);
 
     /// Retrieves the image handle of the image with the provided attributes and address.
     [[nodiscard]] ImageId FindImage(const ImageInfo& info, VAddr cpu_address,
@@ -68,7 +72,7 @@ public:
     }
 
     bool IsMetaCleared(VAddr address) const {
-        const auto& it = surface_metas.find(address);
+        const auto it = surface_metas.find(address);
         if (it != surface_metas.end()) {
             return it.value().is_cleared;
         }
@@ -76,7 +80,7 @@ public:
     }
 
     bool TouchMeta(VAddr address, bool is_clear) {
-        auto it = surface_metas.find(address);
+        const auto it = surface_metas.find(address);
         if (it != surface_metas.end()) {
             it.value().is_cleared = is_clear;
             return true;
@@ -107,7 +111,7 @@ private:
     void ForEachImageInRegion(VAddr cpu_addr, size_t size, Func&& func) {
         using FuncReturn = typename std::invoke_result<Func, ImageId, Image&>::type;
         static constexpr bool BOOL_BREAK = std::is_same_v<FuncReturn, bool>;
-        boost::container::small_vector<ImageId, 32> images;
+        boost::container::small_vector<ImageId, 8> images;
         ForEachPage(cpu_addr, size, [this, &images, cpu_addr, size, func](u64 page) {
             const auto it = page_table.find(page);
             if (it == page_table.end()) {
@@ -147,9 +151,6 @@ private:
     /// Register image in the page table
     void RegisterImage(ImageId image);
 
-    /// Register metadata surfaces attached to the image
-    void RegisterMeta(const ImageInfo& info, ImageId image);
-
     /// Unregister image from the page table
     void UnregisterImage(ImageId image);
 
@@ -159,9 +160,13 @@ private:
     /// Stop tracking CPU reads and writes for image
     void UntrackImage(Image& image, ImageId image_id);
 
+    /// Removes the image and any views/surface metas that reference it.
+    void DeleteImage(ImageId image_id);
+
 private:
     const Vulkan::Instance& instance;
     Vulkan::Scheduler& scheduler;
+    BufferCache& buffer_cache;
     PageManager& tracker;
     TileManager tile_manager;
     Common::SlotVector<Image> slot_images;
@@ -181,7 +186,6 @@ private:
     };
     tsl::robin_map<VAddr, MetaDataInfo> surface_metas;
     std::mutex mutex;
-    std::mutex m_page_table;
 };
 
 } // namespace VideoCore

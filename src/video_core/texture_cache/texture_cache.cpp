@@ -3,6 +3,7 @@
 
 #include <xxhash.h>
 #include "common/assert.h"
+#include "video_core/buffer_cache/buffer_cache.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/texture_cache/texture_cache.h"
@@ -14,13 +15,10 @@ namespace VideoCore {
 static constexpr u64 PageShift = 12;
 
 TextureCache::TextureCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& scheduler_,
-                           PageManager& tracker_)
-    : instance{instance_}, scheduler{scheduler_}, tracker{tracker_},
+                           BufferCache& buffer_cache_, PageManager& tracker_)
+    : instance{instance_}, scheduler{scheduler_}, buffer_cache{buffer_cache_}, tracker{tracker_},
       tile_manager{instance, scheduler} {
-    ImageInfo info;
-    info.pixel_format = vk::Format::eR8G8B8A8Unorm;
-    info.type = vk::ImageType::e2D;
-    const ImageId null_id = slot_images.insert(instance, scheduler, info, 0);
+    const ImageId null_id = slot_images.insert(instance, scheduler, vk::Format::eR8G8B8A8Unorm, 0);
     ASSERT(null_id.index == 0);
 
     ImageViewInfo view_info;
@@ -29,9 +27,9 @@ TextureCache::TextureCache(const Vulkan::Instance& instance_, Vulkan::Scheduler&
 
 TextureCache::~TextureCache() = default;
 
-void TextureCache::OnCpuWrite(VAddr address) {
-    std::unique_lock lock{m_page_table};
-    ForEachImageInRegion(address, 1 << PageShift, [&](ImageId image_id, Image& image) {
+void TextureCache::InvalidateMemory(VAddr address, size_t size) {
+    std::scoped_lock lk{mutex};
+    ForEachImageInRegion(address, size, [&](ImageId image_id, Image& image) {
         // Ensure image is reuploaded when accessed again.
         image.flags |= ImageFlagBits::CpuModified;
         // Untrack image, so the range is unprotected and the guest can write freely.
@@ -39,8 +37,26 @@ void TextureCache::OnCpuWrite(VAddr address) {
     });
 }
 
+void TextureCache::UnmapMemory(VAddr cpu_addr, size_t size) {
+    std::scoped_lock lk{mutex};
+
+    boost::container::small_vector<ImageId, 16> deleted_images;
+    ForEachImageInRegion(cpu_addr, size, [&](ImageId id, Image&) {
+        deleted_images.push_back(id);
+    });
+    for (const ImageId id : deleted_images) {
+        Image& image = slot_images[id];
+        if (True(image.flags & ImageFlagBits::Tracked)) {
+            UntrackImage(image, id);
+        }
+        UnregisterImage(id);
+        DeleteImage(id);
+    }
+}
+
 ImageId TextureCache::FindImage(const ImageInfo& info, VAddr cpu_address, bool refresh_on_create) {
-    std::unique_lock lock{m_page_table};
+    std::scoped_lock lk{mutex};
+
     boost::container::small_vector<ImageId, 2> image_ids;
     ForEachImageInRegion(cpu_address, info.guest_size_bytes, [&](ImageId image_id, Image& image) {
         // Address and width must match.
@@ -63,8 +79,6 @@ ImageId TextureCache::FindImage(const ImageInfo& info, VAddr cpu_address, bool r
     } else {
         image_id = image_ids[0];
     }
-
-    RegisterMeta(info, image_id);
 
     Image& image = slot_images[image_id];
     if (True(image.flags & ImageFlagBits::CpuModified) && refresh_on_create) {
@@ -130,6 +144,20 @@ ImageView& TextureCache::RenderTarget(const AmdGpu::Liverpool::ColorBuffer& buff
 
     image.info.usage.render_target = true;
 
+    if (False(image.flags & ImageFlagBits::MetaRegistered)) {
+        if (info.meta_info.cmask_addr) {
+            const MetaDataInfo cmask_meta{.type = MetaDataInfo::Type::CMask, .is_cleared = true};
+            surface_metas.emplace(info.meta_info.cmask_addr, cmask_meta);
+            image.info.meta_info.cmask_addr = info.meta_info.cmask_addr;
+        }
+        if (info.meta_info.fmask_addr) {
+            const MetaDataInfo fmask_meta{.type = MetaDataInfo::Type::FMask, .is_cleared = true};
+            surface_metas.emplace(info.meta_info.fmask_addr, fmask_meta);
+            image.info.meta_info.fmask_addr = info.meta_info.fmask_addr;
+        }
+        image.flags |= ImageFlagBits::MetaRegistered;
+    }
+
     ImageViewInfo view_info{buffer, !!image.info.usage.vo_buffer};
     return RegisterImageView(image_id, view_info);
 }
@@ -148,6 +176,13 @@ ImageView& TextureCache::DepthTarget(const AmdGpu::Liverpool::DepthBuffer& buffe
                                   vk::AccessFlagBits::eDepthStencilAttachmentRead);
 
     image.info.usage.depth_target = true;
+
+    if (False(image.flags & ImageFlagBits::MetaRegistered)) {
+        const MetaDataInfo htile_meta{.type = MetaDataInfo::Type::HTile, .is_cleared = true};
+        surface_metas.emplace(info.meta_info.htile_addr, htile_meta);
+        image.info.meta_info.htile_addr = info.meta_info.htile_addr;
+        image.flags |= ImageFlagBits::MetaRegistered;
+    }
 
     ImageViewInfo view_info;
     view_info.format = info.pixel_format;
@@ -182,47 +217,6 @@ void TextureCache::RegisterImage(ImageId image_id) {
     image.flags |= ImageFlagBits::Registered;
     ForEachPage(image.cpu_addr, image.info.guest_size_bytes,
                 [this, image_id](u64 page) { page_table[page].push_back(image_id); });
-}
-
-void TextureCache::RegisterMeta(const ImageInfo& info, ImageId image_id) {
-    Image& image = slot_images[image_id];
-
-    if (image.flags & ImageFlagBits::MetaRegistered) {
-        return;
-    }
-
-    bool registered = true;
-    // Current resource tracking implementation allows us to detect usage of meta only in the last
-    // moment, so we likely will miss its first clear. To avoid this and make first frame, where
-    // the meta is encountered, looks correct we set its state to "cleared" at registrations time.
-    if (info.usage.render_target) {
-        if (info.meta_info.cmask_addr) {
-            surface_metas.emplace(
-                info.meta_info.cmask_addr,
-                MetaDataInfo{.type = MetaDataInfo::Type::CMask, .is_cleared = true});
-            image.info.meta_info.cmask_addr = info.meta_info.cmask_addr;
-        }
-
-        if (info.meta_info.fmask_addr) {
-            surface_metas.emplace(
-                info.meta_info.fmask_addr,
-                MetaDataInfo{.type = MetaDataInfo::Type::FMask, .is_cleared = true});
-            image.info.meta_info.fmask_addr = info.meta_info.fmask_addr;
-        }
-    } else if (info.usage.depth_target) {
-        if (info.meta_info.htile_addr) {
-            surface_metas.emplace(
-                info.meta_info.htile_addr,
-                MetaDataInfo{.type = MetaDataInfo::Type::HTile, .is_cleared = true});
-            image.info.meta_info.htile_addr = info.meta_info.htile_addr;
-        }
-    } else {
-        registered = false;
-    }
-
-    if (registered) {
-        image.flags |= ImageFlagBits::MetaRegistered;
-    }
 }
 
 void TextureCache::UnregisterImage(ImageId image_id) {
@@ -261,6 +255,33 @@ void TextureCache::UntrackImage(Image& image, ImageId image_id) {
     }
     image.flags &= ~ImageFlagBits::Tracked;
     tracker.UpdatePagesCachedCount(image.cpu_addr, image.info.guest_size_bytes, -1);
+}
+
+void TextureCache::DeleteImage(ImageId image_id) {
+    Image& image = slot_images[image_id];
+    ASSERT_MSG(False(image.flags & ImageFlagBits::Tracked), "Image was not untracked");
+    ASSERT_MSG(False(image.flags & ImageFlagBits::Registered), "Image was not unregistered");
+
+    // Remove any registered meta areas.
+    const auto& meta_info = image.info.meta_info;
+    if (meta_info.cmask_addr) {
+        surface_metas.erase(meta_info.cmask_addr);
+    }
+    if (meta_info.fmask_addr) {
+        surface_metas.erase(meta_info.fmask_addr);
+    }
+    if (meta_info.htile_addr) {
+        surface_metas.erase(meta_info.htile_addr);
+    }
+
+    // Reclaim image and any image views it references.
+    scheduler.DeferOperation([this, image_id] {
+        Image& image = slot_images[image_id];
+        for (const ImageViewId image_view_id : image.image_view_ids) {
+            slot_image_views.erase(image_view_id);
+        }
+        slot_images.erase(image_id);
+    });
 }
 
 } // namespace VideoCore

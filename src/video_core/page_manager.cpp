@@ -6,6 +6,7 @@
 #include "common/alignment.h"
 #include "common/error.h"
 #include "video_core/page_manager.h"
+#include "video_core/renderer_vulkan/vk_rasterizer.h"
 
 #ifndef _WIN64
 #include <linux/userfaultfd.h>
@@ -20,7 +21,7 @@ constexpr size_t PAGESIZE = 4_KB;
 constexpr size_t PAGEBITS = 12;
 
 struct PageManager::Impl {
-    Impl() {
+    Impl(Vulkan::Rasterizer* rasterizer_) : rasterizer{rasterizer_} {
         uffd = syscall(__NR_userfaultfd, O_CLOEXEC | O_NONBLOCK);
         ASSERT_MSG(uffd != -1, "{}", Common::GetLastErrorMsg());
 
@@ -98,20 +99,33 @@ struct PageManager::Impl {
                 continue;
             }
             ASSERT_MSG(readret == sizeof(msg), "Unexpected short read, exiting");
+            ASSERT(msg.arg.pagefault.flags & UFFD_PAGEFAULT_FLAG_WP);
 
+            // Notify rasterizer about the fault.
             const VAddr addr = msg.arg.pagefault.address;
             const VAddr addr_page = Common::AlignDown(addr, PAGESIZE);
-            ASSERT(msg.arg.pagefault.flags & UFFD_PAGEFAULT_FLAG_WP);
+            rasterizer->InvalidateMemory(addr_page, PAGESIZE);
         }
     }
 
+    Vulkan::Rasterizer* rasterizer;
     std::jthread ufd_thread;
     int uffd;
 };
 
-PageManager::PageManager() {}
+PageManager::PageManager(Vulkan::Rasterizer* rasterizer_)
+    : impl{std::make_unique<Impl>(rasterizer_)}, rasterizer{rasterizer_} {}
 
-PageManager::~PageManager() {}
+PageManager::~PageManager() = default;
+
+void PageManager::OnGpuMap(VAddr address, size_t size) {
+    impl->OnMap(address, size);
+}
+
+void PageManager::OnGpuUnmap(VAddr address, size_t size) {
+    rasterizer->UnmapMemory(address, size);
+    impl->OnUnmap(address, size);
+}
 
 void PageManager::UpdatePagesCachedCount(VAddr addr, u64 size, s32 delta) {
     static constexpr u64 PageShift = 12;

@@ -13,11 +13,11 @@ class MemoryManager;
 
 namespace VideoCore {
 class TextureCache;
+class BufferCache;
 }
 
 namespace Vulkan {
 
-static constexpr u32 MaxVertexBufferCount = 32;
 static constexpr u32 MaxShaderStages = 5;
 
 class Instance;
@@ -64,8 +64,9 @@ public:
                               std::array<vk::ShaderModule, MaxShaderStages> modules);
     ~GraphicsPipeline();
 
-    void BindResources(Core::MemoryManager* memory, StreamBuffer& staging,
-                       VideoCore::TextureCache& texture_cache) const;
+    void BindResources(const Liverpool::Regs& regs,
+                       VideoCore::TextureCache& texture_cache,
+                       VideoCore::BufferCache& buffer_cache) const;
 
     vk::Pipeline Handle() const noexcept {
         return *pipeline;
@@ -90,7 +91,6 @@ public:
 
 private:
     void BuildDescSetLayout();
-    void BindVertexBuffers(StreamBuffer& staging) const;
 
 private:
     const Instance& instance;

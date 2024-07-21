@@ -230,6 +230,7 @@ private:
     void DefineBuffers(const Info& info);
     void DefineImagesAndSamplers(const Info& info);
     void DefineSharedMemory(const Info& info);
+    void DefinePushConstantBlock();
 
     SpirvAttribute GetAttributeInfo(AmdGpu::NumberFormat fmt, Id id);
 };

@@ -6,15 +6,30 @@
 #include <boost/container/static_vector.hpp>
 
 #include "common/assert.h"
+#include "common/alignment.h"
 #include "core/memory.h"
 #include "video_core/amdgpu/resource.h"
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_stream_buffer.h"
+#include "video_core/buffer_cache/buffer_cache.h"
 #include "video_core/texture_cache/texture_cache.h"
 
 namespace Vulkan {
+
+vk::ShaderStageFlagBits StageToVkStage(Shader::Stage stage) {
+    switch (stage) {
+    case Shader::Stage::Fragment:
+        return vk::ShaderStageFlagBits::eFragment;
+    case Shader::Stage::Vertex:
+        return vk::ShaderStageFlagBits::eVertex;
+    case Shader::Stage::Geometry:
+        return vk::ShaderStageFlagBits::eGeometry;
+    default:
+        UNREACHABLE();
+    }
+}
 
 GraphicsPipeline::GraphicsPipeline(const Instance& instance_, Scheduler& scheduler_,
                                    const GraphicsPipelineKey& key_,
@@ -328,15 +343,26 @@ void GraphicsPipeline::BuildDescSetLayout() {
     desc_layout = instance.GetDevice().createDescriptorSetLayoutUnique(desc_layout_ci);
 }
 
-void GraphicsPipeline::BindResources(Core::MemoryManager* memory, StreamBuffer& staging,
-                                     VideoCore::TextureCache& texture_cache) const {
-    BindVertexBuffers(staging);
+void GraphicsPipeline::BindResources(const Liverpool::Regs& regs,
+                                     VideoCore::TextureCache& texture_cache,
+                                     VideoCore::BufferCache& buffer_cache) const {
+    const auto& vs_info = stages[u32(Shader::Stage::Vertex)];
+    const bool has_step_rate = buffer_cache.BindVertexBuffers(vs_info);
 
     // Bind resource buffers and textures.
-    boost::container::static_vector<vk::DescriptorBufferInfo, 16> buffer_infos;
+    boost::container::static_vector<vk::DescriptorBufferInfo, 32> buffer_infos;
     boost::container::static_vector<vk::DescriptorImageInfo, 32> image_infos;
     boost::container::small_vector<vk::WriteDescriptorSet, 16> set_writes;
+    vk::ShaderStageFlags push_flags{};
+    Shader::PushConstants push_data{};
     u32 binding{};
+
+    // Add step rates to push constant block if needed.
+    if (has_step_rate) {
+        push_data.step_rate0 = regs.vgt_instance_step_rate_0;
+        push_data.step_rate1 = regs.vgt_instance_step_rate_1;
+        push_flags |= vk::ShaderStageFlagBits::eVertex;
+    }
 
     for (const auto& stage : stages) {
         for (const auto& buffer : stage.buffers) {
@@ -344,15 +370,18 @@ void GraphicsPipeline::BindResources(Core::MemoryManager* memory, StreamBuffer& 
             const VAddr address = vsharp.base_address;
             const u32 size = vsharp.GetSize();
             if (buffer.is_storage) {
-                texture_cache.OnCpuWrite(address);
-                const auto [vk_buffer, offset] = memory->GetVulkanBuffer(address);
-                buffer_infos.emplace_back(vk_buffer, offset, size);
-            } else {
-                const u32 offset = staging.Copy(address, size,
-                                                buffer.is_storage ? instance.StorageMinAlignment()
-                                                                  : instance.UniformMinAlignment());
-                buffer_infos.emplace_back(staging.Handle(), offset, size);
+                texture_cache.InvalidateMemory(address, size);
             }
+            const u32 alignment = buffer.is_storage ? instance.StorageMinAlignment()
+                                                    : instance.UniformMinAlignment();
+            auto [vk_buffer, offset] = buffer_cache.ObtainBuffer(address, size, true,
+                                                                 buffer.is_storage);
+            const u32 offset_aligned = Common::AlignDown(offset, alignment);
+            if (offset != offset_aligned) {
+                push_data.AddOffset(binding, offset - offset_aligned);
+                push_flags |= StageToVkStage(stage.stage);
+            }
+            buffer_infos.emplace_back(vk_buffer, offset_aligned, size);
             set_writes.push_back({
                 .dstSet = VK_NULL_HANDLE,
                 .dstBinding = binding++,
@@ -410,85 +439,14 @@ void GraphicsPipeline::BindResources(Core::MemoryManager* memory, StreamBuffer& 
         }
     }
 
+    const auto cmdbuf = scheduler.CommandBuffer();
     if (!set_writes.empty()) {
-        const auto cmdbuf = scheduler.CommandBuffer();
         cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eGraphics, *pipeline_layout, 0,
                                     set_writes);
     }
-}
-
-void GraphicsPipeline::BindVertexBuffers(StreamBuffer& staging) const {
-    const auto& vs_info = stages[u32(Shader::Stage::Vertex)];
-    if (vs_info.vs_inputs.empty()) {
-        return;
-    }
-
-    std::array<vk::Buffer, MaxVertexBufferCount> host_buffers;
-    std::array<vk::DeviceSize, MaxVertexBufferCount> host_offsets;
-    boost::container::static_vector<AmdGpu::Buffer, MaxVertexBufferCount> guest_buffers;
-
-    struct BufferRange {
-        VAddr base_address;
-        VAddr end_address;
-        u64 offset; // offset in the mapped memory
-
-        size_t GetSize() const {
-            return end_address - base_address;
-        }
-    };
-
-    // Calculate buffers memory overlaps
-    boost::container::static_vector<BufferRange, MaxVertexBufferCount> ranges{};
-    for (const auto& input : vs_info.vs_inputs) {
-        if (input.instance_step_rate == Shader::Info::VsInput::InstanceIdType::OverStepRate0 ||
-            input.instance_step_rate == Shader::Info::VsInput::InstanceIdType::OverStepRate1) {
-            continue;
-        }
-
-        const auto& buffer = vs_info.ReadUd<AmdGpu::Buffer>(input.sgpr_base, input.dword_offset);
-        if (buffer.GetSize() == 0) {
-            continue;
-        }
-        guest_buffers.emplace_back(buffer);
-        ranges.emplace_back(buffer.base_address, buffer.base_address + buffer.GetSize());
-    }
-    std::ranges::sort(ranges, [](const BufferRange& lhv, const BufferRange& rhv) {
-        return lhv.base_address < rhv.base_address;
-    });
-
-    boost::container::static_vector<BufferRange, MaxVertexBufferCount> ranges_merged{ranges[0]};
-    for (auto range : ranges) {
-        auto& prev_range = ranges_merged.back();
-        if (prev_range.end_address < range.base_address) {
-            ranges_merged.emplace_back(range);
-        } else {
-            prev_range.end_address = std::max(prev_range.end_address, range.end_address);
-        }
-    }
-
-    // Map buffers
-    for (auto& range : ranges_merged) {
-        range.offset = staging.Copy(range.base_address, range.GetSize(), 4);
-    }
-
-    // Bind vertex buffers
-    const size_t num_buffers = guest_buffers.size();
-    for (u32 i = 0; i < num_buffers; ++i) {
-        const auto& buffer = guest_buffers[i];
-        const auto& host_buffer = std::ranges::find_if(
-            ranges_merged.cbegin(), ranges_merged.cend(), [&](const BufferRange& range) {
-                return (buffer.base_address >= range.base_address &&
-                        buffer.base_address < range.end_address);
-            });
-        assert(host_buffer != ranges_merged.cend());
-
-        host_buffers[i] = staging.Handle();
-        host_offsets[i] = host_buffer->offset + buffer.base_address - host_buffer->base_address;
-    }
-
-    if (num_buffers > 0) {
-        const auto cmdbuf = scheduler.CommandBuffer();
-        cmdbuf.bindVertexBuffers(0, num_buffers, host_buffers.data(), host_offsets.data());
+    if (push_flags != vk::ShaderStageFlags{}) {
+        cmdbuf.pushConstants(*pipeline_layout, push_flags, 0u,
+                             sizeof(push_data), &push_data);
     }
 }
 

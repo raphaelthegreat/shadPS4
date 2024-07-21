@@ -13,13 +13,20 @@
 #include "video_core/buffer_cache/memory_tracker_base.h"
 #include "video_core/renderer_vulkan/vk_stream_buffer.h"
 
+namespace Shader {
+struct Info;
+}
+
 namespace VideoCore {
 
 using BufferId = Common::SlotId;
 
 static constexpr BufferId NULL_BUFFER_ID{0};
 
+static constexpr u32 NUM_VERTEX_BUFFERS = 32;
+
 class BufferCache {
+public:
     static constexpr u32 CACHING_PAGEBITS = 16;
     static constexpr u64 CACHING_PAGESIZE = u64{1} << CACHING_PAGEBITS;
     static constexpr u64 DEVICE_PAGESIZE = 4_KB;
@@ -33,16 +40,21 @@ class BufferCache {
 
 public:
     explicit BufferCache(const Vulkan::Instance& instance,
-                         Vulkan::Scheduler& scheduler, PageManager* tracker);
+                         Vulkan::Scheduler& scheduler, PageManager& tracker);
     ~BufferCache();
 
     void WriteMemory(VAddr device_addr, u64 size);
 
     /// Invalidates any buffer in the logical page range.
-    bool OnCpuWrite(VAddr device_addr, u64 size);
+    bool InvalidateMemory(VAddr device_addr, u64 size);
 
     /// Downloads any GPU modified memory to the host in the specified region.
     void DownloadMemory(VAddr device_addr, u64 size);
+
+    /// Binds host vertex buffers for the current draw.
+    bool BindVertexBuffers(const Shader::Info& vs_info);
+
+    void BindIndexBuffer();
 
     /// Obtains a buffer for the specified region.
     [[nodiscard]] std::pair<Buffer*, u32> ObtainBuffer(VAddr gpu_addr, u32 size,
@@ -54,8 +66,6 @@ public:
 
     /// Return true when a CPU region is modified from the CPU
     [[nodiscard]] bool IsRegionCpuModified(VAddr addr, size_t size);
-
-    std::recursive_mutex mutex;
 
 private:
     template <typename Func>
@@ -99,9 +109,10 @@ private:
     const Vulkan::Instance& instance;
     Vulkan::Scheduler& scheduler;
     Vulkan::StreamBuffer staging_buffer;
+    std::recursive_mutex mutex;
     Common::SlotVector<Buffer> slot_buffers;
     MemoryTracker memory_tracker;
-    std::array<BufferId, ((1ULL << 38) >> CACHING_PAGEBITS)> page_table;
+    std::array<BufferId, ((1ULL << 39) >> CACHING_PAGEBITS)> page_table;
 };
 
 } // namespace VideoCore

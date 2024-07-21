@@ -9,6 +9,7 @@
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_stream_buffer.h"
 #include "video_core/texture_cache/texture_cache.h"
+#include "video_core/buffer_cache/buffer_cache.h"
 
 namespace Vulkan {
 
@@ -82,28 +83,46 @@ ComputePipeline::ComputePipeline(const Instance& instance_, Scheduler& scheduler
 
 ComputePipeline::~ComputePipeline() = default;
 
-bool ComputePipeline::BindResources(Core::MemoryManager* memory, StreamBuffer& staging,
-                                    VideoCore::TextureCache& texture_cache) const {
+bool ComputePipeline::BindResources(VideoCore::TextureCache& texture_cache,
+                                    VideoCore::BufferCache& buffer_cache) const {
     // Bind resource buffers and textures.
     boost::container::static_vector<vk::DescriptorBufferInfo, 16> buffer_infos;
     boost::container::static_vector<vk::DescriptorImageInfo, 16> image_infos;
     boost::container::small_vector<vk::WriteDescriptorSet, 16> set_writes;
+    Shader::PushConstants push_data{};
+    vk::ShaderStageFlags push_flags{};
     u32 binding{};
 
     for (const auto& buffer : info.buffers) {
         const auto vsharp = buffer.GetVsharp(info);
         const u32 size = vsharp.GetSize();
         const VAddr address = vsharp.base_address;
-        if (buffer.is_storage) {
-            texture_cache.OnCpuWrite(address);
-            const auto [vk_buffer, offset] = memory->GetVulkanBuffer(address);
-            buffer_infos.emplace_back(vk_buffer, offset, size);
-        } else {
-            const u32 offset = staging.Copy(address, size,
-                                            buffer.is_storage ? instance.StorageMinAlignment()
-                                                              : instance.UniformMinAlignment());
-            buffer_infos.emplace_back(staging.Handle(), offset, size);
+
+        // Most of the time when a metadata is updated with a shader it gets cleared.
+        // It means we can skip the whole dispatch and update the tracked state instead.
+        // Also, it is not intended to be consumed and in such rare cases
+        // (e.g. HTile introspection, CRAA) we will need its full emulation anyways.
+        // For cases of metadata read a warning will be logged.
+        if (buffer.is_storage && texture_cache.TouchMeta(address, true)) {
+            LOG_WARNING(Render_Vulkan, "Metadata update skipped");
+            return false;
+        } else if (!buffer.is_storage && texture_cache.IsMeta(address)) {
+            LOG_WARNING(Render_Vulkan, "Unexpected metadata read by a CS shader (buffer)");
         }
+
+        if (buffer.is_storage) {
+            texture_cache.InvalidateMemory(address, size);
+        }
+        const u32 alignment = buffer.is_storage ? instance.StorageMinAlignment()
+                                                : instance.UniformMinAlignment();
+        const auto [vk_buffer, offset] = buffer_cache.ObtainBuffer(address, size, true,
+                                                                   buffer.is_storage);
+        const u32 offset_aligned = Common::AlignDown(offset, alignment);
+        if (offset != offset_aligned) {
+            push_data.AddOffset(binding, offset - offset_aligned);
+            push_flags = vk::ShaderStageFlagBits::eCompute;
+        }
+        buffer_infos.emplace_back(vk_buffer, offset_aligned, size);
         set_writes.push_back({
             .dstSet = VK_NULL_HANDLE,
             .dstBinding = binding++,
@@ -113,21 +132,6 @@ bool ComputePipeline::BindResources(Core::MemoryManager* memory, StreamBuffer& s
                                                 : vk::DescriptorType::eUniformBuffer,
             .pBufferInfo = &buffer_infos.back(),
         });
-
-        // Most of the time when a metadata is updated with a shader it gets cleared. It means we
-        // can skip the whole dispatch and update the tracked state instead. Also, it is not
-        // intended to be consumed and in such rare cases (e.g. HTile introspection, CRAA) we will
-        // need its full emulation anyways. For cases of metadata read a warning will be logged.
-        if (buffer.is_storage) {
-            if (texture_cache.TouchMeta(address, true)) {
-                LOG_WARNING(Render_Vulkan, "Metadata update skipped");
-                return false;
-            }
-        } else {
-            if (texture_cache.IsMeta(address)) {
-                LOG_WARNING(Render_Vulkan, "Unexpected metadata read by a CS shader (buffer)");
-            }
-        }
     }
 
     for (const auto& image_desc : info.images) {
@@ -170,6 +174,12 @@ bool ComputePipeline::BindResources(Core::MemoryManager* memory, StreamBuffer& s
 
     const auto cmdbuf = scheduler.CommandBuffer();
     cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, *pipeline_layout, 0, set_writes);
+
+    if (push_flags != vk::ShaderStageFlags{}) {
+        cmdbuf.pushConstants(*pipeline_layout, push_flags, 0u,
+                             sizeof(push_data), &push_data);
+    }
+
     return true;
 }
 

@@ -508,4 +508,19 @@ void EmitContext::DefineSharedMemory(const Info& info) {
     interfaces.push_back(shared_memory_u32);
 }
 
+void EmitContext::DefinePushConstantBlock() {
+    // Create push constants block for instance steps rates and buffer offsets.
+    const Id struct_type{Name(TypeStruct(U32[1], U32[1], U32[4]), "aux_data")};
+    Decorate(struct_type, spv::Decoration::Block);
+    MemberName(struct_type, 0, "sr0");
+    MemberName(struct_type, 1, "sr1");
+    MemberName(struct_type, 2, "buf_offsets");
+    MemberDecorate(struct_type, 0, spv::Decoration::Offset, 0U);
+    MemberDecorate(struct_type, 1, spv::Decoration::Offset, 4U);
+    MemberDecorate(struct_type, 2, spv::Decoration::Offset, 8U);
+    instance_step_rates = DefineVar(struct_type, spv::StorageClass::PushConstant);
+    Name(instance_step_rates, "step_rates");
+    interfaces.push_back(instance_step_rates);
+}
+
 } // namespace Shader::Backend::SPIRV

@@ -20,7 +20,8 @@ static constexpr vk::BufferUsageFlags VertexIndexFlags =
 
 Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_,
                        VideoCore::TextureCache& texture_cache_, AmdGpu::Liverpool* liverpool_)
-    : instance{instance_}, scheduler{scheduler_}, texture_cache{texture_cache_},
+    : instance{instance_}, scheduler{scheduler_}, page_manager{this},
+      buffer_cache{instance, scheduler, page_manager}, texture_cache{texture_cache_},
       liverpool{liverpool_}, memory{Core::Memory::Instance()},
       pipeline_cache{instance, scheduler, liverpool},
       vertex_index_buffer{instance, scheduler, VertexIndexFlags, 4_GB, BufferType::Upload} {
@@ -44,16 +45,11 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
         return;
     }
 
-    try {
-        pipeline->BindResources(memory, vertex_index_buffer, texture_cache);
-    } catch (...) {
-        UNREACHABLE();
-    }
+    cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->Handle());
+    pipeline->BindResources(texture_cache, buffer_cache);
 
     BeginRendering();
     UpdateDynamicState(*pipeline);
-
-    cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->Handle());
 
     const u32 step_rates[] = {
         regs.vgt_instance_step_rate_0,
@@ -81,19 +77,25 @@ void Rasterizer::DispatchDirect() {
         return;
     }
 
-    try {
-        const auto has_resources =
-            pipeline->BindResources(memory, vertex_index_buffer, texture_cache);
-        if (!has_resources) {
-            return;
-        }
-    } catch (...) {
-        UNREACHABLE();
+    const auto has_resources =
+        pipeline->BindResources(texture_cache, buffer_cache);
+    if (!has_resources) {
+        return;
     }
 
     scheduler.EndRendering();
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline->Handle());
     cmdbuf.dispatch(cs_program.dim_x, cs_program.dim_y, cs_program.dim_z);
+}
+
+void Rasterizer::InvalidateMemory(VAddr addr, u64 size) {
+    buffer_cache.InvalidateMemory(addr, size);
+    texture_cache.InvalidateMemory(addr, size);
+}
+
+void Rasterizer::UnmapMemory(VAddr addr, u64 size) {
+    buffer_cache.WriteMemory(addr, size);
+    texture_cache.UnmapMemory(addr, size);
 }
 
 void Rasterizer::BeginRendering() {

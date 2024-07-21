@@ -174,10 +174,9 @@ bool IsImageStorageInstruction(const IR::Inst& inst) {
 
 class Descriptors {
 public:
-    explicit Descriptors(BufferResourceList& buffer_resources_, ImageResourceList& image_resources_,
-                         SamplerResourceList& sampler_resources_)
-        : buffer_resources{buffer_resources_}, image_resources{image_resources_},
-          sampler_resources{sampler_resources_} {}
+    explicit Descriptors(Info& info_)
+        : info{info_}, buffer_resources{info.buffers}, image_resources{info.images},
+          sampler_resources{info.samplers} {}
 
     u32 Add(const BufferResource& desc) {
         const u32 index{Add(buffer_resources, desc, [&desc](const auto& existing) {
@@ -202,9 +201,13 @@ public:
     }
 
     u32 Add(const SamplerResource& desc) {
-        const u32 index{Add(sampler_resources, desc, [&desc](const auto& existing) {
+        const u32 index{Add(sampler_resources, desc, [&desc, this](const auto& existing) {
+            const auto new_desc = info.ReadUd<AmdGpu::Sampler>(desc.sgpr_base,
+                                                               desc.dword_offset);
+            const auto old_desc = info.ReadUd<AmdGpu::Sampler>(existing.sgpr_base,
+                                                               existing.dword_offset);
             return desc.sgpr_base == existing.sgpr_base &&
-                   desc.dword_offset == existing.dword_offset;
+                       desc.dword_offset == existing.dword_offset || (new_desc == old_desc);
         })};
         return index;
     }
@@ -220,6 +223,7 @@ private:
         return static_cast<u32>(descriptors.size()) - 1;
     }
 
+    Info& info;
     BufferResourceList& buffer_resources;
     ImageResourceList& image_resources;
     SamplerResourceList& sampler_resources;
@@ -606,7 +610,7 @@ void ResourceTrackingPass(IR::Program& program) {
 
     // Iterate resource instructions and patch them after finding the sharp.
     auto& info = program.info;
-    Descriptors descriptors{info.buffers, info.images, info.samplers};
+    Descriptors descriptors{info};
     for (IR::Block* const block : program.post_order_blocks) {
         for (IR::Inst& inst : block->Instructions()) {
             if (IsBufferInstruction(inst)) {
