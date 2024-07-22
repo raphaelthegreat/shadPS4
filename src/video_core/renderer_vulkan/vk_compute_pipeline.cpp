@@ -112,18 +112,20 @@ bool ComputePipeline::BindResources(VideoCore::TextureCache& texture_cache,
 
         if (buffer.is_storage) {
             texture_cache.InvalidateMemory(address, size);
+            LOG_INFO(Render_Vulkan, "Binding storage buffer addr = {:#x}, size = {:#x}",
+                     address, size);
         }
         const u32 alignment = buffer.is_storage ? instance.StorageMinAlignment()
                                                 : instance.UniformMinAlignment();
-        LOG_INFO(Render_Vulkan, "Obtaining storage {} buffer addr = {:#x}, size = {:#x}",
-                 buffer.is_storage ? "storage" : "uniform", address, size);
+        //LOG_INFO(Render_Vulkan, "Obtaining storage {} buffer addr = {:#x}, size = {:#x}",
+        //         buffer.is_storage ? "storage" : "uniform", address, size);
         const auto [vk_buffer, offset] = buffer_cache.ObtainBuffer(address, size, true,
                                                                    buffer.is_storage);
         const u32 offset_aligned = Common::AlignDown(offset, alignment);
         if (offset != offset_aligned) {
             push_data.AddOffset(binding, offset - offset_aligned);
             push_flags = vk::ShaderStageFlagBits::eCompute;
-            UNREACHABLE();
+            //UNREACHABLE();
         }
         buffer_infos.emplace_back(vk_buffer->buffer, offset_aligned, size);
         set_writes.push_back({
@@ -179,8 +181,8 @@ bool ComputePipeline::BindResources(VideoCore::TextureCache& texture_cache,
     cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, *pipeline_layout, 0, set_writes);
 
     if (push_flags != vk::ShaderStageFlags{}) {
-        cmdbuf.pushConstants(*pipeline_layout, push_flags, 0u,
-                             sizeof(push_data), &push_data);
+        //cmdbuf.pushConstants(*pipeline_layout, push_flags, 0u,
+        //                     sizeof(push_data), &push_data);
     }
 
     return true;

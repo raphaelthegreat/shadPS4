@@ -350,6 +350,13 @@ void GraphicsPipeline::BindResources(const Liverpool::Regs& regs,
     const auto& vs_info = GetStage(Shader::Stage::Vertex);
     const bool has_step_rate = buffer_cache.BindVertexBuffers(vs_info);
 
+    static std::unique_ptr<StreamBuffer> staging{};
+    if (!staging) {
+        staging = std::make_unique<StreamBuffer>(instance, scheduler,
+            vk::BufferUsageFlagBits::eTransferSrc |
+            vk::BufferUsageFlagBits::eUniformBuffer, 512_MB, BufferType::Upload);
+    }
+
     // Bind resource buffers and textures.
     boost::container::static_vector<vk::DescriptorBufferInfo, 32> buffer_infos;
     boost::container::static_vector<vk::DescriptorImageInfo, 32> image_infos;
@@ -371,18 +378,25 @@ void GraphicsPipeline::BindResources(const Liverpool::Regs& regs,
             const VAddr address = vsharp.base_address;
             const u32 size = vsharp.GetSize();
             if (buffer.is_storage) {
+                LOG_INFO(Render_Vulkan, "Binding storage buffer addr = {:#x}, size = {:#x}",
+                         address, size);
                 texture_cache.InvalidateMemory(address, size);
+                const u32 alignment = buffer.is_storage ? instance.StorageMinAlignment()
+                                                        : instance.UniformMinAlignment();
+                auto [vk_buffer, offset] = buffer_cache.ObtainBuffer(address, size, true,
+                                                                     buffer.is_storage);
+                const u32 offset_aligned = Common::AlignDown(offset, alignment);
+                if (offset != offset_aligned) {
+                    push_data.AddOffset(binding, offset - offset_aligned);
+                    push_flags |= StageToVkStage(stage.stage);
+                }
+                buffer_infos.emplace_back(vk_buffer->buffer, offset_aligned, size);
+            } else {
+                const u32 offset = staging->Copy(address, size,
+                                                 buffer.is_storage ? instance.StorageMinAlignment()
+                                                                   : instance.UniformMinAlignment());
+                buffer_infos.emplace_back(staging->Handle(), offset, size);
             }
-            const u32 alignment = buffer.is_storage ? instance.StorageMinAlignment()
-                                                    : instance.UniformMinAlignment();
-            auto [vk_buffer, offset] = buffer_cache.ObtainBuffer(address, size, true,
-                                                                 buffer.is_storage);
-            const u32 offset_aligned = Common::AlignDown(offset, alignment);
-            if (offset != offset_aligned) {
-                push_data.AddOffset(binding, offset - offset_aligned);
-                push_flags |= StageToVkStage(stage.stage);
-            }
-            buffer_infos.emplace_back(vk_buffer->buffer, offset_aligned, size);
             set_writes.push_back({
                 .dstSet = VK_NULL_HANDLE,
                 .dstBinding = binding++,

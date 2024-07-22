@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
-
+#pragma clang optimize off
 #include <common/logging/log.h>
 #include <core/file_format/psf.h>
 #include <core/file_format/splash.h>

@@ -28,7 +28,7 @@ static constexpr u32 NUM_VERTEX_BUFFERS = 32;
 
 class BufferCache {
 public:
-    static constexpr u32 CACHING_PAGEBITS = 14;
+    static constexpr u32 CACHING_PAGEBITS = 12;
     static constexpr u64 CACHING_PAGESIZE = u64{1} << CACHING_PAGEBITS;
     static constexpr u64 DEVICE_PAGESIZE = 4_KB;
 
@@ -110,7 +110,7 @@ private:
     std::recursive_mutex mutex;
     Common::SlotVector<Buffer> slot_buffers;
     MemoryTracker memory_tracker;
-    tsl::robin_pg_map<u32, BufferId> page_table;
+    std::array<BufferId, ((1ULL << 39) >> CACHING_PAGEBITS)> page_table;
 };
 
 } // namespace VideoCore

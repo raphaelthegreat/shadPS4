@@ -25,7 +25,7 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_,
       texture_cache{instance, scheduler, buffer_cache, page_manager},
       liverpool{liverpool_}, memory{Core::Memory::Instance()},
       pipeline_cache{instance, scheduler, liverpool},
-      vertex_index_buffer{instance, scheduler, VertexIndexFlags, 4_GB, BufferType::Upload} {
+      vertex_index_buffer{instance, scheduler, VertexIndexFlags, 512_MB, BufferType::Upload} {
     if (!Config::nullGpu()) {
         liverpool->BindRasterizer(this);
     }
@@ -52,10 +52,13 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
     pipeline->BindResources(regs, texture_cache, buffer_cache);
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->Handle());
 
-    cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eAllCommands,
+    static constexpr vk::MemoryBarrier WRITE_BARRIER{
+        .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
+        .dstAccessMask = vk::AccessFlagBits::eMemoryRead | vk::AccessFlagBits::eMemoryWrite,
+    };
+    cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
                            vk::PipelineStageFlagBits::eAllCommands,
-                           vk::DependencyFlagBits::eByRegion,
-                           {}, {}, {});
+                           vk::DependencyFlagBits::eByRegion, WRITE_BARRIER, {}, {});
 
     // Begin rendering.
     BeginRendering();
@@ -193,16 +196,26 @@ u32 Rasterizer::SetupIndexBuffer(bool& is_indexed, u32 index_offset) {
     const u32 index_size = is_index16 ? sizeof(u16) : sizeof(u32);
 
     // Upload index data to stream buffer.
-    const VAddr index_address = regs.index_base_address.Address<VAddr>();
-    const u32 index_buffer_size = (index_offset + regs.num_indices) * index_size;
+    const VAddr index_address = regs.index_base_address.Address<VAddr>() +
+                                index_offset * index_size;
+    const u32 index_buffer_size = regs.num_indices * index_size;
     const auto [buffer, offset] = buffer_cache.ObtainBuffer(index_address,
                                                             index_buffer_size,
                                                             true, false);
     // Bind index buffer.
     const auto cmdbuf = scheduler.CommandBuffer();
-    cmdbuf.bindIndexBuffer(buffer->buffer, offset + index_offset * index_size,
-                           index_type);
+    cmdbuf.bindIndexBuffer(buffer->buffer, offset, index_type);
     return regs.num_indices;
+
+    /*const auto [data, offset, _] = vertex_index_buffer.Map(index_buffer_size);
+    std::memcpy(data, (void*)index_address, index_buffer_size);
+    vertex_index_buffer.Commit(index_buffer_size);
+
+    // Bind index buffer.
+    const auto cmdbuf = scheduler.CommandBuffer();
+    cmdbuf.bindIndexBuffer(vertex_index_buffer.Handle(), offset + index_offset * index_size,
+                           index_type);
+    return regs.num_indices;*/
 }
 
 void Rasterizer::UpdateDynamicState(const GraphicsPipeline& pipeline) {

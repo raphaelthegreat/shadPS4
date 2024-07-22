@@ -108,7 +108,7 @@ struct PushConstants {
     std::array<u8, 16> buf_offsets;
 
     void AddOffset(u32 binding, u32 offset) {
-        ASSERT(offset < 16);
+        //ASSERT(offset < 16);
         buf_offsets[binding >> 1] |= offset << (binding & 1);
     }
 };

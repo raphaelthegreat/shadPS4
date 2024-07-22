@@ -32,6 +32,7 @@ TextureCache::~TextureCache() = default;
 
 void TextureCache::InvalidateMemory(VAddr address, size_t size) {
     std::scoped_lock lk{mutex};
+
     ForEachImageInRegion(address, size, [&](ImageId image_id, Image& image) {
         // Ensure image is reuploaded when accessed again.
         image.flags |= ImageFlagBits::CpuModified;
@@ -241,7 +242,6 @@ void TextureCache::UnregisterImage(ImageId image_id) {
         }
         image_ids.erase(vector_it);
     });
-    slot_images.erase(image_id);
 }
 
 void TextureCache::TrackImage(Image& image, ImageId image_id) {

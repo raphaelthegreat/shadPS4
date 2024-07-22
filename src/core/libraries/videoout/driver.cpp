@@ -1,13 +1,12 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
+#pragma clang optimize off
 
 #include <pthread.h>
 #include "common/assert.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/kernel/time_management.h"
 #include "core/libraries/videoout/driver.h"
-#include "core/platform.h"
-
 #include "video_core/renderer_vulkan/renderer_vulkan.h"
 
 extern std::unique_ptr<Vulkan::RendererVulkan> renderer;

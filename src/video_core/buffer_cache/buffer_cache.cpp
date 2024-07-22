@@ -9,7 +9,7 @@
 
 namespace VideoCore {
 
-static constexpr size_t StagingBufferSize = 64_MB;
+static constexpr size_t StagingBufferSize = 4_GB;
 
 BufferCache::BufferCache(const Vulkan::Instance& instance_,
                          Vulkan::Scheduler& scheduler_, PageManager& tracker)
@@ -27,10 +27,11 @@ bool BufferCache::InvalidateMemory(VAddr device_addr, u64 size) {
     std::scoped_lock lk{mutex};
     const bool is_tracked = IsRegionRegistered(device_addr, size);
     if (!is_tracked) {
-        return false;
+        //return false;
     }
     if (memory_tracker.IsRegionGpuModified(device_addr, size)) {
-        LOG_WARNING(Render_Vulkan, "Writing to GPU modified memory from CPU");
+        LOG_WARNING(Render_Vulkan, "Writing to GPU modified memory from CPU addr = {:#x}, size = {:#x}",
+                    device_addr, size);
     }
     memory_tracker.MarkRegionAsCpuModified(device_addr, size);
     return false;
@@ -73,6 +74,7 @@ void BufferCache::DownloadBufferMemory(Buffer& buffer, VAddr device_addr, u64 si
         // Modify copies to have the staging offset in mind
         copy.dstOffset += offset;
     }
+    staging_buffer.Commit(total_size_bytes);
     scheduler.EndRendering();
     const auto cmdbuf = scheduler.CommandBuffer();
     cmdbuf.copyBuffer(buffer.buffer, staging_buffer.Handle(), copies);
@@ -97,7 +99,7 @@ bool BufferCache::BindVertexBuffers(const Shader::Info& vs_info) {
         VAddr base_address;
         VAddr end_address;
         vk::Buffer vk_buffer;
-        u64 offset; // offset in the mapped memory
+        u64 offset;
 
         size_t GetSize() const {
             return end_address - base_address;
@@ -121,6 +123,7 @@ bool BufferCache::BindVertexBuffers(const Shader::Info& vs_info) {
         guest_buffers.emplace_back(buffer);
         ranges.emplace_back(buffer.base_address, buffer.base_address + buffer.GetSize());
     }
+
     std::ranges::sort(ranges, [](const BufferRange& lhv, const BufferRange& rhv) {
         return lhv.base_address < rhv.base_address;
     });
@@ -137,7 +140,12 @@ bool BufferCache::BindVertexBuffers(const Shader::Info& vs_info) {
 
     // Map buffers
     for (auto& range : ranges_merged) {
+        //LOG_INFO(Render_Vulkan, "Obtaining vertex buffer addr = {:#x}, size = {:#x}",
+        //         range.base_address, range.GetSize());
+        LOG_INFO(Render_Vulkan, "Binding vertex buffer addr = {:#x}, size = {:#x}",
+                 range.base_address, range.GetSize());
         const auto [buffer, offset] = ObtainBuffer(range.base_address, range.GetSize(), true, false);
+        //LOG_INFO(Render_Vulkan, "Done obtaining vertex buffer");
         range.vk_buffer = buffer->buffer;
         range.offset = offset;
         //range.offset = staging_buffer.Copy(range.base_address, range.GetSize(), 4);
@@ -153,7 +161,7 @@ bool BufferCache::BindVertexBuffers(const Shader::Info& vs_info) {
                 return (buffer.base_address >= range.base_address &&
                         buffer.base_address < range.end_address);
             });
-        assert(host_buffer != ranges_merged.cend());
+        ASSERT(host_buffer != ranges_merged.cend());
 
         host_buffers[i] = host_buffer->vk_buffer;
         host_offsets[i] = host_buffer->offset + buffer.base_address - host_buffer->base_address;
@@ -169,14 +177,14 @@ bool BufferCache::BindVertexBuffers(const Shader::Info& vs_info) {
 
 std::pair<Buffer*, u32> BufferCache::ObtainBuffer(
     VAddr device_addr, u32 size, bool sync_buffer, bool is_written) {
-    std::scoped_lock lk{mutex};
-
     const BufferId buffer_id = FindBuffer(device_addr, size);
     Buffer& buffer = slot_buffers[buffer_id];
     if (sync_buffer) {
         SynchronizeBuffer(buffer, device_addr, size);
     }
     if (is_written) {
+        LOG_ERROR(Render_Vulkan, "Marking region as GPU modified addr = {:#x}, size = {:#x}",
+                  device_addr, size);
         memory_tracker.MarkRegionAsGpuModified(device_addr, size);
     }
     return {&buffer, buffer.Offset(device_addr)};
@@ -278,7 +286,7 @@ BufferCache::OverlapResult BufferCache::ResolveOverlaps(VAddr device_addr, u32 w
             end = overlap_end;
         }
         stream_score += overlap.StreamScore();
-        if (stream_score > STREAM_LEAP_THRESHOLD && !has_stream_leap) {
+        /*if (stream_score > STREAM_LEAP_THRESHOLD && !has_stream_leap) {
             // When this memory region has been joined a bunch of times, we assume it's being used
             // as a stream buffer. Increase the size to skip constantly recreating buffers.
             has_stream_leap = true;
@@ -288,7 +296,7 @@ BufferCache::OverlapResult BufferCache::ResolveOverlaps(VAddr device_addr, u32 w
             if (expands_left) {
                 expand_end(CACHING_PAGESIZE * 128);
             }
-        }
+        }*/
     }
     return OverlapResult{
         .ids = std::move(overlap_ids),
@@ -313,16 +321,28 @@ void BufferCache::JoinOverlap(BufferId new_buffer_id, BufferId overlap_id,
     };
     scheduler.EndRendering();
     const auto cmdbuf = scheduler.CommandBuffer();
-    cmdbuf.copyBuffer(overlap.buffer, new_buffer.buffer, copy);
+    static constexpr vk::MemoryBarrier READ_BARRIER{
+        .srcAccessMask = vk::AccessFlagBits::eMemoryWrite,
+        .dstAccessMask = vk::AccessFlagBits::eTransferRead | vk::AccessFlagBits::eTransferWrite,
+    };
+    static constexpr vk::MemoryBarrier WRITE_BARRIER{
+        .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
+        .dstAccessMask = vk::AccessFlagBits::eMemoryRead | vk::AccessFlagBits::eMemoryWrite,
+    };
     cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eAllCommands,
+                           vk::PipelineStageFlagBits::eTransfer,
+                           vk::DependencyFlagBits::eByRegion, READ_BARRIER,
+                           {}, {});
+    cmdbuf.copyBuffer(overlap.buffer, new_buffer.buffer, copy);
+    cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
                            vk::PipelineStageFlagBits::eAllCommands,
-                           vk::DependencyFlagBits::eByRegion,
-                           {}, {}, {});
+                           vk::DependencyFlagBits::eByRegion, WRITE_BARRIER, {}, {});
     DeleteBuffer(overlap_id, true);
 }
 
 BufferId BufferCache::CreateBuffer(VAddr device_addr, u32 wanted_size) {
-    VAddr device_addr_end = Common::AlignUp(device_addr + wanted_size, CACHING_PAGESIZE);
+    std::scoped_lock lk{mutex};
+    const VAddr device_addr_end = Common::AlignUp(device_addr + wanted_size, CACHING_PAGESIZE);
     device_addr = Common::AlignDown(device_addr, CACHING_PAGESIZE);
     wanted_size = static_cast<u32>(device_addr_end - device_addr);
     const OverlapResult overlap = ResolveOverlaps(device_addr, wanted_size);
@@ -371,8 +391,8 @@ bool BufferCache::SynchronizeBuffer(Buffer& buffer, VAddr device_addr, u32 size)
     u64 largest_copy = 0;
     VAddr buffer_start = buffer.CpuAddr();
     memory_tracker.ForEachUploadRange(device_addr, size, [&](u64 device_addr_out, u64 range_size) {
-        LOG_INFO(Render_Vulkan, "Adding copy addr = {:#x}, size = {:#x}",
-                 device_addr_out, range_size);
+        //LOG_INFO(Render_Vulkan, "Adding copy addr = {:#x}, size = {:#x}",
+        //         device_addr_out, range_size);
         copies.push_back(vk::BufferCopy{
             .srcOffset = total_size_bytes,
             .dstOffset = device_addr_out - buffer_start,
@@ -395,11 +415,22 @@ bool BufferCache::SynchronizeBuffer(Buffer& buffer, VAddr device_addr, u32 size)
     staging_buffer.Commit(total_size_bytes);
     scheduler.EndRendering();
     const auto cmdbuf = scheduler.CommandBuffer();
-    cmdbuf.copyBuffer(staging_buffer.Handle(), buffer.buffer, copies);
+    static constexpr vk::MemoryBarrier READ_BARRIER{
+        .srcAccessMask = vk::AccessFlagBits::eMemoryWrite,
+        .dstAccessMask = vk::AccessFlagBits::eTransferRead | vk::AccessFlagBits::eTransferWrite,
+    };
+    static constexpr vk::MemoryBarrier WRITE_BARRIER{
+        .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
+        .dstAccessMask = vk::AccessFlagBits::eMemoryRead | vk::AccessFlagBits::eMemoryWrite,
+    };
     cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eAllCommands,
+                           vk::PipelineStageFlagBits::eTransfer,
+                           vk::DependencyFlagBits::eByRegion, READ_BARRIER,
+                           {}, {});
+    cmdbuf.copyBuffer(staging_buffer.Handle(), buffer.buffer, copies);
+    cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
                            vk::PipelineStageFlagBits::eAllCommands,
-                           vk::DependencyFlagBits::eByRegion,
-                           {}, {}, {});
+                           vk::DependencyFlagBits::eByRegion, WRITE_BARRIER, {}, {});
     return false;
 }
 
