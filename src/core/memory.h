@@ -92,6 +92,10 @@ struct VirtualMemoryArea {
         return addr >= base && (addr + size) < (base + this->size);
     }
 
+    bool IsFree() const noexcept {
+        return type == VMAType::Free;
+    }
+
     bool IsMapped() const noexcept {
         return type != VMAType::Free && type != VMAType::Reserved;
     }
@@ -136,9 +140,7 @@ public:
         return total_flexible_size - flexible_usage;
     }
 
-    /// Returns the offset of the mapped virtual system managed memory base from where it usually
-    /// would be mapped.
-    [[nodiscard]] VAddr SystemReservedVirtualBase() noexcept {
+    VAddr SystemReservedVirtualBase() noexcept {
         return impl.SystemReservedVirtualBase();
     }
 
@@ -202,9 +204,23 @@ private:
         return iter;
     }
 
-    VMAHandle AddMapping(VAddr virtual_addr, size_t size);
+    VAddr SearchFree(VAddr virtual_addr, size_t size) {
+        auto it = FindVMA(virtual_addr);
+        // If the VMA is free and contains the requested mapping we are done.
+        if (it->second.IsFree() && it->second.Contains(virtual_addr, size)) {
+            return virtual_addr;
+        }
+        // Search for the first free VMA that fits our mapping.
+        while (!it->second.IsFree() || it->second.size < size) {
+            it++;
+        }
+        const auto& vma = it->second;
+        return vma.base;
+    }
 
-    DirectMemoryArea& AddDmemAllocation(PAddr addr, size_t size);
+    VMAHandle CarveVMA(VAddr virtual_addr, size_t size);
+
+    DirectMemoryArea& CarveDma(PAddr addr, size_t size);
 
     VMAHandle Split(VMAHandle vma_handle, size_t offset_in_vma);
 
