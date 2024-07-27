@@ -140,9 +140,7 @@ public:
         return total_flexible_size - flexible_usage;
     }
 
-    /// Returns the offset of the mapped virtual system managed memory base from where it usually
-    /// would be mapped.
-    [[nodiscard]] VAddr SystemReservedVirtualBase() noexcept {
+    VAddr SystemReservedVirtualBase() noexcept {
         return impl.SystemReservedVirtualBase();
     }
 
@@ -176,6 +174,8 @@ public:
 
     int GetDirectMemoryType(PAddr addr, int* directMemoryTypeOut, void** directMemoryStartOut,
                             void** directMemoryEndOut);
+
+    void SetVirtualRangeName(VAddr addr, size_t size, std::string_view name);
 
 private:
     VMAHandle FindVMA(VAddr target) {

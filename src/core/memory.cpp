@@ -280,6 +280,7 @@ int MemoryManager::VirtualQuery(VAddr addr, int flags,
     info->is_flexible.Assign(vma.type == VMAType::Flexible);
     info->is_direct.Assign(vma.type == VMAType::Direct);
     info->is_commited.Assign(vma.type != VMAType::Free);
+    vma.name.copy(info->name.data(), std::min(info->name.size(), vma.name.size()));
     if (vma.type == VMAType::Direct) {
         const auto dmem_it = FindDmemArea(vma.phys_base);
         ASSERT(dmem_it != dmem_map.end());
@@ -533,6 +534,13 @@ int MemoryManager::GetDirectMemoryType(PAddr addr, int* directMemoryTypeOut,
     *directMemoryEndOut = reinterpret_cast<void*>(area.GetEnd());
     *directMemoryTypeOut = area.memory_type;
     return ORBIS_OK;
+}
+
+void MemoryManager::SetVirtualRangeName(VAddr addr, size_t size, std::string_view name) {
+    std::scoped_lock lk{mutex};
+    const auto it = FindVMA(addr);
+    ASSERT(it != vma_map.end() && it->first == addr && it->second.size == size);
+    it->second.name = name;
 }
 
 } // namespace Core

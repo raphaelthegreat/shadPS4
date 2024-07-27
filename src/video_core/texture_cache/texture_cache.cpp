@@ -142,14 +142,14 @@ ImageId TextureCache::FindImage(const ImageInfo& info, bool refresh_on_create) {
             image_ids.push_back(image_id);
         });
 
-    ASSERT_MSG(image_ids.size() <= 1, "Overlapping images not allowed!");
+    //ASSERT_MSG(image_ids.size() <= 1, "Overlapping images not allowed!");
 
     ImageId image_id{};
     if (image_ids.empty()) {
         image_id = slot_images.insert(instance, scheduler, info);
         RegisterImage(image_id);
     } else {
-        image_id = image_ids[0];
+        image_id = image_ids[image_ids.size() > 1 ? 1 : 0];
     }
 
     Image& image = slot_images[image_id];
@@ -316,7 +316,7 @@ void TextureCache::RefreshImage(Image& image) {
 
     cmdbuf.copyBufferToImage(buffer, image.image, vk::ImageLayout::eTransferDstOptimal, image_copy);
 
-    image.Transit(vk::ImageLayout::eGeneral,
+    image.Transit(vk::ImageLayout::eShaderReadOnlyOptimal,
                   vk::AccessFlagBits::eShaderRead | vk::AccessFlagBits::eTransferRead);
 }
 

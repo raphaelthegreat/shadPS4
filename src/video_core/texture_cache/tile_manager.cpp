@@ -233,7 +233,7 @@ const DetilerContext* TileManager::GetDetiler(const Image& image) const {
 struct DetilerParams {
     u32 num_levels;
     u32 pitch0;
-    u32 sizes[14];
+    std::array<u32, 14> sizes{};
 };
 
 TileManager::TileManager(const Vulkan::Instance& instance, Vulkan::Scheduler& scheduler)
@@ -374,11 +374,13 @@ std::optional<vk::Buffer> TileManager::TryDetile(Image& image) {
     auto in_buffer = AllocBuffer(image.info.guest_size_bytes);
     Upload(in_buffer, reinterpret_cast<const void*>(image.info.guest_address),
            image.info.guest_size_bytes);
-    scheduler.DeferOperation([=, this]() { FreeBuffer(in_buffer); });
 
     // Prepare output buffer
     auto out_buffer = AllocBuffer(image.info.guest_size_bytes, true);
-    scheduler.DeferOperation([=, this]() { FreeBuffer(out_buffer); });
+    scheduler.DeferOperation([=, this]() {
+        FreeBuffer(in_buffer);
+        FreeBuffer(out_buffer);
+    });
 
     auto cmdbuf = scheduler.CommandBuffer();
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, *detiler->pl);
@@ -421,13 +423,11 @@ std::optional<vk::Buffer> TileManager::TryDetile(Image& image) {
     params.num_levels = image.info.resources.levels;
 
     ASSERT(image.info.resources.levels <= 14);
-    std::memset(&params.sizes, 0, sizeof(params.sizes));
     for (int m = 0; m < image.info.resources.levels; ++m) {
         params.sizes[m] = image.info.mips_layout[m].size * image.info.resources.layers +
                           (m > 0 ? params.sizes[m - 1] : 0);
     }
 
-    auto pitch = image.info.pitch;
     cmdbuf.pushConstants(*detiler->pl_layout, vk::ShaderStageFlagBits::eCompute, 0u, sizeof(params),
                          &params);
 
@@ -435,6 +435,20 @@ std::optional<vk::Buffer> TileManager::TryDetile(Image& image) {
     const auto bpp = image.info.num_bits * (image.info.props.is_block ? 16u : 1u);
     auto num_tiles = image.info.guest_size_bytes / (64 * (bpp / 8));
     cmdbuf.dispatch(num_tiles, 1, 1);
+
+    const vk::BufferMemoryBarrier post_barrier = {
+        .srcAccessMask = vk::AccessFlagBits::eShaderWrite,
+        .dstAccessMask = vk::AccessFlagBits::eTransferRead,
+        .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+        .buffer = out_buffer.first,
+        .offset = 0,
+        .size = image.info.guest_size_bytes,
+    };
+    cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eAllCommands,
+                           vk::PipelineStageFlagBits::eAllCommands,
+                           vk::DependencyFlagBits::eByRegion,
+                           {}, post_barrier, {});
 
     return {out_buffer.first};
 }

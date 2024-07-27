@@ -183,8 +183,8 @@ s32 PS4_SYSV_ABI sceKernelMapNamedFlexibleMemory(void** addr_in_out, std::size_t
     const int ret = memory->MapMemory(addr_in_out, in_addr, len, mem_prot, map_flags,
                                       Core::VMAType::Flexible, name);
 
-    LOG_INFO(Kernel_Vmm, "addr = {}, len = {:#x}, prot = {:#x}, flags = {:#x}",
-             fmt::ptr(*addr_in_out), len, prot, flags);
+    LOG_INFO(Kernel_Vmm, "addr = {}, len = {:#x}, prot = {:#x}, flags = {:#x}, name = {}",
+             fmt::ptr(*addr_in_out), len, prot, flags, name);
     return ret;
 }
 
@@ -272,6 +272,14 @@ s32 PS4_SYSV_ABI sceKernelBatchMap2(OrbisKernelBatchMapEntry* entries, int numEn
         *numEntriesOut = processed;
     }
     return result;
+}
+
+s32 PS4_SYSV_ABI sceKernelSetVirtualRangeName(const void* addr, size_t len, const char* name) {
+    LOG_INFO(Kernel_Vmm, "called, addr = {}, size = {:#x}, name = {}",
+             fmt::ptr(addr), len, name);
+    auto* memory = Core::Memory::Instance();
+    memory->SetVirtualRangeName(std::bit_cast<VAddr>(addr), len, name);
+    return ORBIS_OK;
 }
 
 } // namespace Libraries::Kernel

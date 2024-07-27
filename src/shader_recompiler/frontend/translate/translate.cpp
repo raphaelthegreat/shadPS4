@@ -317,6 +317,9 @@ void Translate(IR::Block* block, u32 block_base, std::span<const GcnInst> inst_l
         case Opcode::V_LSHLREV_B32:
             translator.V_LSHLREV_B32(inst);
             break;
+        case Opcode::V_LSHL_B32:
+            translator.V_LSHL_B32(inst);
+            break;
         case Opcode::V_ADD_I32:
             translator.V_ADD_I32(inst);
             break;
@@ -328,6 +331,9 @@ void Translate(IR::Block* block, u32 block_base, std::span<const GcnInst> inst_l
             break;
         case Opcode::V_RCP_F32:
             translator.V_RCP_F32(inst);
+            break;
+        case Opcode::V_FFBL_B32:
+            translator.V_FFBL_B32(inst);
             break;
         case Opcode::S_SWAPPC_B64:
             ASSERT(info.stage == Stage::Vertex);
@@ -370,6 +376,9 @@ void Translate(IR::Block* block, u32 block_base, std::span<const GcnInst> inst_l
             break;
         case Opcode::V_CVT_F32_F16:
             translator.V_CVT_F32_F16(inst);
+            break;
+        case Opcode::V_CVT_F16_F32:
+            translator.V_CVT_F16_F32(inst);
             break;
         case Opcode::V_CVT_F32_UBYTE0:
             translator.V_CVT_F32_UBYTE(0, inst);
@@ -945,14 +954,26 @@ void Translate(IR::Block* block, u32 block_base, std::span<const GcnInst> inst_l
         case Opcode::DS_READ_B32:
             translator.DS_READ(32, false, false, inst);
             break;
+        case Opcode::DS_READ_B64:
+            translator.DS_READ(64, false, false, inst);
+            break;
         case Opcode::DS_READ2_B32:
             translator.DS_READ(32, false, true, inst);
+            break;
+        case Opcode::DS_READ2_B64:
+            translator.DS_READ(64, false, true, inst);
             break;
         case Opcode::DS_WRITE_B32:
             translator.DS_WRITE(32, false, false, inst);
             break;
+        case Opcode::DS_WRITE_B64:
+            translator.DS_WRITE(64, false, false, inst);
+            break;
         case Opcode::DS_WRITE2_B32:
             translator.DS_WRITE(32, false, true, inst);
+            break;
+        case Opcode::DS_WRITE2_B64:
+            translator.DS_WRITE(64, false, true, inst);
             break;
         case Opcode::V_READFIRSTLANE_B32:
             translator.V_READFIRSTLANE_B32(inst);

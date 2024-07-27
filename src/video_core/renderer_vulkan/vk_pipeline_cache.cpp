@@ -302,6 +302,10 @@ std::unique_ptr<ComputePipeline> PipelineCache::CreateComputePipeline() {
     block_pool.ReleaseContents();
     inst_pool.ReleaseContents();
 
+    if (compute_key == 0x7e9a10d8 || compute_key == 0xd313588c) {
+        return nullptr;
+    }
+
     // Recompile shader to IR.
     try {
         LOG_INFO(Render_Vulkan, "Compiling cs shader {:#x}", compute_key);

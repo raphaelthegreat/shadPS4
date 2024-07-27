@@ -273,7 +273,7 @@ Value IREmitter::LoadShared(int bit_size, bool is_signed, const U32& offset) {
     case 32:
         return Inst<U32>(Opcode::LoadSharedU32, offset);
     case 64:
-        return Inst<U64>(Opcode::LoadSharedU64, offset);
+        return Inst(Opcode::LoadSharedU64, offset);
     case 128:
         return Inst(Opcode::LoadSharedU128, offset);
     default:
@@ -1063,6 +1063,10 @@ U32 IREmitter::FindUMsb(const U32& value) {
     return Inst<U32>(Opcode::FindUMsb32, value);
 }
 
+U32 IREmitter::FindULsb(const U32& value) {
+    return Inst<U32>(Opcode::FindULsb32, value);
+}
+
 U32 IREmitter::SMin(const U32& a, const U32& b) {
     return Inst<U32>(Opcode::SMin32, a, b);
 }
@@ -1227,6 +1231,11 @@ U16U32U64 IREmitter::UConvert(size_t result_bitsize, const U16U32U64& value) {
         switch (value.Type()) {
         case Type::U32:
             return Inst<U16>(Opcode::ConvertU16U32, value);
+        }
+    case 32:
+        switch (value.Type()) {
+        case Type::U16:
+            return Inst<U32>(Opcode::ConvertU32U16, value);
         }
     }
     throw NotImplementedException("Conversion from {} to {} bits", value.Type(), result_bitsize);

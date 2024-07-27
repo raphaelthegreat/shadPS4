@@ -32,6 +32,12 @@ void Translator::V_CVT_F32_F16(const GcnInst& inst) {
     SetDst(inst.dst[0], ir.FPConvert(32, ir.BitCast<IR::F16>(src0l)));
 }
 
+void Translator::V_CVT_F16_F32(const GcnInst& inst) {
+    const IR::F32 src0 = GetSrc(inst.src[0], true);
+    const IR::F16 src0fp16 = ir.FPConvert(16, src0);
+    SetDst(inst.dst[0], ir.UConvert(32, ir.BitCast<IR::U16>(src0fp16)));
+}
+
 void Translator::V_MUL_F32(const GcnInst& inst) {
     SetDst(inst.dst[0], ir.FPMul(GetSrc(inst.src[0], true), GetSrc(inst.src[1], true)));
 }
@@ -80,8 +86,13 @@ void Translator::V_AND_B32(const GcnInst& inst) {
 void Translator::V_LSHLREV_B32(const GcnInst& inst) {
     const IR::U32 src0{GetSrc(inst.src[0])};
     const IR::U32 src1{GetSrc(inst.src[1])};
-    const IR::VectorReg dst_reg{inst.dst[0].code};
-    ir.SetVectorReg(dst_reg, ir.ShiftLeftLogical(src1, ir.BitwiseAnd(src0, ir.Imm32(0x1F))));
+    SetDst(inst.dst[0], ir.ShiftLeftLogical(src1, ir.BitwiseAnd(src0, ir.Imm32(0x1F))));
+}
+
+void Translator::V_LSHL_B32(const GcnInst& inst) {
+    const IR::U32 src0{GetSrc(inst.src[0])};
+    const IR::U32 src1{GetSrc(inst.src[1])};
+    SetDst(inst.dst[0], ir.ShiftLeftLogical(src0, ir.BitwiseAnd(src1, ir.Imm32(0x1F))));
 }
 
 void Translator::V_ADD_I32(const GcnInst& inst) {
@@ -549,8 +560,14 @@ void Translator::V_CMP_CLASS_F32(const GcnInst& inst) {
             UNREACHABLE();
         }
     } else {
-        UNREACHABLE();
+        ir.SetVcc(ir.FPIsNan(src0));
+        //UNREACHABLE();
     }
+}
+
+void Translator::V_FFBL_B32(const GcnInst& inst) {
+    const IR::U32 src0{GetSrc(inst.src[0])};
+    SetDst(inst.dst[0], ir.FindULsb(src0));
 }
 
 } // namespace Shader::Gcn

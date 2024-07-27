@@ -34,7 +34,7 @@ struct DetilerContext {
 
 class TileManager {
 public:
-    using ScratchBuffer = std::pair<VkBuffer, VmaAllocation>;
+    using ScratchBuffer = std::pair<vk::Buffer, VmaAllocation>;
 
     TileManager(const Vulkan::Instance& instance, Vulkan::Scheduler& scheduler);
     ~TileManager();
