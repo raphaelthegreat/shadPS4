@@ -195,7 +195,6 @@ private:
 private:
     IR::IREmitter ir;
     Info& info;
-    static std::array<bool, IR::NumScalarRegs> exec_contexts;
 };
 
 void Translate(IR::Block* block, u32 block_base, std::span<const GcnInst> inst_list, Info& info);

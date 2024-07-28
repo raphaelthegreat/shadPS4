@@ -336,7 +336,9 @@ void EmitContext::DefineBuffers(const Info& info) {
             .id = id,
             .data_types = data_types,
             .pointer_type = pointer_type,
-            .buffer = buffer.GetVsharp(info),
+            .stride = buffer.stride,
+            .data_format = buffer.data_format,
+            .num_format = buffer.num_format,
         });
         interfaces.push_back(id);
         i++;

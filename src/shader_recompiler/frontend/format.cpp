@@ -436,20 +436,20 @@ constexpr std::array<InstFormat, 32> InstructionFormatSMRD = {{
     {},
     {},
     // 8 = S_BUFFER_LOAD_DWORD
-    {InstClass::ScalarMemRd, InstCategory::ScalarMemory, 1, 1, ScalarType::Float32,
-     ScalarType::Float32},
+    {InstClass::ScalarMemRd, InstCategory::ScalarMemory, 1, 1, ScalarType::Uint32,
+     ScalarType::Uint32},
     // 9 = S_BUFFER_LOAD_DWORDX2
-    {InstClass::ScalarMemRd, InstCategory::ScalarMemory, 1, 1, ScalarType::Float32,
-     ScalarType::Float32},
+    {InstClass::ScalarMemRd, InstCategory::ScalarMemory, 1, 1, ScalarType::Uint32,
+     ScalarType::Uint32},
     // 10 = S_BUFFER_LOAD_DWORDX4
-    {InstClass::ScalarMemRd, InstCategory::ScalarMemory, 1, 1, ScalarType::Float32,
-     ScalarType::Float32},
+    {InstClass::ScalarMemRd, InstCategory::ScalarMemory, 1, 1, ScalarType::Uint32,
+     ScalarType::Uint32},
     // 11 = S_BUFFER_LOAD_DWORDX8
-    {InstClass::ScalarMemRd, InstCategory::ScalarMemory, 1, 1, ScalarType::Float32,
-     ScalarType::Float32},
+    {InstClass::ScalarMemRd, InstCategory::ScalarMemory, 1, 1, ScalarType::Uint32,
+     ScalarType::Uint32},
     // 12 = S_BUFFER_LOAD_DWORDX16
-    {InstClass::ScalarMemRd, InstCategory::ScalarMemory, 1, 1, ScalarType::Float32,
-     ScalarType::Float32},
+    {InstClass::ScalarMemRd, InstCategory::ScalarMemory, 1, 1, ScalarType::Uint32,
+     ScalarType::Uint32},
     {},
     {},
     {},

@@ -77,6 +77,9 @@ struct BufferResource {
     u32 length;
     IR::Type used_types;
     AmdGpu::Buffer inline_cbuf;
+    AmdGpu::DataFormat data_format;
+    AmdGpu::NumberFormat num_format;
+    u32 stride;
     bool is_storage{false};
     bool is_instance_data{false};
 
@@ -193,7 +196,12 @@ struct Info {
 };
 
 constexpr AmdGpu::Buffer BufferResource::GetVsharp(const Info& info) const noexcept {
-    return inline_cbuf ? inline_cbuf : info.ReadUd<AmdGpu::Buffer>(sgpr_base, dword_offset);
+    if (inline_cbuf) {
+        auto cbuf = inline_cbuf;
+        cbuf.base_address += info.pgm_base;
+        return cbuf;
+    }
+    return info.ReadUd<AmdGpu::Buffer>(sgpr_base, dword_offset);
 }
 
 } // namespace Shader

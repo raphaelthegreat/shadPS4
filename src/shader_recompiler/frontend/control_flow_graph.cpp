@@ -116,6 +116,8 @@ void CFG::EmitBlocks() {
         block->end_inst = end_inst;
         block->cond = MakeCondition(end_inst.opcode);
         blocks.insert(*block);
+
+        const auto& start_inst = inst_list[block->begin_index];
     }
 }
 

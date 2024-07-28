@@ -61,9 +61,6 @@ IR::Program TranslateProgram(ObjectPool<IR::Inst>& inst_pool, ObjectPool<IR::Blo
     Shader::Optimization::DeadCodeEliminationPass(program);
     Shader::Optimization::CollectShaderInfoPass(program);
 
-    fmt::print("Post passes\n\n{}\n", Shader::IR::DumpProgram(program));
-    std::fflush(stdout);
-
     return program;
 }
 

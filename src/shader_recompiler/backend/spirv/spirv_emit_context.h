@@ -203,7 +203,9 @@ public:
         Id id;
         const VectorIds* data_types;
         Id pointer_type;
-        AmdGpu::Buffer buffer;
+        u32 stride;
+        AmdGpu::DataFormat data_format;
+        AmdGpu::NumberFormat num_format;
     };
 
     u32& binding;

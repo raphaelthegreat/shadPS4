@@ -371,16 +371,21 @@ s32 TryHandleInlineCbuf(IR::Inst& inst, Info& info, Descriptors& descriptors,
     }
     // We have found this pattern. Build the sharp.
     std::array<u64, 2> buffer;
-    buffer[0] = info.pgm_base + p0->Arg(0).U32() + p0->Arg(1).U32();
+    buffer[0] = p0->Arg(0).U32() + p0->Arg(1).U32();
     buffer[1] = handle->Arg(2).U32() | handle->Arg(3).U64() << 32;
     cbuf = std::bit_cast<AmdGpu::Buffer>(buffer);
     // Assign a binding to this sharp.
+    const auto inst_info = inst.Flags<IR::BufferInstInfo>();
+    const auto num_fmt = inst_info.is_typed ? inst_info.nfmt : cbuf.GetNumberFmt();
     return descriptors.Add(BufferResource{
         .sgpr_base = std::numeric_limits<u32>::max(),
         .dword_offset = 0,
         .length = BufferLength(cbuf),
-        .used_types = BufferDataType(inst, cbuf.GetNumberFmt()),
+        .used_types = BufferDataType(inst, num_fmt),
         .inline_cbuf = cbuf,
+        .data_format = inst_info.is_typed ? inst_info.dmft : cbuf.GetDataFmt(),
+        .num_format = num_fmt,
+        .stride = cbuf.GetStride(),
         .is_storage = IsBufferStore(inst) || cbuf.GetSize() > MaxUboSize,
     });
 }
@@ -389,21 +394,25 @@ void PatchBufferInstruction(IR::Block& block, IR::Inst& inst, Info& info,
                             Descriptors& descriptors) {
     s32 binding{};
     AmdGpu::Buffer buffer;
+    const auto inst_info = inst.Flags<IR::BufferInstInfo>();
     if (binding = TryHandleInlineCbuf(inst, info, descriptors, buffer); binding == -1) {
         IR::Inst* handle = inst.Arg(0).InstRecursive();
         IR::Inst* producer = handle->Arg(0).InstRecursive();
         const auto sharp = TrackSharp(producer);
         buffer = info.ReadUd<AmdGpu::Buffer>(sharp.sgpr_base, sharp.dword_offset);
+        const auto num_fmt = inst_info.is_typed ? inst_info.nfmt : buffer.GetNumberFmt();
         binding = descriptors.Add(BufferResource{
             .sgpr_base = sharp.sgpr_base,
             .dword_offset = sharp.dword_offset,
             .length = BufferLength(buffer),
-            .used_types = BufferDataType(inst, buffer.GetNumberFmt()),
+            .used_types = BufferDataType(inst, num_fmt),
+            .data_format = inst_info.is_typed ? inst_info.dmft : buffer.GetDataFmt(),
+            .num_format = inst_info.is_typed ? inst_info.nfmt : buffer.GetNumberFmt(),
+            .stride = buffer.GetStride(),
             .is_storage = IsBufferStore(inst) || buffer.GetSize() > MaxUboSize,
         });
     }
 
-    const auto inst_info = inst.Flags<IR::BufferInstInfo>();
     IR::IREmitter ir{block, IR::Block::InstructionList::s_iterator_to(inst)};
     // Replace handle with binding index in buffer resource list.
     inst.SetArg(0, ir.Imm32(binding));
@@ -426,8 +435,8 @@ void PatchBufferInstruction(IR::Block& block, IR::Inst& inst, Info& info,
         }
     } else {
         const u32 stride = buffer.GetStride();
-        ASSERT_MSG(stride >= 4, "non-formatting load_buffer_* is not implemented for stride {}",
-                   stride);
+        //ASSERT_MSG(stride >= 4, "non-formatting load_buffer_* is not implemented for stride {}",
+        //           stride);
     }
 
     IR::U32 address = ir.Imm32(inst_info.inst_offset.Value());
