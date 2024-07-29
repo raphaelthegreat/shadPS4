@@ -8,13 +8,18 @@
 
 namespace Libraries::MsgDialog {
 
+static u32 status = 0;
+
 int PS4_SYSV_ABI sceMsgDialogClose() {
     LOG_ERROR(Lib_MsgDlg, "(STUBBED) called");
     return ORBIS_OK;
 }
 
-int PS4_SYSV_ABI sceMsgDialogGetResult() {
+int PS4_SYSV_ABI sceMsgDialogGetResult(OrbisMsgDialogResult *result) {
     LOG_ERROR(Lib_MsgDlg, "(STUBBED) called");
+    result->mode = 0;
+    result->result = 0;
+    result->buttonId = 1;
     return ORBIS_OK;
 }
 
@@ -25,6 +30,7 @@ int PS4_SYSV_ABI sceMsgDialogGetStatus() {
 
 int PS4_SYSV_ABI sceMsgDialogInitialize() {
     LOG_ERROR(Lib_MsgDlg, "(STUBBED) called");
+    status = 1;
     return ORBIS_OK;
 }
 
@@ -33,6 +39,7 @@ s32 PS4_SYSV_ABI sceMsgDialogOpen(const OrbisMsgDialogParam* param) {
     OrbisMsgDialogUserMessageParam* userMsgParam = param->userMsgParam;
     const char* msg = userMsgParam->msg;
     printf("sceMsgDialogOpen msg : %s", msg);
+    status = 3;
     return ORBIS_OK;
 }
 
@@ -58,7 +65,7 @@ int PS4_SYSV_ABI sceMsgDialogTerminate() {
 
 int PS4_SYSV_ABI sceMsgDialogUpdateStatus() {
     LOG_ERROR(Lib_MsgDlg, "(STUBBED) called");
-    return ORBIS_OK;
+    return status;
 }
 
 void RegisterlibSceMsgDialog(Core::Loader::SymbolsResolver* sym) {

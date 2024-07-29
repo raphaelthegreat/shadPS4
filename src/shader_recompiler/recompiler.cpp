@@ -55,6 +55,7 @@ IR::Program TranslateProgram(ObjectPool<IR::Inst>& inst_pool, ObjectPool<IR::Blo
 
     // Run optimization passes
     Shader::Optimization::SsaRewritePass(program.post_order_blocks);
+    LOG_INFO(Render_Vulkan, "{}", IR::DumpProgram(program));
     Shader::Optimization::ResourceTrackingPass(program);
     Shader::Optimization::ConstantPropagationPass(program.post_order_blocks);
     Shader::Optimization::IdentityRemovalPass(program.blocks);

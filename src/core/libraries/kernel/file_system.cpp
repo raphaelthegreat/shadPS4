@@ -56,6 +56,12 @@ int PS4_SYSV_ABI sceKernelOpen(const char* path, int flags, u16 mode) {
     if (std::string_view{path} == "/dev/urandom") {
         return 2003;
     }
+    if (std::string_view{path} == "/dev/klog") {
+        return 2004;
+    }
+    if (std::string_view{path} == "/dev/ttyu0") {
+        return 2005;
+    }
     u32 handle = h->CreateHandle();
     auto* file = h->GetFile(handle);
     if (directory) {
@@ -117,6 +123,12 @@ int PS4_SYSV_ABI sceKernelClose(int d) {
         return ORBIS_KERNEL_ERROR_EPERM;
     }
     if (d == 2003) { // dev/urandom case
+        return SCE_OK;
+    }
+    if (d == 2004) {
+        return SCE_OK;
+    }
+    if (d == 2005) {
         return SCE_OK;
     }
     auto* h = Common::Singleton<Core::FileSys::HandleTable>::Instance();

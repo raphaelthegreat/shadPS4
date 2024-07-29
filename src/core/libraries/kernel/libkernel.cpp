@@ -171,7 +171,7 @@ void PS4_SYSV_ABI sceLibcHeapGetTraceInfo(HeapInfoInfo* info) {
 }
 
 s64 PS4_SYSV_ABI ps4__write(int d, const void* buf, std::size_t nbytes) {
-    if (d <= 2) { // stdin,stdout,stderr
+    if (d <= 2 || d == 2004 || d == 2005) { // stdin,stdout,stderr
         char* str = strdup((const char*)buf);
         if (str[nbytes - 1] == '\n')
             str[nbytes - 1] = 0;
@@ -446,6 +446,7 @@ void LibKernel_Register(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("NWtTN10cJzE", "libSceLibcInternalExt", 1, "libSceLibcInternal", 1, 1,
                  sceLibcHeapGetTraceInfo);
     LIB_FUNCTION("FxVZqBAA7ks", "libkernel", 1, "libkernel", 1, 1, ps4__write);
+    LIB_FUNCTION("FN4gaPmuFV8", "libScePosix", 1, "libkernel", 1, 1, ps4__write);
     LIB_FUNCTION("6XG4B33N09g", "libScePosix", 1, "libkernel", 1, 1, sched_yield);
 }
 

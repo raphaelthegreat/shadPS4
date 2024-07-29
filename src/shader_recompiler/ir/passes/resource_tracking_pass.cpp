@@ -273,9 +273,14 @@ std::pair<const IR::Inst*, bool> TryDisableAnisoLod0(const IR::Inst* inst) {
 }
 
 SharpLocation TrackSharp(const IR::Inst* inst) {
-    while (inst->GetOpcode() == IR::Opcode::Phi) {
-        inst = inst->Arg(0).InstRecursive();
-    }
+    const auto pre_pred = [](const IR::Inst* inst) -> std::optional<const IR::Inst*> {
+        if (inst->GetOpcode() == IR::Opcode::GetUserData ||
+            inst->GetOpcode() == IR::Opcode::ReadConst) {
+            return inst;
+        }
+        return std::nullopt;
+    };
+    inst = IR::BreadthFirstSearch(inst, pre_pred).value();
     if (inst->GetOpcode() == IR::Opcode::GetUserData) {
         return SharpLocation{
             .sgpr_base = u32(IR::ScalarReg::Max),

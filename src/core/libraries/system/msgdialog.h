@@ -91,8 +91,15 @@ struct OrbisMsgDialogParam {
     s32 : 32;
 };
 
+struct OrbisMsgDialogResult {
+    uint32_t mode;
+    int32_t result;
+    uint32_t buttonId;
+    char reserved[32];
+};
+
 int PS4_SYSV_ABI sceMsgDialogClose();
-int PS4_SYSV_ABI sceMsgDialogGetResult();
+int PS4_SYSV_ABI sceMsgDialogGetResult(OrbisMsgDialogResult* result);
 int PS4_SYSV_ABI sceMsgDialogGetStatus();
 int PS4_SYSV_ABI sceMsgDialogInitialize();
 s32 PS4_SYSV_ABI sceMsgDialogOpen(const OrbisMsgDialogParam* param);
