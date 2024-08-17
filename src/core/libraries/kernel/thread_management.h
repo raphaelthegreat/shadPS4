@@ -45,17 +45,17 @@ using PthreadKeyDestructor = PS4_SYSV_ABI void (*)(void*);
 using PthreadEntryFunc = PS4_SYSV_ABI void* (*)(void*);
 
 struct PthreadInternal {
+    using Destructor = std::pair<OrbisPthreadKey, PthreadKeyDestructor>;
+
     u8 reserved[4096];
     std::string name;
     pthread_t pth;
-    ScePthreadAttr attr;
+    ScePthreadAttr attr{};
     PthreadEntryFunc entry;
     void* arg;
-    std::atomic_bool is_started;
-    std::atomic_bool is_detached;
-    std::atomic_bool is_almost_done;
-    std::atomic_bool is_free;
-    using Destructor = std::pair<OrbisPthreadKey, PthreadKeyDestructor>;
+    std::atomic_bool is_started{};
+    std::atomic_bool is_detached{};
+    std::atomic_bool is_free{};
     std::vector<Destructor> key_destructors;
     int prio;
 };
@@ -104,15 +104,6 @@ struct PthreadRwInternal {
     std::string name;
 };
 
-class PThreadPool {
-public:
-    ScePthread Create();
-
-private:
-    std::vector<ScePthread> m_threads;
-    std::mutex m_mutex;
-};
-
 class PThreadCxt {
 public:
     ScePthreadMutexattr* getDefaultMutexattr() {
@@ -133,12 +124,6 @@ public:
     void SetDefaultAttr(ScePthreadAttr attr) {
         m_default_attr = attr;
     }
-    PThreadPool* GetPthreadPool() {
-        return m_pthread_pool;
-    }
-    void SetPthreadPool(PThreadPool* pool) {
-        m_pthread_pool = pool;
-    }
     OrbisPthreadRwlockattr* getDefaultRwattr() {
         return &m_default_Rwattr;
     }
@@ -150,7 +135,6 @@ private:
     ScePthreadMutexattr m_default_mutexattr = nullptr;
     ScePthreadCondattr m_default_condattr = nullptr;
     ScePthreadAttr m_default_attr = nullptr;
-    PThreadPool* m_pthread_pool = nullptr;
     OrbisPthreadRwlockattr m_default_Rwattr = nullptr;
 };
 

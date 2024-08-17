@@ -22,6 +22,22 @@ struct OrbisQueryInfo;
 
 namespace Core {
 
+struct HeapAPI {
+    PS4_SYSV_ABI void* (*heap_malloc)(size_t);
+    PS4_SYSV_ABI void (*heap_free)(void*);
+    PS4_SYSV_ABI void* (*heap_calloc)(size_t, size_t);
+    PS4_SYSV_ABI void* (*heap_realloc)(void*, size_t);
+    PS4_SYSV_ABI void* (*heap_memalign)(size_t, size_t);
+    PS4_SYSV_ABI int (*heap_posix_memalign)(void**, size_t, size_t);
+    // NOTE: Fields below may be inaccurate
+    PS4_SYSV_ABI int (*heap_reallocalign)(void);
+    PS4_SYSV_ABI void (*heap_malloc_stats)(void);
+    PS4_SYSV_ABI int (*heap_malloc_stats_fast)(void);
+    PS4_SYSV_ABI size_t (*heap_malloc_usable_size)(void*);
+};
+
+using AppHeapAPI = HeapAPI*;
+
 enum class MemoryProt : u32 {
     NoAccess = 0,
     CpuRead = 1,
@@ -134,12 +150,31 @@ public:
         total_flexible_size = size;
     }
 
+    void SetHeapAPI(void* func[]) {
+        heap_api = reinterpret_cast<AppHeapAPI>(func);
+    }
+
     u64 GetAvailableFlexibleSize() const {
         return total_flexible_size - flexible_usage;
     }
 
     VAddr SystemReservedVirtualBase() noexcept {
         return impl.SystemReservedVirtualBase();
+    }
+
+    void* Malloc(size_t size) {
+        if (heap_api) {
+            return heap_api->heap_malloc(size);
+        } else {
+            return std::malloc(size);
+        }
+    }
+
+    template <typename T, typename... Args>
+    T* AllocObject(Args&&... args) {
+        T* obj = reinterpret_cast<T*>(Malloc(sizeof(T)));
+        std::construct_at(obj, args...);
+        return obj;
     }
 
     PAddr Allocate(PAddr search_start, PAddr search_end, size_t size, u64 alignment,
@@ -219,6 +254,7 @@ private:
     std::recursive_mutex mutex;
     size_t total_flexible_size = 448_MB;
     size_t flexible_usage{};
+    AppHeapAPI heap_api;
     Vulkan::Rasterizer* rasterizer{};
 };
 

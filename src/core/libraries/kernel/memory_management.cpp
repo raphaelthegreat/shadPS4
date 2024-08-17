@@ -8,7 +8,6 @@
 #include "common/singleton.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/kernel/memory_management.h"
-#include "core/linker.h"
 #include "core/memory.h"
 
 namespace Libraries::Kernel {
@@ -222,8 +221,8 @@ s32 PS4_SYSV_ABI sceKernelAvailableFlexibleMemorySize(size_t* out_size) {
 }
 
 void PS4_SYSV_ABI _sceKernelRtldSetApplicationHeapAPI(void* func[]) {
-    auto* linker = Common::Singleton<Core::Linker>::Instance();
-    linker->SetHeapAPI(func);
+    auto* memory = Core::Memory::Instance();
+    memory->SetHeapAPI(func);
 }
 
 int PS4_SYSV_ABI sceKernelGetDirectMemoryType(u64 addr, int* directMemoryTypeOut,

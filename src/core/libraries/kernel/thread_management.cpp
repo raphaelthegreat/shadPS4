@@ -4,9 +4,7 @@
 #include <mutex>
 #include <thread>
 #include <semaphore.h>
-#include "common/alignment.h"
 #include "common/assert.h"
-#include "common/error.h"
 #include "common/logging/log.h"
 #include "common/singleton.h"
 #include "common/thread.h"
@@ -16,10 +14,9 @@
 #include "core/libraries/kernel/threads/threads.h"
 #include "core/libraries/libs.h"
 #include "core/linker.h"
+#include "core/memory.h"
 #ifdef _WIN64
 #include <windows.h>
-#else
-#include <sys/mman.h>
 #endif
 
 namespace Libraries::Kernel {
@@ -45,13 +42,10 @@ void init_pthreads() {
     OrbisPthreadRwlockattr default_rwattr = nullptr;
     scePthreadRwlockattrInit(&default_rwattr);
     g_pthread_cxt->setDefaultRwattr(default_rwattr);
-
-    g_pthread_cxt->SetPthreadPool(new PThreadPool);
 }
 
 void pthreadInitSelfMainThread() {
-    auto* pthread_pool = g_pthread_cxt->GetPthreadPool();
-    g_pthread_self = pthread_pool->Create();
+    g_pthread_self = new PthreadInternal{};
     scePthreadAttrInit(&g_pthread_self->attr);
     g_pthread_self->pth = pthread_self();
     g_pthread_self->name = "Main_Thread";
@@ -984,7 +978,6 @@ static void cleanup_thread(void* arg) {
             destructor(value);
         }
     }
-    thread->is_almost_done = true;
 }
 
 static void* run_thread(void* arg) {
@@ -1007,17 +1000,12 @@ int PS4_SYSV_ABI scePthreadCreate(ScePthread* thread, const ScePthreadAttr* attr
         return SCE_KERNEL_ERROR_EINVAL;
     }
 
-    auto* pthread_pool = g_pthread_cxt->GetPthreadPool();
-
     if (attr == nullptr) {
         attr = g_pthread_cxt->GetDefaultAttr();
     }
 
-    *thread = pthread_pool->Create();
-
-    if ((*thread)->attr != nullptr) {
-        scePthreadAttrDestroy(&(*thread)->attr);
-    }
+    auto* memory = Core::Memory::Instance();
+    *thread = memory->AllocObject<PthreadInternal>();
     scePthreadAttrInit(&(*thread)->attr);
 
     int result = pthread_copy_attributes(&(*thread)->attr, attr);
@@ -1030,7 +1018,6 @@ int PS4_SYSV_ABI scePthreadCreate(ScePthread* thread, const ScePthreadAttr* attr
     }
     (*thread)->entry = start_routine;
     (*thread)->arg = arg;
-    (*thread)->is_almost_done = false;
     (*thread)->is_detached = (*attr)->detached;
     (*thread)->is_started = false;
 
@@ -1053,27 +1040,6 @@ int PS4_SYSV_ABI scePthreadCreate(ScePthread* thread, const ScePthreadAttr* attr
     default:
         return SCE_KERNEL_ERROR_EINVAL;
     }
-}
-
-ScePthread PThreadPool::Create() {
-    std::scoped_lock lock{m_mutex};
-
-    for (auto* p : m_threads) {
-        if (p->is_free) {
-            p->is_free = false;
-            return p;
-        }
-    }
-
-    auto* ret = new PthreadInternal{};
-    ret->is_free = false;
-    ret->is_detached = false;
-    ret->is_almost_done = false;
-    ret->attr = nullptr;
-
-    m_threads.push_back(ret);
-
-    return ret;
 }
 
 void PS4_SYSV_ABI scePthreadYield() {
@@ -1327,7 +1293,7 @@ int PS4_SYSV_ABI posix_pthread_create(ScePthread* thread, const ScePthreadAttr* 
     return posix_pthread_create_name_np(thread, attr, start_routine, arg, "NoName");
 }
 
-using Destructor = void (*)(void*);
+using Destructor = PS4_SYSV_ABI void (*)(void*);
 
 int PS4_SYSV_ABI posix_pthread_key_create(u32* key, Destructor func) {
     pthread_key_t thread_key;
