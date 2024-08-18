@@ -3,10 +3,10 @@
 
 #pragma once
 
-#include "common/types.h"
+#include <cstdarg> // va_list
+#include <cstddef> // size_t
 
-#include <stdarg.h> // va_list
-#include <stddef.h> // size_t
+#include "common/types.h"
 
 namespace Core::Loader {
 class SymbolsResolver;

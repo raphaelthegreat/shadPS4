@@ -3,21 +3,15 @@
 
 #pragma once
 
-#include "avplayer.h"
-#include "avplayer_data_streamer.h"
-#include "avplayer_state.h"
-
-#include "core/libraries/kernel/thread_management.h"
-
 #include <mutex>
+#include <memory>
+#include "core/libraries/avplayer/avplayer.h"
+#include "core/libraries/avplayer/avplayer_state.h"
 
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 }
-
-#include <memory>
-#include <vector>
 
 namespace Libraries::AvPlayer {
 
@@ -40,8 +34,6 @@ public:
     bool SetLooping(bool is_looping);
 
 private:
-    using ScePthreadMutex = Kernel::ScePthreadMutex;
-
     // Memory Replacement
     static void* PS4_SYSV_ABI Allocate(void* handle, u32 alignment, u32 size);
     static void PS4_SYSV_ABI Deallocate(void* handle, void* memory);

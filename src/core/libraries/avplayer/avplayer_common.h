@@ -3,15 +3,13 @@
 
 #pragma once
 
-#include "avplayer.h"
 
-#include "common/assert.h"
-#include "common/logging/log.h"
-#include "core/libraries/kernel/thread_management.h"
-
+#include <mutex>
 #include <optional>
 #include <utility>
 #include <queue>
+#include <string_view>
+#include "core/libraries/avplayer/avplayer.h"
 
 #define AVPLAYER_IS_ERROR(x) ((x) < 0)
 
@@ -62,7 +60,7 @@ public:
     }
 
     void Push(T&& value) {
-        std::lock_guard guard(m_mutex);
+        std::scoped_lock guard(m_mutex);
         m_queue.emplace(std::forward<T>(value));
     }
 
@@ -70,14 +68,14 @@ public:
         if (Size() == 0) {
             return std::nullopt;
         }
-        std::lock_guard guard(m_mutex);
+        std::scoped_lock guard(m_mutex);
         auto result = std::move(m_queue.front());
         m_queue.pop();
         return result;
     }
 
     void Clear() {
-        std::lock_guard guard(m_mutex);
+        std::scoped_lock guard(m_mutex);
         m_queue = {};
     }
 

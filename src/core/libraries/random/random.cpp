@@ -4,7 +4,7 @@
 #include "common/logging/log.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/libs.h"
-#include "random.h"
+#include "core/libraries/random/random.h"
 
 namespace Libraries::Random {
 

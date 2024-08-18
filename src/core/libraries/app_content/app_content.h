@@ -11,6 +11,8 @@ class SymbolsResolver;
 
 namespace Libraries::AppContent {
 
+constexpr int ORBIS_APP_CONTENT_ERROR_PARAMETER = 0x80D90002;
+
 constexpr int ORBIS_APP_CONTENT_APPPARAM_ID_SKU_FLAG = 0;
 constexpr int ORBIS_APP_CONTENT_APPPARAM_ID_USER_DEFINED_PARAM_1 = 1;
 constexpr int ORBIS_APP_CONTENT_APPPARAM_ID_USER_DEFINED_PARAM_2 = 2;
@@ -85,7 +87,7 @@ int PS4_SYSV_ABI sceAppContentSmallSharedDataMount();
 int PS4_SYSV_ABI sceAppContentSmallSharedDataUnmount();
 int PS4_SYSV_ABI sceAppContentTemporaryDataFormat();
 int PS4_SYSV_ABI sceAppContentTemporaryDataGetAvailableSpaceKb(
-    const OrbisAppContentMountPoint* mountPoint, size_t* availableSpaceKb);
+    const OrbisAppContentMountPoint* mountPoint, std::size_t* availableSpaceKb);
 int PS4_SYSV_ABI sceAppContentTemporaryDataMount();
 int PS4_SYSV_ABI sceAppContentTemporaryDataMount2(OrbisAppContentTemporaryDataOption option,
                                                   OrbisAppContentMountPoint* mountPoint);

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <sys/types.h>
 #include "common/types.h"
 
 namespace Core::Loader {
@@ -24,6 +25,12 @@ struct OrbisKernelTimezone {
 struct OrbisKernelTimespec {
     s64 tv_sec;
     s64 tv_nsec;
+};
+
+struct OrbisTimesec {
+    time_t t;
+    u32 west_sec;
+    u32 dst_sec;
 };
 
 constexpr int ORBIS_CLOCK_REALTIME = 0;

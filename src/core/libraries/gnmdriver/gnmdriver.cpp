@@ -9,6 +9,7 @@
 #include "common/slot_vector.h"
 #include "core/address_space.h"
 #include "core/libraries/error_codes.h"
+#include "core/libraries/gnmdriver/error_codes.h"
 #include "core/libraries/gnmdriver/gnmdriver.h"
 #include "core/libraries/kernel/libkernel.h"
 #include "core/libraries/libs.h"

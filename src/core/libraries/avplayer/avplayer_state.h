@@ -3,16 +3,13 @@
 
 #pragma once
 
-#include "avplayer.h"
-#include "avplayer_data_streamer.h"
-#include "avplayer_source.h"
-
-#include "common/polyfill_thread.h"
-#include "core/libraries/kernel/thread_management.h"
-
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
+
+#include "common/polyfill_thread.h"
+#include "core/libraries/avplayer/avplayer.h"
+#include "core/libraries/avplayer/avplayer_source.h"
 
 namespace Libraries::AvPlayer {
 
@@ -38,9 +35,6 @@ public:
     bool SetLooping(bool is_looping);
 
 private:
-    using ScePthreadMutex = Kernel::ScePthreadMutex;
-    using ScePthread = Kernel::ScePthread;
-
     // Event Replacement
     static void PS4_SYSV_ABI AutoPlayEventCallback(void* handle, s32 event_id, s32 source_id,
                                                    void* event_data);

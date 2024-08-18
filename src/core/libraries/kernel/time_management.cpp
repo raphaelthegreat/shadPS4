@@ -230,6 +230,32 @@ int PS4_SYSV_ABI sceKernelConvertLocaltimeToUtc(time_t param_1, int64_t param_2,
     return SCE_OK;
 }
 
+int PS4_SYSV_ABI sceKernelConvertUtcToLocaltime(time_t time, time_t* local_time,
+                                                struct OrbisTimesec* st, unsigned long* dst_sec) {
+    LOG_TRACE(Kernel, "Called");
+#ifdef __APPLE__
+    // std::chrono::current_zone() not available yet.
+    const auto* time_zone = date::current_zone();
+#else
+    const auto* time_zone = std::chrono::current_zone();
+#endif
+    auto info = time_zone->get_info(std::chrono::system_clock::now());
+
+    *local_time = info.offset.count() + info.save.count() * 60 + time;
+
+    if (st != nullptr) {
+        st->t = time;
+        st->west_sec = info.offset.count() * 60;
+        st->dst_sec = info.save.count() * 60;
+    }
+
+    if (dst_sec != nullptr) {
+        *dst_sec = info.save.count() * 60;
+    }
+
+    return ORBIS_OK;
+}
+
 void timeSymbolsRegister(Core::Loader::SymbolsResolver* sym) {
     clock = std::make_unique<Common::NativeClock>();
     initial_ptc = clock->GetUptime();

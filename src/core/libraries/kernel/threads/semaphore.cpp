@@ -161,8 +161,9 @@ public:
 using OrbisKernelSema = Semaphore*;
 
 struct PthreadSemaphore {
+    static constexpr size_t MaxValue = std::numeric_limits<s32>::max();
     std::string name;
-    std::counting_semaphore<std::numeric_limits<s32>::max()> sema;
+    std::counting_semaphore<MaxValue> sema;
     std::atomic_int32_t value;
 
     PthreadSemaphore(u32 value) : sema{value} {}

@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <sys/types.h>
 #include "common/types.h"
 
 namespace Core::Loader {
@@ -16,23 +15,37 @@ void ErrSceToPosix(int result);
 int ErrnoToSceKernelError(int e);
 void SetPosixErrno(int e);
 
-struct OrbisTimesec {
-    time_t t;
-    u32 west_sec;
-    u32 dst_sec;
+struct OrbisKernelUuid {
+    u32 timeLow;
+    u16 timeMid;
+    u16 timeHiAndVersion;
+    u8 clockSeqHiAndReserved;
+    u8 clockSeqLow;
+    u8 node[6];
 };
-
-typedef struct {
-    uint32_t timeLow;
-    uint16_t timeMid;
-    uint16_t timeHiAndVersion;
-    uint8_t clockSeqHiAndReserved;
-    uint8_t clockSeqLow;
-    uint8_t node[6];
-} OrbisKernelUuid;
 
 int* PS4_SYSV_ABI __Error();
 int PS4_SYSV_ABI sceKernelGetCompiledSdkVersion(int* ver);
+
+template <bool set_errno, class F, F f>
+struct PosixWrapperImpl;
+
+template <bool set_errno, class R, class... Args, PS4_SYSV_ABI R (*f)(Args...)>
+struct PosixWrapperImpl<set_errno, PS4_SYSV_ABI R (*)(Args...), f> {
+    static R PS4_SYSV_ABI wrap(Args... args) {
+        s32 result = f(args...);
+        if (result < 0) {
+            result -= SCE_KERNEL_ERROR_UNKNOWN;
+            if constexpr (set_errno) {
+                *__Error() = result;
+            }
+        }
+        return result;
+    }
+};
+
+template <bool set_errno, class F, F f>
+constexpr auto PosixWrapper = PosixWrapperImpl<set_errno, F, f>::wrap;
 
 void LibKernel_Register(Core::Loader::SymbolsResolver* sym);
 

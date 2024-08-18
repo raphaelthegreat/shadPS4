@@ -125,11 +125,13 @@ set(AUDIO_LIB src/core/libraries/audio/audioin.cpp
               src/core/libraries/audio/audioin.h
               src/core/libraries/audio/audioout.cpp
               src/core/libraries/audio/audioout.h
+              src/core/libraries/audio/error_codes.h
               src/core/libraries/ajm/ajm.cpp
               src/core/libraries/ajm/ajm.h
 )
 
-set(GNM_LIB src/core/libraries/gnmdriver/gnmdriver.cpp
+set(GNM_LIB src/core/libraries/gnmdriver/error_codes.h
+            src/core/libraries/gnmdriver/gnmdriver.cpp
             src/core/libraries/gnmdriver/gnmdriver.h
 )
 
@@ -174,15 +176,16 @@ set(NETWORK_LIBS src/core/libraries/network/http.cpp
                  src/core/libraries/network/ssl.h
 )
 
-set(SYSTEM_LIBS src/core/libraries/system/commondialog.cpp
+set(SYSTEM_LIBS src/core/libraries/save_data/error_codes.h
+                src/core/libraries/save_data/savedata.cpp
+                src/core/libraries/save_data/savedata.h
+                src/core/libraries/system/commondialog.cpp
                 src/core/libraries/system/commondialog.h
+                src/core/libraries/system/error_codes.h
                 src/core/libraries/system/msgdialog.cpp
                 src/core/libraries/system/msgdialog.h
                 src/core/libraries/system/posix.cpp
                 src/core/libraries/system/posix.h
-                src/core/libraries/save_data/error_codes.h
-                src/core/libraries/save_data/savedata.cpp
-                src/core/libraries/save_data/savedata.h
                 src/core/libraries/system/savedatadialog.cpp
                 src/core/libraries/system/savedatadialog.h
                 src/core/libraries/system/sysmodule.cpp
@@ -198,6 +201,7 @@ set(SYSTEM_LIBS src/core/libraries/system/commondialog.cpp
                 src/core/libraries/disc_map/disc_map.cpp
                 src/core/libraries/disc_map/disc_map.h
                 src/core/libraries/disc_map/disc_map_codes.h
+                src/core/libraries/avplayer/error_codes.h
                 src/core/libraries/avplayer/avplayer_common.cpp
                 src/core/libraries/avplayer/avplayer_common.h
                 src/core/libraries/avplayer/avplayer_file_streamer.cpp
@@ -215,6 +219,7 @@ set(SYSTEM_LIBS src/core/libraries/system/commondialog.cpp
 set(VIDEOOUT_LIB src/core/libraries/videoout/buffer.h
                  src/core/libraries/videoout/driver.cpp
                  src/core/libraries/videoout/driver.h
+                 src/core/libraries/videoout/error_codes.h
                  src/core/libraries/videoout/video_out.cpp
                  src/core/libraries/videoout/video_out.h
 )
@@ -244,7 +249,8 @@ set(DIALOGS_LIB src/core/libraries/dialogs/error_dialog.cpp
                 src/core/libraries/dialogs/error_codes.h
 )
 
-set(PAD_LIB src/core/libraries/pad/pad.cpp
+set(PAD_LIB src/core/libraries/pad/error_codes.h
+            src/core/libraries/pad/pad.cpp
             src/core/libraries/pad/pad.h
 )
 
@@ -269,6 +275,7 @@ set(NP_LIBS src/core/libraries/np_manager/np_manager.cpp
             src/core/libraries/np_manager/np_manager.h
             src/core/libraries/np_score/np_score.cpp
             src/core/libraries/np_score/np_score.h
+            src/core/libraries/np_trophy/error_codes.h
             src/core/libraries/np_trophy/np_trophy.cpp
             src/core/libraries/np_trophy/np_trophy.h
 )

@@ -1,15 +1,11 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include "avplayer_source.h"
-
-#include "avplayer_file_streamer.h"
-
+#include <magic_enum.hpp>
 #include "common/singleton.h"
 #include "core/file_sys/fs.h"
-#include "core/libraries/kernel/time_management.h"
-
-#include <magic_enum.hpp>
+#include "core/libraries/avplayer/avplayer_source.h"
+#include "core/libraries/avplayer/avplayer_file_streamer.h"
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -20,8 +16,6 @@ extern "C" {
 }
 
 namespace Libraries::AvPlayer {
-
-using namespace Kernel;
 
 AvPlayerSource::AvPlayerSource(AvPlayerStateCallback& state, std::string_view path,
                                const SceAvPlayerInitData& init_data,

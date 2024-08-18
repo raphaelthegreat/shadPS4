@@ -1,0 +1,10 @@
+// SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
+// SPDX-License-Identifier: GPL-2.0-or-later
+
+#pragma once
+
+constexpr int ORBIS_NP_TROPHY_ERROR_INVALID_ARGUMENT = 0x80551604;
+constexpr int ORBIS_NP_TROPHY_ERROR_INVALID_HANDLE = 0x80551608;
+constexpr int ORBIS_NP_TROPHY_ERROR_HANDLE_EXCEEDS_MAX = 0x80551624;
+constexpr int ORBIS_NP_TROPHY_ERROR_CONTEXT_ALREADY_EXISTS = 0x80551613;
+constexpr int ORBIS_NP_TROPHY_ERROR_CONTEXT_EXCEEDS_MAX = 0x80551622;

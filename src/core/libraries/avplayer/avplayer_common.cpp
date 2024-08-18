@@ -1,16 +1,11 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include "avplayer.h"
-#include "avplayer_common.h"
-
-#include <algorithm>   // std::equal
-#include <cctype>      // std::tolower
-#include <string_view> // std::string_view
+#include <algorithm>
+#include <cctype>
+#include "core/libraries/avplayer/avplayer_common.h"
 
 namespace Libraries::AvPlayer {
-
-using namespace Kernel;
 
 static bool ichar_equals(char a, char b) {
     return std::tolower(static_cast<unsigned char>(a)) ==

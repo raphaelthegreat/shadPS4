@@ -5,6 +5,7 @@
 #include "common/logging/log.h"
 #include "core/libraries/error_codes.h"
 #include "core/libraries/libs.h"
+#include "core/libraries/system/error_codes.h"
 #include "core/libraries/system/systemservice.h"
 
 namespace Libraries::SystemService {
