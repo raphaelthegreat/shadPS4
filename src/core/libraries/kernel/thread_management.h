@@ -22,10 +22,6 @@ constexpr int ORBIS_KERNEL_PRIO_FIFO_LOWEST = 767;
 
 struct PthreadInternal;
 struct PthreadAttrInternal;
-struct PthreadMutexInternal;
-struct PthreadMutexattrInternal;
-struct PthreadCondInternal;
-struct PthreadCondAttrInternal;
 struct PthreadRwInternal;
 struct PthreadRwLockAttrInternal;
 class PthreadKeys;
@@ -33,10 +29,6 @@ class PthreadKeys;
 using SceKernelSchedParam = ::sched_param;
 using ScePthread = PthreadInternal*;
 using ScePthreadAttr = PthreadAttrInternal*;
-using ScePthreadMutex = PthreadMutexInternal*;
-using ScePthreadMutexattr = PthreadMutexattrInternal*;
-using ScePthreadCond = PthreadCondInternal*;
-using ScePthreadCondattr = PthreadCondAttrInternal*;
 using OrbisPthreadRwlock = PthreadRwInternal*;
 using OrbisPthreadRwlockattr = PthreadRwLockAttrInternal*;
 using OrbisPthreadKey = u32;
@@ -69,30 +61,6 @@ struct PthreadAttrInternal {
     pthread_attr_t pth_attr;
 };
 
-struct PthreadMutexInternal {
-    u8 reserved[256];
-    std::string name;
-    pthread_mutex_t pth_mutex;
-};
-
-struct PthreadMutexattrInternal {
-    u8 reserved[64];
-    pthread_mutexattr_t pth_mutex_attr;
-    int pprotocol;
-};
-
-struct PthreadCondInternal {
-    u8 reserved[256];
-    std::string name;
-    pthread_cond_t cond;
-};
-
-struct PthreadCondAttrInternal {
-    u8 reserved[64];
-    pthread_condattr_t cond_attr;
-    clockid_t clock;
-};
-
 struct PthreadRwLockAttrInternal {
     u8 reserved[64];
     pthread_rwlockattr_t attr_rwlock;
@@ -106,12 +74,6 @@ struct PthreadRwInternal {
 
 class PThreadCxt {
 public:
-    ScePthreadMutexattr* getDefaultMutexattr() {
-        return &m_default_mutexattr;
-    }
-    void setDefaultMutexattr(ScePthreadMutexattr attr) {
-        m_default_mutexattr = attr;
-    }
     ScePthreadCondattr* getDefaultCondattr() {
         return &m_default_condattr;
     }
@@ -132,7 +94,6 @@ public:
     }
 
 private:
-    ScePthreadMutexattr m_default_mutexattr = nullptr;
     ScePthreadCondattr m_default_condattr = nullptr;
     ScePthreadAttr m_default_attr = nullptr;
     OrbisPthreadRwlockattr m_default_Rwattr = nullptr;
@@ -175,13 +136,6 @@ int PS4_SYSV_ABI scePthreadCondInit(ScePthreadCond* cond, const ScePthreadCondat
 int PS4_SYSV_ABI scePthreadCondattrInit(ScePthreadCondattr* attr);
 int PS4_SYSV_ABI scePthreadCondBroadcast(ScePthreadCond* cond);
 int PS4_SYSV_ABI scePthreadCondWait(ScePthreadCond* cond, ScePthreadMutex* mutex);
-/****
- * Posix calls
- */
-int PS4_SYSV_ABI posix_pthread_mutex_init(ScePthreadMutex* mutex, const ScePthreadMutexattr* attr);
-int PS4_SYSV_ABI posix_pthread_mutex_lock(ScePthreadMutex* mutex);
-int PS4_SYSV_ABI posix_pthread_mutex_unlock(ScePthreadMutex* mutex);
-int PS4_SYSV_ABI posix_pthread_cond_broadcast(ScePthreadCond* cond);
 
 void pthreadSymbolsRegister(Core::Loader::SymbolsResolver* sym);
 } // namespace Libraries::Kernel

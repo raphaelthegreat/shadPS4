@@ -138,9 +138,13 @@ set(KERNEL_LIB
                src/core/libraries/kernel/event_flag/event_flag.h
                src/core/libraries/kernel/event_flag/event_flag_obj.cpp
                src/core/libraries/kernel/event_flag/event_flag_obj.h
+               src/core/libraries/kernel/threads/condvar.cpp
+               src/core/libraries/kernel/threads/condvar.h
                src/core/libraries/kernel/threads/rwlock.cpp
                src/core/libraries/kernel/threads/semaphore.cpp
                src/core/libraries/kernel/threads/keys.cpp
+               src/core/libraries/kernel/threads/mutex.cpp
+               src/core/libraries/kernel/threads/mutex.h
                src/core/libraries/kernel/threads/threads.h
                src/core/libraries/kernel/cpu_management.cpp
                src/core/libraries/kernel/cpu_management.h
