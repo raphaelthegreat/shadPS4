@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
-
+#pragma clang optimize off
 #include <xxhash.h>
 #include "common/assert.h"
 #include "video_core/buffer_cache/buffer_cache.h"
@@ -37,11 +37,13 @@ TextureCache::~TextureCache() = default;
 void TextureCache::InvalidateMemory(VAddr address, size_t size, bool from_compute) {
     std::unique_lock lock{mutex};
     ForEachImageInRegion(address, size, [&](ImageId image_id, Image& image) {
-        if (from_compute && !image.Overlaps(address, size)) {
+        if (!image.Overlaps(address, size)) {
             return;
         }
-        // Ensure image is reuploaded when accessed again.
-        image.flags |= ImageFlagBits::CpuModified;
+        // Mark any subresources as dirty.
+        image.ForEachSubresource(address, size, [&](u32 index) {
+            image.cpu_modified |= 1ULL << index;
+        });
         // Untrack image, so the range is unprotected and the guest can write freely.
         UntrackImage(image, image_id);
     });
@@ -203,7 +205,7 @@ ImageView& TextureCache::FindDepthTarget(const ImageInfo& image_info,
     const ImageId image_id = FindImage(image_info);
     Image& image = slot_images[image_id];
     image.flags |= ImageFlagBits::GpuModified;
-    image.flags &= ~ImageFlagBits::CpuModified;
+    image.cpu_modified = 0;
 
     const auto new_layout = view_info.is_storage ? vk::ImageLayout::eDepthStencilAttachmentOptimal
                                                  : vk::ImageLayout::eDepthStencilReadOnlyOptimal;
@@ -228,15 +230,18 @@ ImageView& TextureCache::FindDepthTarget(const ImageInfo& image_info,
 }
 
 void TextureCache::RefreshImage(Image& image, Vulkan::Scheduler* custom_scheduler /*= nullptr*/) {
-    // Mark image as validated.
-    image.flags &= ~ImageFlagBits::CpuModified;
-
-    const auto& num_layers = image.info.resources.layers;
-    const auto& num_mips = image.info.resources.levels;
+    const u32 num_layers = image.info.resources.layers;
+    const u32 num_mips = image.info.resources.levels;
     ASSERT(num_mips == image.info.mips_layout.size());
 
     boost::container::small_vector<vk::BufferImageCopy, 14> image_copy{};
     for (u32 m = 0; m < num_mips; m++) {
+        const u32 mask = (1 << num_layers) - 1;
+        const u64 cpu_modified = (image.cpu_modified >> (m * num_layers)) & mask;
+        if (cpu_modified == 0) {
+            continue;
+        }
+
         const u32 width = std::max(image.info.size.width >> m, 1u);
         const u32 height = std::max(image.info.size.height >> m, 1u);
         const u32 depth =
@@ -254,19 +259,41 @@ void TextureCache::RefreshImage(Image& image, Vulkan::Scheduler* custom_schedule
             image.mip_hashes[m] = hash;
         }
 
-        image_copy.push_back({
-            .bufferOffset = mip_ofs * num_layers,
-            .bufferRowLength = static_cast<u32>(mip_pitch),
-            .bufferImageHeight = static_cast<u32>(mip_height),
-            .imageSubresource{
-                .aspectMask = vk::ImageAspectFlagBits::eColor,
-                .mipLevel = m,
-                .baseArrayLayer = 0,
-                .layerCount = num_layers,
-            },
-            .imageOffset = {0, 0, 0},
-            .imageExtent = {width, height, depth},
-        });
+        // If all layers in a mipmap are dirty, batch upload them.
+        if (cpu_modified == mask) {
+            image_copy.push_back({
+                .bufferOffset = mip_ofs * num_layers,
+                .bufferRowLength = static_cast<u32>(mip_pitch),
+                .bufferImageHeight = static_cast<u32>(mip_height),
+                .imageSubresource{
+                    .aspectMask = vk::ImageAspectFlagBits::eColor,
+                    .mipLevel = m,
+                    .baseArrayLayer = 0,
+                    .layerCount = num_layers,
+                },
+                .imageOffset = {0, 0, 0},
+                .imageExtent = {width, height, depth},
+            });
+        } else {
+            for (u32 l = 0; l < num_layers; l++) {
+                if (!(cpu_modified & (1 << l))) {
+                    continue;
+                }
+                image_copy.push_back({
+                    .bufferOffset = mip_ofs * num_layers + mip_size * l,
+                    .bufferRowLength = static_cast<u32>(mip_pitch),
+                    .bufferImageHeight = static_cast<u32>(mip_height),
+                    .imageSubresource{
+                      .aspectMask = vk::ImageAspectFlagBits::eColor,
+                      .mipLevel = m,
+                      .baseArrayLayer = l,
+                      .layerCount = 1,
+                    },
+                    .imageOffset = {0, 0, 0},
+                    .imageExtent = {width, height, depth},
+                });
+            }
+        }
     }
 
     if (image_copy.empty()) {
@@ -296,6 +323,7 @@ void TextureCache::RefreshImage(Image& image, Vulkan::Scheduler* custom_schedule
     }
 
     cmdbuf.copyBufferToImage(buffer, image.image, vk::ImageLayout::eTransferDstOptimal, image_copy);
+    image.cpu_modified = 0;
 }
 
 vk::Sampler TextureCache::GetSampler(const AmdGpu::Sampler& sampler) {

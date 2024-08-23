@@ -48,7 +48,7 @@ void Translator::DS_SWIZZLE_B32(const GcnInst& inst) {
     const IR::U32 src{GetSrc(inst.src[1])};
     ASSERT(offset1 & 0x80);
     const IR::U32 lane_id = ir.LaneId();
-    const IR::U32 id_in_group = ir.BitwiseAnd(lane_id, ir.Imm32(0b11));
+    const IR::U32 id_in_group = ir.BitwiseAnd(lane_id, ir.Imm32(3));
     const IR::U32 base = ir.ShiftLeftLogical(id_in_group, ir.Imm32(1));
     const IR::U32 index =
         ir.IAdd(lane_id, ir.BitFieldExtract(ir.Imm32(offset0), base, ir.Imm32(2)));

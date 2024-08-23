@@ -232,7 +232,7 @@ std::pair<Buffer*, u32> BufferCache::ObtainBuffer(VAddr device_addr, u32 size, b
     std::scoped_lock lk{mutex};
     static constexpr u64 StreamThreshold = CACHING_PAGESIZE;
     const bool is_gpu_dirty = memory_tracker.IsRegionGpuModified(device_addr, size);
-    if (!is_written && size < StreamThreshold && !is_gpu_dirty) {
+    if (!is_written && size <= StreamThreshold && !is_gpu_dirty) {
         // For small uniform buffers that have not been modified by gpu
         // use device local stream buffer to reduce renderpass breaks.
         const u64 offset = stream_buffer.Copy(device_addr, size, instance.UniformMinAlignment());

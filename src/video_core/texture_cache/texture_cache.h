@@ -61,7 +61,7 @@ public:
     /// Updates image contents if it was modified by CPU.
     void UpdateImage(ImageId image_id, Vulkan::Scheduler* custom_scheduler = nullptr) {
         Image& image = slot_images[image_id];
-        if (False(image.flags & ImageFlagBits::CpuModified)) {
+        if (!image.cpu_modified) {
             return;
         }
         RefreshImage(image, custom_scheduler);
