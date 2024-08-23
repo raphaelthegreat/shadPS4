@@ -41,9 +41,8 @@ void TextureCache::InvalidateMemory(VAddr address, size_t size, bool from_comput
             return;
         }
         // Mark any subresources as dirty.
-        image.ForEachSubresource(address, size, [&](u32 index) {
-            image.cpu_modified |= 1ULL << index;
-        });
+        image.ForEachSubresource(address, size,
+                                 [&](u32 index) { image.cpu_modified |= 1ULL << index; });
         // Untrack image, so the range is unprotected and the guest can write freely.
         UntrackImage(image, image_id);
     });
@@ -284,10 +283,10 @@ void TextureCache::RefreshImage(Image& image, Vulkan::Scheduler* custom_schedule
                     .bufferRowLength = static_cast<u32>(mip_pitch),
                     .bufferImageHeight = static_cast<u32>(mip_height),
                     .imageSubresource{
-                      .aspectMask = vk::ImageAspectFlagBits::eColor,
-                      .mipLevel = m,
-                      .baseArrayLayer = l,
-                      .layerCount = 1,
+                        .aspectMask = vk::ImageAspectFlagBits::eColor,
+                        .mipLevel = m,
+                        .baseArrayLayer = l,
+                        .layerCount = 1,
                     },
                     .imageOffset = {0, 0, 0},
                     .imageExtent = {width, height, depth},
