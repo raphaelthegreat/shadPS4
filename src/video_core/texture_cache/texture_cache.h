@@ -61,11 +61,8 @@ public:
     /// Updates image contents if it was modified by CPU.
     void UpdateImage(ImageId image_id, Vulkan::Scheduler* custom_scheduler = nullptr) {
         Image& image = slot_images[image_id];
-        if (False(image.flags & ImageFlagBits::CpuModified)) {
-            return;
-        }
-        RefreshImage(image, custom_scheduler);
         TrackImage(image, image_id);
+        RefreshImage(image, custom_scheduler);
     }
 
     /// Reuploads image contents.
@@ -124,7 +121,7 @@ private:
         using FuncReturn = typename std::invoke_result<Func, ImageId, Image&>::type;
         static constexpr bool BOOL_BREAK = std::is_same_v<FuncReturn, bool>;
         boost::container::small_vector<ImageId, 32> images;
-        ForEachPage(cpu_addr, size, [this, &images, func](u64 page) {
+        ForEachPage(cpu_addr, size, [this, &images, cpu_addr, size, func](u64 page) {
             const auto it = page_table.find(page);
             if (it == nullptr) {
                 if constexpr (BOOL_BREAK) {
@@ -136,6 +133,9 @@ private:
             for (const ImageId image_id : *it) {
                 Image& image = slot_images[image_id];
                 if (image.flags & ImageFlagBits::Picked) {
+                    continue;
+                }
+                if (!image.Overlaps(cpu_addr, size)) {
                     continue;
                 }
                 image.flags |= ImageFlagBits::Picked;
