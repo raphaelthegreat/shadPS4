@@ -23,6 +23,13 @@ namespace VideoCore {
 class BufferCache;
 class PageManager;
 
+enum class FindFlags {
+    NoCreate = 1 << 0,  ///< Do not create an image if searching for one fails.
+    RelaxDim = 1 << 1,  ///< Do not check the dimentions of image, only address.
+    ExactSize = 1 << 2, ///< Check that the size of image must match exactly.
+};
+DECLARE_ENUM_FLAG_OPERATORS(FindFlags)
+
 class TextureCache {
     struct Traits {
         using Entry = boost::container::small_vector<ImageId, 16>;
@@ -44,7 +51,7 @@ public:
     void UnmapMemory(VAddr cpu_addr, size_t size);
 
     /// Retrieves the image handle of the image with the provided attributes.
-    [[nodiscard]] ImageId FindImage(const ImageInfo& info);
+    [[nodiscard]] ImageId FindImage(const ImageInfo& info, FindFlags flags = {});
 
     /// Retrieves an image view with the properties of the specified image descriptor.
     [[nodiscard]] ImageView& FindTexture(const ImageInfo& image_info,

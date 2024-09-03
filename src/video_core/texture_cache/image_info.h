@@ -20,7 +20,7 @@ struct ImageInfo {
               const AmdGpu::Liverpool::CbDbExtent& hint = {}) noexcept;
     ImageInfo(const AmdGpu::Liverpool::DepthBuffer& buffer, u32 num_slices, VAddr htile_address,
               const AmdGpu::Liverpool::CbDbExtent& hint = {}) noexcept;
-    ImageInfo(const AmdGpu::Image& image) noexcept;
+    ImageInfo(const AmdGpu::Image& image, bool is_depth = false) noexcept;
 
     bool IsTiled() const {
         return tiling_mode != AmdGpu::TilingMode::Display_Linear;

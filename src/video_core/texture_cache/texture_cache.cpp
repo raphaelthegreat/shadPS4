@@ -43,6 +43,9 @@ void TextureCache::InvalidateMemory(VAddr address, size_t size) {
         if (image_dist < MaxInvalidateDist) {
             // Ensure image is reuploaded when accessed again.
             image.flags |= ImageFlagBits::CpuModified;
+            if (image.cpu_addr == 0x75de8000) {
+                printf("bad\n");
+            }
         }
         // Untrack image, so the range is unprotected and the guest can write freely.
         UntrackImage(image, image_id);
@@ -65,7 +68,7 @@ void TextureCache::UnmapMemory(VAddr cpu_addr, size_t size) {
     }
 }
 
-ImageId TextureCache::FindImage(const ImageInfo& info) {
+ImageId TextureCache::FindImage(const ImageInfo& info, FindFlags flags) {
     if (info.guest_address == 0) [[unlikely]] {
         return NULL_IMAGE_VIEW_ID;
     }
@@ -74,18 +77,22 @@ ImageId TextureCache::FindImage(const ImageInfo& info) {
     boost::container::small_vector<ImageId, 2> image_ids;
     ForEachImageInRegion(
         info.guest_address, info.guest_size_bytes, [&](ImageId image_id, Image& image) {
-            // Address and width must match.
-            if (image.cpu_addr != info.guest_address || image.info.size.width != info.size.width) {
+            if (image.cpu_addr != info.guest_address) {
                 return;
             }
-            if (info.IsDepthStencil() != image.info.IsDepthStencil() &&
-                info.pixel_format != vk::Format::eR32Sfloat) {
+            if (True(flags & FindFlags::ExactSize) &&
+                image.info.guest_size_bytes != info.guest_size_bytes) {
+                return;
+            }
+            if (False(flags & FindFlags::RelaxDim) && image.info.size.width != info.size.width) {
                 return;
             }
             image_ids.push_back(image_id);
         });
 
-    // ASSERT_MSG(image_ids.size() <= 1, "Overlapping images not allowed!");
+    if (True(flags & FindFlags::NoCreate) && image_ids.empty()) {
+        return {};
+    }
 
     ImageId image_id{};
     if (image_ids.empty()) {
@@ -266,7 +273,7 @@ void TextureCache::RefreshImage(Image& image, Vulkan::Scheduler* custom_schedule
             .bufferRowLength = static_cast<u32>(mip_pitch),
             .bufferImageHeight = static_cast<u32>(mip_height),
             .imageSubresource{
-                .aspectMask = vk::ImageAspectFlagBits::eColor,
+                .aspectMask = image.aspect_mask & ~vk::ImageAspectFlagBits::eStencil,
                 .mipLevel = m,
                 .baseArrayLayer = 0,
                 .layerCount = num_layers,
