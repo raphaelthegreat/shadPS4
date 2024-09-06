@@ -291,6 +291,9 @@ bool PipelineCache::RefreshGraphicsKey() {
         const auto stage = Shader::StageFromIndex(i);
         const auto params = Liverpool::GetParams(*pgm);
 
+        if (auto* pgm = regs.ProgramForStage(3); regs.stage_enable.IsStageEnabled(3) && pgm->Address() != 0) {
+            return false;
+        }
         if (stage != Shader::Stage::Vertex && stage != Shader::Stage::Fragment) {
             return false;
         }

@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
-
+#pragma clang optimize off
 #include "common/div_ceil.h"
 #include "shader_recompiler/backend/spirv/spirv_emit_context.h"
 
@@ -360,7 +360,7 @@ void EmitContext::DefineBuffers() {
     for (const auto& desc : info.buffers) {
         const auto sharp = desc.GetSharp(info);
         const bool is_storage = desc.IsStorage(sharp);
-        const auto* data_types = True(desc.used_types & IR::Type::F32) ? &F32 : &U32;
+        const auto* data_types = &U32;
         const Id data_type = (*data_types)[1];
         const Id record_array_type{is_storage ? TypeRuntimeArray(data_type)
                                               : TypeArray(data_type, ConstU32(sharp.NumDwords()))};
