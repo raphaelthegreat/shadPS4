@@ -202,9 +202,10 @@ vk::SamplerAddressMode ClampMode(AmdGpu::ClampMode mode) {
     case AmdGpu::ClampMode::MirrorOnceLastTexel:
         return vk::SamplerAddressMode::eMirrorClampToEdge;
     case AmdGpu::ClampMode::ClampBorder:
+    case AmdGpu::ClampMode::ClampHalfBorder:
         return vk::SamplerAddressMode::eClampToBorder;
     default:
-        UNREACHABLE();
+        UNREACHABLE_MSG("Unknown clamp mode {}", u32(mode));
     }
 }
 

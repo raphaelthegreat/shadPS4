@@ -60,6 +60,7 @@ enum class PM4ItOpcode : u32 {
     SetContextRegIndirect = 0x73,
     SetShReg = 0x76,
     SetShRegOffset = 0x77,
+    SetQueueReg = 0x78,
     SetUconfigReg = 0x79,
     WriteConstRam = 0x81,
     DumpConstRam = 0x83,

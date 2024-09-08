@@ -307,6 +307,8 @@ void Translator::EmitVectorAlu(const GcnInst& inst) {
         return V_CMP_U32(ConditionOp::TRU, false, true, inst);
     case Opcode::V_CMPX_LG_I32:
         return V_CMP_U32(ConditionOp::LG, true, true, inst);
+    case Opcode::V_CMPX_EQ_I32:
+        return V_CMP_U32(ConditionOp::EQ, true, true, inst);
 
     case Opcode::V_MBCNT_LO_U32_B32:
         return V_MBCNT_U32_B32(true, inst);

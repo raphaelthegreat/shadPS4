@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
-
+#pragma clang optimize off
 #include <algorithm>
 #include "common/assert.h"
 #include "shader_recompiler/frontend/control_flow_graph.h"
@@ -110,6 +110,7 @@ void CFG::EmitDivergenceLabels() {
                // Those instructions need to be wrapped in the condition as well so allow branch
                // as end scope instruction.
                inst.opcode == Opcode::S_CBRANCH_EXECZ ||
+               inst.opcode == Opcode::S_ENDPGM ||
                (inst.opcode == Opcode::S_ANDN2_B64 && inst.dst[0].field == OperandField::ExecLo);
     };
 
@@ -127,7 +128,8 @@ void CFG::EmitDivergenceLabels() {
         s32 curr_begin = -1;
         for (size_t index = GetIndex(start); index < end_index; index++) {
             const auto& inst = inst_list[index];
-            if (is_close_scope(inst) && curr_begin != -1) {
+            const bool is_close = is_close_scope(inst);
+            if ((is_close || index == end_index - 1) && curr_begin != -1) {
                 // If there are no instructions inside scope don't do anything.
                 if (index - curr_begin == 1) {
                     curr_begin = -1;
@@ -138,8 +140,16 @@ void CFG::EmitDivergenceLabels() {
                 const auto& save_inst = inst_list[curr_begin];
                 const Label label = index_to_pc[curr_begin] + save_inst.length;
                 AddLabel(label);
-                // Add a label to the close scope instruction as well.
-                AddLabel(index_to_pc[index]);
+                // Add a label to the close scope instruction.
+                // There are 3 cases of when we need to close a scope.
+                // * Close scope instruction inside the block
+                // * Close scope instruction at end of the block (cbranch of endpgm)
+                // * Normal instruction at end of block
+                // For the last case we must NOT add a label as that would cause
+                // the last instruction to be separated into its own basic block
+                if (is_close) {
+                    AddLabel(index_to_pc[index]);
+                }
                 // Reset scope begin.
                 curr_begin = -1;
             }
@@ -197,11 +207,13 @@ void CFG::LinkBlocks() {
             end_inst.opcode == Opcode::S_ANDN2_B64 || end_inst.opcode == Opcode::V_CMPX_NE_U32) {
             // Blocks are stored ordered by address in the set
             auto next_it = std::next(it);
+            ASSERT(next_it != blocks.end());
             auto* target_block = &(*next_it);
             ++target_block->num_predecessors;
             block.branch_true = target_block;
 
             auto merge_it = std::next(next_it);
+            ASSERT(merge_it != blocks.end());
             auto* merge_block = &(*merge_it);
             ++merge_block->num_predecessors;
             block.branch_false = merge_block;

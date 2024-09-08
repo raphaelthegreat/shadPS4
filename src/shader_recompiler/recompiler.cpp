@@ -51,6 +51,10 @@ IR::Program TranslateProgram(std::span<const u32> code, Pools& pools, Info& info
     Common::ObjectPool<Gcn::Block> gcn_block_pool{64};
     Gcn::CFG cfg{gcn_block_pool, program.ins_list};
 
+    if (info.pgm_hash == 0x3d5ebf4e) {
+        printf("bad\n");
+    }
+
     // Structurize control flow graph and create program.
     program.syntax_list = Shader::Gcn::BuildASL(pools.inst_pool, pools.block_pool, cfg,
                                                 program.info, runtime_info, profile);

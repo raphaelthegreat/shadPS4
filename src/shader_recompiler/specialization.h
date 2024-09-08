@@ -45,6 +45,7 @@ struct StageSpecialization {
     boost::container::small_vector<BufferSpecialization, 16> buffers;
     boost::container::small_vector<TextureBufferSpecialization, 8> tex_buffers;
     boost::container::small_vector<ImageSpecialization, 16> images;
+    boost::container::static_vector<u32, 16> ud_regs;
     u32 start_binding{};
 
     explicit StageSpecialization(const Shader::Info& info_, RuntimeInfo runtime_info_,
@@ -87,6 +88,9 @@ struct StageSpecialization {
         if (runtime_info != other.runtime_info) {
             return false;
         }
+        /*if (!std::ranges::equal(ud_regs, other.ud_regs)) {
+            return false;
+        }*/
         u32 binding{};
         for (u32 i = 0; i < buffers.size(); i++) {
             if (other.bitset[binding++] && buffers[i] != other.buffers[i]) {
