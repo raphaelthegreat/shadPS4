@@ -7,6 +7,12 @@
 
 namespace Libraries::Kernel {
 
+static constexpr int CPU_MAXSIZE = 128;
+
+struct CpuSet {
+    long bits[2];
+};
+
 int PS4_SYSV_ABI sceKernelIsNeoMode();
 
 } // namespace Libraries::Kernel

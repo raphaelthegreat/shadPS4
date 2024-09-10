@@ -11,7 +11,7 @@
 #include "core/libraries/dialogs/ime_dialog.h"
 #include "core/libraries/disc_map/disc_map.h"
 #include "core/libraries/gnmdriver/gnmdriver.h"
-#include "core/libraries/kernel/libkernel.h"
+#include "core/libraries/kernel/kernel.h"
 #include "core/libraries/libc_internal/libc_internal.h"
 #include "core/libraries/libpng/pngdec.h"
 #include "core/libraries/libs.h"

@@ -184,8 +184,6 @@ set(KERNEL_LIB
                src/core/libraries/kernel/event_flag/event_flag.h
                src/core/libraries/kernel/event_flag/event_flag_obj.cpp
                src/core/libraries/kernel/event_flag/event_flag_obj.h
-               src/core/libraries/kernel/threads/rwlock.cpp
-               src/core/libraries/kernel/threads/semaphore.cpp
                src/core/libraries/kernel/threads/keys.cpp
                src/core/libraries/kernel/threads/threads.h
                src/core/libraries/kernel/cpu_management.cpp
@@ -196,8 +194,8 @@ set(KERNEL_LIB
                src/core/libraries/kernel/event_queues.h
                src/core/libraries/kernel/file_system.cpp
                src/core/libraries/kernel/file_system.h
-               src/core/libraries/kernel/libkernel.cpp
-               src/core/libraries/kernel/libkernel.h
+               src/core/libraries/kernel/kernel.cpp
+               src/core/libraries/kernel/kernel.h
                src/core/libraries/kernel/memory_management.cpp
                src/core/libraries/kernel/memory_management.h
                src/core/libraries/kernel/thread_management.cpp
@@ -678,6 +676,11 @@ else()
         src/emulator.h
         src/sdl_window.h
         src/sdl_window.cpp
+        src/core/libraries/kernel/signal.h
+        src/core/libraries/kernel/threads/thr_mutex.cpp
+        src/core/libraries/kernel/threads/thr_cond.cpp
+        src/core/libraries/kernel/threads/thr_sem.cpp
+        src/core/libraries/kernel/threads/thr_rwlock.cpp
     )
 endif()
 

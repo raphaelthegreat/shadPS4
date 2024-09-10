@@ -19,7 +19,7 @@
 #include "core/libraries/kernel/event_flag/event_flag.h"
 #include "core/libraries/kernel/event_queues.h"
 #include "core/libraries/kernel/file_system.h"
-#include "core/libraries/kernel/libkernel.h"
+#include "core/libraries/kernel/kernel.h"
 #include "core/libraries/kernel/memory_management.h"
 #include "core/libraries/kernel/thread_management.h"
 #include "core/libraries/kernel/time_management.h"
