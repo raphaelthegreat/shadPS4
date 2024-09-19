@@ -577,6 +577,9 @@ bool BufferCache::SynchronizeBufferFromImage(Buffer& buffer, VAddr device_addr, 
         return false;
     }
     Image& image = texture_cache.GetImage(image_id);
+    ASSERT_MSG(device_addr == image.info.guest_address,
+               "Texel buffer aliases image subresources {:x} : {:x}", device_addr,
+               image.info.guest_address);
     boost::container::small_vector<vk::BufferImageCopy, 8> copies;
     u32 offset = buffer.Offset(image.cpu_addr);
     const u32 num_layers = image.info.resources.layers;
@@ -586,6 +589,10 @@ bool BufferCache::SynchronizeBufferFromImage(Buffer& buffer, VAddr device_addr, 
         const u32 depth =
             image.info.props.is_volume ? std::max(image.info.size.depth >> m, 1u) : 1u;
         const auto& [mip_size, mip_pitch, mip_height, mip_ofs] = image.info.mips_layout[m];
+        offset += mip_ofs * num_layers;
+        if (offset + (mip_size * num_layers) > buffer.SizeBytes()) {
+            break;
+        }
         copies.push_back({
             .bufferOffset = offset,
             .bufferRowLength = static_cast<u32>(mip_pitch),

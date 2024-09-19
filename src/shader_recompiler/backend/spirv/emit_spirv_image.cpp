@@ -118,8 +118,8 @@ Id EmitImageSampleDrefExplicitLod(EmitContext& ctx, IR::Inst* inst, u32 handle, 
     const Id sampler = ctx.OpLoad(ctx.sampler_type, ctx.samplers[handle >> 16]);
     const Id sampled_image = ctx.OpSampledImage(texture.sampled_type, image, sampler);
     ImageOperands operands;
-    operands.AddOffset(ctx, offset);
     operands.Add(spv::ImageOperandsMask::Lod, lod);
+    operands.AddOffset(ctx, offset);
     return ctx.OpImageSampleDrefExplicitLod(ctx.F32[1], sampled_image, coords, dref, operands.mask,
                                             operands.operands);
 }
@@ -157,8 +157,11 @@ Id EmitImageFetch(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coords, const
     ImageOperands operands;
     operands.AddOffset(ctx, offset);
     operands.Add(spv::ImageOperandsMask::Lod, lod);
-    return ctx.OpBitcast(
-        ctx.F32[4], ctx.OpImageFetch(result_type, image, coords, operands.mask, operands.operands));
+    const Id texel =
+        texture.is_storage
+            ? ctx.OpImageRead(result_type, image, coords, operands.mask, operands.operands)
+            : ctx.OpImageFetch(result_type, image, coords, operands.mask, operands.operands);
+    return ctx.OpBitcast(ctx.F32[4], texel);
 }
 
 Id EmitImageQueryDimensions(EmitContext& ctx, IR::Inst* inst, u32 handle, Id lod, bool skip_mips) {
