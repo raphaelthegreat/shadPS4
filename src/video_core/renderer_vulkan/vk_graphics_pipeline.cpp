@@ -356,7 +356,7 @@ void GraphicsPipeline::BindResources(const Liverpool::Regs& regs,
     boost::container::small_vector<vk::WriteDescriptorSet, 16> set_writes;
     boost::container::small_vector<vk::BufferMemoryBarrier2, 16> buffer_barriers;
     Shader::PushData push_data{};
-    u32 binding{};
+    Shader::Backend::Bindings binding{};
 
     for (const auto* stage : stages) {
         if (!stage) {
@@ -366,6 +366,7 @@ void GraphicsPipeline::BindResources(const Liverpool::Regs& regs,
             push_data.step0 = regs.vgt_instance_step_rate_0;
             push_data.step1 = regs.vgt_instance_step_rate_1;
         }
+        stage->PushUd(binding, push_data);
         for (const auto& buffer : stage->buffers) {
             const auto vsharp = buffer.GetSharp(*stage);
             const bool is_storage = buffer.IsStorage(vsharp);
@@ -381,23 +382,22 @@ void GraphicsPipeline::BindResources(const Liverpool::Regs& regs,
                     buffer_cache.ObtainBuffer(address, size, buffer.is_written);
                 const u32 offset_aligned = Common::AlignDown(offset, alignment);
                 const u32 adjust = offset - offset_aligned;
-                if (adjust != 0) {
-                    ASSERT(adjust % 4 == 0);
-                    push_data.AddOffset(binding, adjust);
-                }
+                ASSERT(adjust % 4 == 0);
+                push_data.AddOffset(binding.buffer, adjust);
                 buffer_infos.emplace_back(vk_buffer->Handle(), offset_aligned, size + adjust);
             } else {
                 buffer_infos.emplace_back(VK_NULL_HANDLE, 0, VK_WHOLE_SIZE);
             }
             set_writes.push_back({
                 .dstSet = VK_NULL_HANDLE,
-                .dstBinding = binding++,
+                .dstBinding = binding.unified++,
                 .dstArrayElement = 0,
                 .descriptorCount = 1,
                 .descriptorType = is_storage ? vk::DescriptorType::eStorageBuffer
                                              : vk::DescriptorType::eUniformBuffer,
                 .pBufferInfo = &buffer_infos.back(),
             });
+            ++binding.buffer;
         }
 
         for (const auto& desc : stage->texture_buffers) {
@@ -414,10 +414,8 @@ void GraphicsPipeline::BindResources(const Liverpool::Regs& regs,
                            "Texel buffer stride must match format stride");
                 const u32 offset_aligned = Common::AlignDown(offset, alignment);
                 const u32 adjust = offset - offset_aligned;
-                if (adjust != 0) {
-                    ASSERT(adjust % fmt_stride == 0);
-                    push_data.AddOffset(binding, adjust / fmt_stride);
-                }
+                ASSERT(adjust % fmt_stride == 0);
+                push_data.AddOffset(binding.buffer, adjust / fmt_stride);
                 buffer_view = vk_buffer->View(offset_aligned, size + adjust, desc.is_written,
                                               vsharp.GetDataFmt(), vsharp.GetNumberFmt());
                 const auto dst_access = desc.is_written ? vk::AccessFlagBits2::eShaderWrite
@@ -432,13 +430,14 @@ void GraphicsPipeline::BindResources(const Liverpool::Regs& regs,
             }
             set_writes.push_back({
                 .dstSet = VK_NULL_HANDLE,
-                .dstBinding = binding++,
+                .dstBinding = binding.unified++,
                 .dstArrayElement = 0,
                 .descriptorCount = 1,
                 .descriptorType = desc.is_written ? vk::DescriptorType::eStorageTexelBuffer
                                                   : vk::DescriptorType::eUniformTexelBuffer,
                 .pTexelBufferView = &buffer_view,
             });
+            ++binding.buffer;
         }
 
         boost::container::static_vector<AmdGpu::Image, 32> tsharps;
@@ -456,7 +455,7 @@ void GraphicsPipeline::BindResources(const Liverpool::Regs& regs,
             }
             set_writes.push_back({
                 .dstSet = VK_NULL_HANDLE,
-                .dstBinding = binding++,
+                .dstBinding = binding.unified++,
                 .dstArrayElement = 0,
                 .descriptorCount = 1,
                 .descriptorType = image_desc.is_storage ? vk::DescriptorType::eStorageImage
@@ -483,7 +482,7 @@ void GraphicsPipeline::BindResources(const Liverpool::Regs& regs,
             image_infos.emplace_back(vk_sampler, VK_NULL_HANDLE, vk::ImageLayout::eGeneral);
             set_writes.push_back({
                 .dstSet = VK_NULL_HANDLE,
-                .dstBinding = binding++,
+                .dstBinding = binding.unified++,
                 .dstArrayElement = 0,
                 .descriptorCount = 1,
                 .descriptorType = vk::DescriptorType::eSampler,
