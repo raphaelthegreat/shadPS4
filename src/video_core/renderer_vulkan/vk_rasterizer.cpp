@@ -62,8 +62,8 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
     buffer_cache.BindVertexBuffers(vs_info);
     const u32 num_indices = buffer_cache.BindIndexBuffer(is_indexed, index_offset);
 
-    BeginRendering();
-    UpdateDynamicState(*pipeline);
+    BeginRendering(pipeline);
+    UpdateDynamicState(pipeline);
 
     const auto [vertex_offset, instance_offset] = vs_info.GetDrawOffsets();
 
@@ -102,8 +102,8 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr address, u32 offset, u32 si
     buffer_cache.BindVertexBuffers(vs_info);
     const u32 num_indices = buffer_cache.BindIndexBuffer(is_indexed, 0);
 
-    BeginRendering();
-    UpdateDynamicState(*pipeline);
+    BeginRendering(pipeline);
+    UpdateDynamicState(pipeline);
 
     const auto [buffer, base] = buffer_cache.ObtainBuffer(address, size, true);
     const auto total_offset = base + offset;
@@ -179,7 +179,7 @@ void Rasterizer::Finish() {
     scheduler.Finish();
 }
 
-void Rasterizer::BeginRendering() {
+void Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
     const auto& regs = liverpool->regs;
     RenderState state;
 
@@ -196,6 +196,13 @@ void Rasterizer::BeginRendering() {
         // If the color buffer is still bound but rendering to it is disabled by the target mask,
         // we need to prevent the render area from being affected by unbound render target extents.
         if (!regs.color_target_mask.GetMask(col_buf_id)) {
+            continue;
+        }
+
+        // Skip stale color buffers if shader doesn't output to them. Otherwise it will perform
+        // an unnecessary transition and may result in state conflict if the resource is already
+        // bound for reading.
+        if ((pipeline->GetMrtMask() & (1 << col_buf_id)) == 0) {
             continue;
         }
 
@@ -281,7 +288,7 @@ void Rasterizer::UnmapMemory(VAddr addr, u64 size) {
     page_manager.OnGpuUnmap(addr, size);
 }
 
-void Rasterizer::UpdateDynamicState(const GraphicsPipeline& pipeline) {
+void Rasterizer::UpdateDynamicState(const GraphicsPipeline* pipeline) {
     UpdateViewportScissorState();
 
     auto& regs = liverpool->regs;
@@ -289,7 +296,7 @@ void Rasterizer::UpdateDynamicState(const GraphicsPipeline& pipeline) {
     cmdbuf.setBlendConstants(&regs.blend_constants.red);
 
     if (instance.IsColorWriteEnableSupported()) {
-        const auto& write_masks = pipeline.GetWriteMasks();
+        const auto& write_masks = pipeline->GetWriteMasks();
         std::array<vk::Bool32, Liverpool::NumColorBuffers> write_ens{};
         std::transform(write_masks.cbegin(), write_masks.cend(), write_ens.begin(),
                        [](auto in) { return in ? vk::True : vk::False; });

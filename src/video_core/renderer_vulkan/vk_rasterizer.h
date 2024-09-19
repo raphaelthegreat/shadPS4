@@ -52,9 +52,8 @@ public:
     void Finish();
 
 private:
-    void BeginRendering();
-
-    void UpdateDynamicState(const GraphicsPipeline& pipeline);
+    void BeginRendering(const GraphicsPipeline* pipeline);
+    void UpdateDynamicState(const GraphicsPipeline* pipeline);
     void UpdateViewportScissorState();
     void UpdateDepthStencilState();
 

@@ -168,6 +168,7 @@ struct Info {
 
     s8 vertex_offset_sgpr = -1;
     s8 instance_offset_sgpr = -1;
+    u8 mrt_mask{0u};
 
     BufferResourceList buffers;
     TextureBufferResourceList texture_buffers;
