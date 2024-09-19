@@ -173,6 +173,10 @@ ImageId TextureCache::ExpandImage(const ImageInfo& info, ImageId image_id) {
     src_image.Transit(vk::ImageLayout::eTransferSrcOptimal, vk::AccessFlagBits::eTransferRead);
     new_image.CopyImage(src_image);
 
+    if (True(src_image.flags & ImageFlagBits::Bound)) {
+        src_image.flags |= ImageFlagBits::NeedsRebind;
+    }
+
     FreeImage(image_id);
 
     TrackImage(new_image_id);
@@ -249,8 +253,7 @@ ImageView& TextureCache::RegisterImageView(ImageId image_id, const ImageViewInfo
     return slot_image_views[view_id];
 }
 
-ImageView& TextureCache::FindTexture(const ImageInfo& info, const ImageViewInfo& view_info) {
-    const ImageId image_id = FindImage(info);
+ImageView& TextureCache::FindTexture(ImageId image_id, const ImageViewInfo& view_info) {
     Image& image = slot_images[image_id];
     UpdateImage(image_id);
     auto& usage = image.info.usage;

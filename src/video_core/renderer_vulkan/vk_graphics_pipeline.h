@@ -5,7 +5,7 @@
 #include "common/types.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_common.h"
-#include "video_core/renderer_vulkan/vk_compute_pipeline.h"
+#include "video_core/renderer_vulkan/vk_pipeline_common.h"
 
 namespace VideoCore {
 class BufferCache;
@@ -50,7 +50,7 @@ struct GraphicsPipelineKey {
     }
 };
 
-class GraphicsPipeline {
+class GraphicsPipeline : public Pipeline {
 public:
     explicit GraphicsPipeline(const Instance& instance, Scheduler& scheduler,
                               DescriptorHeap& desc_heap, const GraphicsPipelineKey& key,
@@ -61,14 +61,6 @@ public:
 
     void BindResources(const Liverpool::Regs& regs, VideoCore::BufferCache& buffer_cache,
                        VideoCore::TextureCache& texture_cache) const;
-
-    vk::Pipeline Handle() const noexcept {
-        return *pipeline;
-    }
-
-    vk::PipelineLayout GetLayout() const {
-        return *pipeline_layout;
-    }
 
     const Shader::Info& GetStage(Shader::Stage stage) const noexcept {
         return *stages[u32(stage)];
@@ -91,12 +83,6 @@ private:
     void BuildDescSetLayout();
 
 private:
-    const Instance& instance;
-    Scheduler& scheduler;
-    DescriptorHeap& desc_heap;
-    vk::UniquePipeline pipeline;
-    vk::UniquePipelineLayout pipeline_layout;
-    vk::UniqueDescriptorSetLayout desc_layout;
     std::array<const Shader::Info*, MaxShaderStages> stages{};
     GraphicsPipelineKey key;
     bool uses_push_descriptors{};

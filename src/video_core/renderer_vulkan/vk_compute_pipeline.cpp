@@ -15,7 +15,7 @@ ComputePipeline::ComputePipeline(const Instance& instance_, Scheduler& scheduler
                                  DescriptorHeap& desc_heap_, vk::PipelineCache pipeline_cache,
                                  u64 compute_key_, const Shader::Info& info_,
                                  vk::ShaderModule module)
-    : instance{instance_}, scheduler{scheduler_}, desc_heap{desc_heap_}, compute_key{compute_key_},
+    : Pipeline{instance_, scheduler_, desc_heap_, pipeline_cache}, compute_key{compute_key_},
       info{&info_} {
     const vk::PipelineShaderStageCreateInfo shader_ci = {
         .stage = vk::ShaderStageFlagBits::eCompute,
@@ -108,11 +108,12 @@ bool ComputePipeline::BindResources(VideoCore::BufferCache& buffer_cache,
     // Bind resource buffers and textures.
     boost::container::static_vector<vk::BufferView, 8> buffer_views;
     boost::container::static_vector<vk::DescriptorBufferInfo, 32> buffer_infos;
-    boost::container::static_vector<vk::DescriptorImageInfo, 32> image_infos;
     boost::container::small_vector<vk::WriteDescriptorSet, 16> set_writes;
     boost::container::small_vector<vk::BufferMemoryBarrier2, 16> buffer_barriers;
     Shader::PushData push_data{};
     Shader::Backend::Bindings binding{};
+
+    image_infos.clear();
 
     info->PushUd(binding, push_data);
     for (const auto& desc : info->buffers) {
@@ -212,31 +213,8 @@ bool ComputePipeline::BindResources(VideoCore::BufferCache& buffer_cache,
         ++binding.buffer;
     }
 
-    for (const auto& image_desc : info->images) {
-        const auto tsharp = image_desc.GetSharp(*info);
-        if (tsharp.GetDataFmt() != AmdGpu::DataFormat::FormatInvalid) {
-            VideoCore::ImageInfo image_info{tsharp, image_desc.is_depth};
-            VideoCore::ImageViewInfo view_info{tsharp, image_desc.is_storage};
-            const auto& image_view = texture_cache.FindTexture(image_info, view_info);
-            const auto& image = texture_cache.GetImage(image_view.image_id);
-            image_infos.emplace_back(VK_NULL_HANDLE, *image_view.image_view, image.layout);
-        } else {
-            image_infos.emplace_back(VK_NULL_HANDLE, VK_NULL_HANDLE, vk::ImageLayout::eGeneral);
-        }
-        set_writes.push_back({
-            .dstSet = VK_NULL_HANDLE,
-            .dstBinding = binding.unified++,
-            .dstArrayElement = 0,
-            .descriptorCount = 1,
-            .descriptorType = image_desc.is_storage ? vk::DescriptorType::eStorageImage
-                                                    : vk::DescriptorType::eSampledImage,
-            .pImageInfo = &image_infos.back(),
-        });
+    BindTextures(texture_cache, *info, binding, set_writes);
 
-        if (texture_cache.IsMeta(tsharp.Address())) {
-            LOG_WARNING(Render_Vulkan, "Unexpected metadata read by a CS shader (texture)");
-        }
-    }
     for (const auto& sampler : info->samplers) {
         const auto ssharp = sampler.GetSharp(*info);
         if (ssharp.force_degamma) {
