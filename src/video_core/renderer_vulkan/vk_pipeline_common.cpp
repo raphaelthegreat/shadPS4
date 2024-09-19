@@ -52,7 +52,7 @@ void Pipeline::BindTextures(VideoCore::TextureCache& texture_cache, const Shader
             if (True(image->flags & VideoCore::ImageFlagBits::NeedsRebind)) {
                 image_id = texture_cache.FindImage(image->info);
             }
-            VideoCore::ImageViewInfo view_info{tsharp, desc.is_storage};
+            VideoCore::ImageViewInfo view_info{tsharp, desc};
             auto& image_view = texture_cache.FindTexture(image_id, view_info);
             image = &texture_cache.GetImage(image_id);
             image_infos.emplace_back(VK_NULL_HANDLE, *image_view.image_view, image->layout);
