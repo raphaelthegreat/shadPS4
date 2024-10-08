@@ -169,6 +169,8 @@ struct Info {
     };
     UserDataMask ud_mask{};
 
+    u32 uses_patches{};
+
     s8 vertex_offset_sgpr = -1;
     s8 instance_offset_sgpr = -1;
 
@@ -179,6 +181,7 @@ struct Info {
 
     std::span<const u32> user_data;
     Stage stage;
+    LogicalStage l_stage;
 
     u64 pgm_hash{};
     VAddr pgm_base;
@@ -195,11 +198,13 @@ struct Info {
     bool uses_fp16{};
     bool uses_fp64{};
     bool uses_step_rates{};
+    bool stores_tess_level_outer{};
+    bool stores_tess_level_inner{};
     bool translation_failed{}; // indicates that shader has unsupported instructions
     u8 mrt_mask{0u};
 
-    explicit Info(Stage stage_, ShaderParams params)
-        : stage{stage_}, pgm_hash{params.hash}, pgm_base{params.Base()},
+    explicit Info(Stage stage_, LogicalStage l_stage_, ShaderParams params)
+        : stage{stage_}, l_stage{l_stage_}, pgm_hash{params.hash}, pgm_base{params.Base()},
           user_data{params.user_data} {}
 
     template <typename T>

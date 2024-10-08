@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
-#include "shader_recompiler/frontend/translate/translate.h"
+#include "shader_recompiler/ir/ir_emitter.h"
 #include "shader_recompiler/ir/opcodes.h"
 #include "shader_recompiler/ir/program.h"
 #include "shader_recompiler/ir/reg.h"
@@ -21,12 +21,43 @@ void RingAccessElimination(const IR::Program& program, const RuntimeInfo& runtim
     };
 
     switch (stage) {
+    case Stage::Local: {
+        ForEachInstruction([=](IR::IREmitter& ir, IR::Inst& inst) {
+            const auto opcode = inst.GetOpcode();
+            switch (opcode) {
+            case IR::Opcode::WriteSharedU64: {
+                u32 offset = 0;
+                const auto* addr = inst.Arg(0).InstRecursive();
+                if (addr->GetOpcode() == IR::Opcode::IAdd32) {
+                    ASSERT(addr->Arg(1).IsImmediate());
+                    offset = addr->Arg(1).U32();
+                }
+                const IR::Inst* pair = inst.Arg(1).InstRecursive();
+                for (s32 i = 0; i < 2; i++) {
+                    const auto attrib = IR::Attribute::Param0 + (offset / 16);
+                    const auto comp = (offset / 4) % 4;
+                    const IR::U32 value = IR::U32{pair->Arg(i)};
+                    ir.SetAttribute(attrib, ir.BitCast<IR::F32, IR::U32>(value), comp);
+                    offset += 4;
+                }
+                inst.Invalidate();
+                break;
+            }
+            case IR::Opcode::WriteSharedU32:
+                UNREACHABLE();
+            default:
+                break;
+            }
+        });
+        break;
+    }
     case Stage::Export: {
         ForEachInstruction([=](IR::IREmitter& ir, IR::Inst& inst) {
             const auto opcode = inst.GetOpcode();
             switch (opcode) {
             case IR::Opcode::StoreBufferU32: {
-                if (!inst.Flags<IR::BufferInstInfo>().ring_access) {
+                const auto info = inst.Flags<IR::BufferInstInfo>();
+                if (!info.system_coherent || !info.globally_coherent) {
                     break;
                 }
 
@@ -56,7 +87,8 @@ void RingAccessElimination(const IR::Program& program, const RuntimeInfo& runtim
             const auto opcode = inst.GetOpcode();
             switch (opcode) {
             case IR::Opcode::LoadBufferU32: {
-                if (!inst.Flags<IR::BufferInstInfo>().ring_access) {
+                const auto info = inst.Flags<IR::BufferInstInfo>();
+                if (!info.system_coherent || !info.globally_coherent) {
                     break;
                 }
 
@@ -75,7 +107,8 @@ void RingAccessElimination(const IR::Program& program, const RuntimeInfo& runtim
                 break;
             }
             case IR::Opcode::StoreBufferU32: {
-                if (!inst.Flags<IR::BufferInstInfo>().ring_access) {
+                const auto info = inst.Flags<IR::BufferInstInfo>();
+                if (!info.system_coherent || !info.globally_coherent) {
                     break;
                 }
 

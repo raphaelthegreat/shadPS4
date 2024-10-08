@@ -22,6 +22,8 @@ extern std::unique_ptr<Vulkan::RendererVulkan> renderer;
 namespace Vulkan {
 
 using Shader::VsOutput;
+using Shader::Stage;
+using Shader::LogicalStage;
 
 [[nodiscard]] inline u64 HashCombine(const u64 seed, const u64 hash) {
     return seed ^ (hash + 0x9e3779b9 + (seed << 6) + (seed >> 2));
@@ -81,31 +83,44 @@ void GatherVertexOutputs(Shader::VertexRuntimeInfo& info,
                    : (ctl.IsCullDistEnabled(7) ? VsOutput::CullDist7 : VsOutput::None));
 }
 
-Shader::RuntimeInfo PipelineCache::BuildRuntimeInfo(Shader::Stage stage) {
+Shader::RuntimeInfo PipelineCache::BuildRuntimeInfo(Stage stage, LogicalStage l_stage) {
     auto info = Shader::RuntimeInfo{stage};
     const auto& regs = liverpool->regs;
+    const auto BuildCommon = [&](const auto& program) {
+        info.num_user_data = program.settings.num_user_regs;
+        info.num_input_vgprs = program.settings.vgpr_comp_cnt;
+        info.num_allocated_vgprs = program.settings.num_vgprs * 4;
+    };
     switch (stage) {
-    case Shader::Stage::Export: {
-        info.num_user_data = regs.es_program.settings.num_user_regs;
-        info.num_input_vgprs = regs.es_program.settings.vgpr_comp_cnt;
-        info.num_allocated_vgprs = regs.es_program.settings.num_vgprs * 4;
+    case Stage::Local: {
+        BuildCommon(regs.ls_program);
+        break;
+    }
+    case Stage::Hull: {
+        BuildCommon(regs.hs_program);
+        info.hs_info.output_control_points = regs.ls_hs_config.hs_output_control_points.Value();
+        break;
+    }
+    case Stage::Export: {
+        BuildCommon(regs.es_program);
         info.es_info.vertex_data_size = regs.vgt_esgs_ring_itemsize;
         break;
     }
-    case Shader::Stage::Vertex: {
-        info.num_user_data = regs.vs_program.settings.num_user_regs;
-        info.num_input_vgprs = regs.vs_program.settings.vgpr_comp_cnt;
-        info.num_allocated_vgprs = regs.vs_program.settings.num_vgprs * 4;
+    case Stage::Vertex: {
+        BuildCommon(regs.vs_program);
         GatherVertexOutputs(info.vs_info, regs.vs_output_control);
         info.vs_info.emulate_depth_negative_one_to_one =
             !instance.IsDepthClipControlSupported() &&
             regs.clipper_control.clip_space == Liverpool::ClipSpace::MinusWToW;
+        if (l_stage == LogicalStage::TessellationEval) {
+            info.vs_info.tess_type = regs.tess_config.type;
+            info.vs_info.tess_topology = regs.tess_config.topology;
+            info.vs_info.tess_partitioning = regs.tess_config.partitioning;
+        }
         break;
     }
-    case Shader::Stage::Geometry: {
-        info.num_user_data = regs.gs_program.settings.num_user_regs;
-        info.num_input_vgprs = regs.gs_program.settings.vgpr_comp_cnt;
-        info.num_allocated_vgprs = regs.gs_program.settings.num_vgprs * 4;
+    case Stage::Geometry: {
+        BuildCommon(regs.gs_program);
         info.gs_info.output_vertices = regs.vgt_gs_max_vert_out;
         info.gs_info.num_invocations =
             regs.vgt_gs_instance_cnt.IsEnabled() ? regs.vgt_gs_instance_cnt.count : 1;
@@ -125,9 +140,8 @@ Shader::RuntimeInfo PipelineCache::BuildRuntimeInfo(Shader::Stage stage) {
         info.gs_info.copy_data = Shader::ParseCopyShader(params_vc.code);
         break;
     }
-    case Shader::Stage::Fragment: {
-        info.num_user_data = regs.ps_program.settings.num_user_regs;
-        info.num_allocated_vgprs = regs.ps_program.settings.num_vgprs * 4;
+    case Stage::Fragment: {
+        BuildCommon(regs.ps_program);
         const auto& ps_inputs = regs.ps_inputs;
         for (u32 i = 0; i < regs.num_interp; i++) {
             info.fs_info.inputs.push_back({
@@ -145,7 +159,7 @@ Shader::RuntimeInfo PipelineCache::BuildRuntimeInfo(Shader::Stage stage) {
         }
         break;
     }
-    case Shader::Stage::Compute: {
+    case Stage::Compute: {
         const auto& cs_pgm = regs.cs_program;
         info.num_user_data = cs_pgm.settings.num_user_regs;
         info.num_allocated_vgprs = regs.cs_program.settings.num_vgprs * 4;
@@ -181,10 +195,6 @@ PipelineCache::~PipelineCache() = default;
 
 const GraphicsPipeline* PipelineCache::GetGraphicsPipeline() {
     const auto& regs = liverpool->regs;
-    // Tessellation is unsupported so skip the draw to avoid locking up the driver.
-    if (regs.primitive_type == AmdGpu::PrimitiveType::PatchPrimitive) {
-        return nullptr;
-    }
     // There are several cases (e.g. FCE, FMask/HTile decompression) where we don't need to do an
     // actual draw hence can skip pipeline creation.
     if (regs.color_control.mode == Liverpool::ColorControl::OperationMode::EliminateFastClear) {
@@ -299,7 +309,7 @@ bool PipelineCache::RefreshGraphicsKey() {
     }
 
     Shader::Backend::Bindings binding{};
-    const auto& TryBindStageRemap = [&](Shader::Stage stage_in, Shader::Stage stage_out) -> bool {
+    const auto& TryBindStage = [&](Shader::Stage stage_in, Shader::LogicalStage stage_out) -> bool {
         const auto stage_in_idx = static_cast<u32>(stage_in);
         const auto stage_out_idx = static_cast<u32>(stage_out);
         if (!regs.stage_enable.IsStageEnabled(stage_in_idx)) {
@@ -325,20 +335,19 @@ bool PipelineCache::RefreshGraphicsKey() {
 
         auto params = Liverpool::GetParams(*pgm);
         std::tie(infos[stage_out_idx], modules[stage_out_idx], key.stage_hashes[stage_out_idx]) =
-            GetProgram(stage_in, params, binding);
+            GetProgram(stage_in, stage_out, params, binding);
         return true;
     };
-
-    const auto& TryBindStage = [&](Shader::Stage stage) { return TryBindStageRemap(stage, stage); };
 
     const auto& IsGsFeaturesSupported = [&]() -> bool {
         // These checks are temporary until all functionality is implemented.
         return !regs.vgt_gs_mode.onchip && !regs.vgt_strmout_config.raw;
     };
 
-    TryBindStage(Shader::Stage::Fragment);
+    infos.fill(nullptr);
+    TryBindStage(Stage::Fragment, LogicalStage::Fragment);
 
-    const auto* fs_info = infos[static_cast<u32>(Shader::Stage::Fragment)];
+    const auto* fs_info = infos[static_cast<u32>(LogicalStage::Fragment)];
     key.mrt_mask = fs_info ? fs_info->mrt_mask : 0u;
 
     switch (regs.stage_enable.raw) {
@@ -346,22 +355,36 @@ bool PipelineCache::RefreshGraphicsKey() {
         if (!instance.IsGeometryStageSupported() || !IsGsFeaturesSupported()) {
             break;
         }
-        if (!TryBindStageRemap(Shader::Stage::Export, Shader::Stage::Vertex)) {
+        if (!TryBindStage(Stage::Export, LogicalStage::Vertex)) {
             return false;
         }
-        if (!TryBindStage(Shader::Stage::Geometry)) {
+        if (!TryBindStage(Stage::Geometry, LogicalStage::Geometry)) {
+            return false;
+        }
+        break;
+    }
+    case Liverpool::ShaderStageEnable::VgtStages::LsHs: {
+        if (!instance.IsTessellationSupported()) {
+            break;
+        }
+        if (!TryBindStage(Stage::Local, LogicalStage::Vertex)) {
+            return false;
+        }
+        if (!TryBindStage(Stage::Hull, LogicalStage::TessellationControl)) {
+            return false;
+        }
+        if (!TryBindStage(Stage::Vertex, LogicalStage::TessellationEval)) {
             return false;
         }
         break;
     }
     default: {
-        TryBindStage(Shader::Stage::Vertex);
-        infos[static_cast<u32>(Shader::Stage::Geometry)] = nullptr;
+        TryBindStage(Stage::Vertex, LogicalStage::Vertex);
         break;
     }
     }
 
-    const auto* vs_info = infos[static_cast<u32>(Shader::Stage::Vertex)];
+    const auto* vs_info = infos[static_cast<u32>(LogicalStage::Vertex)];
     if (vs_info && !instance.IsVertexInputDynamicState()) {
         u32 vertex_binding = 0;
         for (const auto& input : vs_info->vs_inputs) {
@@ -406,7 +429,7 @@ bool PipelineCache::RefreshComputeKey() {
     const auto* cs_pgm = &liverpool->regs.cs_program;
     const auto cs_params = Liverpool::GetParams(*cs_pgm);
     std::tie(infos[0], modules[0], compute_key) =
-        GetProgram(Shader::Stage::Compute, cs_params, binding);
+        GetProgram(Stage::Compute, LogicalStage::Compute, cs_params, binding);
     return true;
 }
 
@@ -428,12 +451,13 @@ vk::ShaderModule PipelineCache::CompileModule(Shader::Info& info,
     return module;
 }
 
-std::tuple<const Shader::Info*, vk::ShaderModule, u64> PipelineCache::GetProgram(
-    Shader::Stage stage, Shader::ShaderParams params, Shader::Backend::Bindings& binding) {
-    const auto runtime_info = BuildRuntimeInfo(stage);
+PipelineCache::Result PipelineCache::GetProgram(Stage stage, LogicalStage l_stage,
+                                                Shader::ShaderParams params,
+                                                Shader::Backend::Bindings& binding) {
+    const auto runtime_info = BuildRuntimeInfo(stage, l_stage);
     auto [it_pgm, new_program] = program_cache.try_emplace(params.hash);
     if (new_program) {
-        Program* program = program_pool.Create(stage, params);
+        Program* program = program_pool.Create(stage, l_stage, params);
         auto start = binding;
         const auto module = CompileModule(program->info, runtime_info, params.code, 0, binding);
         const auto spec = Shader::StageSpecialization(program->info, runtime_info, start);
@@ -450,7 +474,7 @@ std::tuple<const Shader::Info*, vk::ShaderModule, u64> PipelineCache::GetProgram
 
     const auto it = std::ranges::find(program->modules, spec, &Program::Module::spec);
     if (it == program->modules.end()) {
-        auto new_info = Shader::Info(stage, params);
+        auto new_info = Shader::Info(stage, l_stage, params);
         module = CompileModule(new_info, runtime_info, params.code, perm_idx, binding);
         program->AddPermut(module, std::move(spec));
     } else {
