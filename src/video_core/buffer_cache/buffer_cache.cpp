@@ -612,7 +612,8 @@ bool BufferCache::SynchronizeBufferFromImage(Buffer& buffer, VAddr device_addr, 
     // - GPU modified; otherwise there are no changes to synchronize.
     // - Not CPU modified; otherwise we could overwrite CPU changes with stale GPU changes.
     if (False(image.flags & ImageFlagBits::GpuModified) ||
-        True(image.flags & ImageFlagBits::CpuDirty)) {
+        True(image.flags & ImageFlagBits::CpuDirty) ||
+        True(image.flags & ImageFlagBits::GpuDirty)) {
         return false;
     }
     ASSERT_MSG(device_addr == image.info.guest_address,
