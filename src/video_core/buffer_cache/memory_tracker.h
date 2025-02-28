@@ -23,7 +23,7 @@ public:
     ~MemoryTracker() = default;
 
     /// Returns true if a region has been modified from the CPU
-    [[nodiscard]] bool IsRegionCpuModified(VAddr query_cpu_addr, u64 query_size) noexcept {
+    bool IsRegionCpuModified(VAddr query_cpu_addr, u64 query_size) noexcept {
         return IteratePages<true>(
             query_cpu_addr, query_size, [](RegionManager* manager, u64 offset, size_t size) {
                 return manager->template IsRegionModified<Type::CPU>(offset, size);
@@ -31,7 +31,7 @@ public:
     }
 
     /// Returns true if a region has been modified from the GPU
-    [[nodiscard]] bool IsRegionGpuModified(VAddr query_cpu_addr, u64 query_size) noexcept {
+    bool IsRegionGpuModified(VAddr query_cpu_addr, u64 query_size) noexcept {
         return IteratePages<false>(
             query_cpu_addr, query_size, [](RegionManager* manager, u64 offset, size_t size) {
                 return manager->template IsRegionModified<Type::GPU>(offset, size);
@@ -71,13 +71,8 @@ public:
     void ForEachDownloadRange(VAddr query_cpu_range, u64 query_size, Func&& func) {
         IteratePages<false>(query_cpu_range, query_size,
                             [&func](RegionManager* manager, u64 offset, size_t size) {
-                                if constexpr (clear) {
-                                    manager->template ForEachModifiedRange<Type::GPU, true>(
-                                        manager->GetCpuAddr() + offset, size, func);
-                                } else {
-                                    manager->template ForEachModifiedRange<Type::GPU, false>(
-                                        manager->GetCpuAddr() + offset, size, func);
-                                }
+                                manager->template ForEachModifiedRange<Type::GPU, clear>(
+                                    manager->GetCpuAddr() + offset, size, func);
                             });
     }
 

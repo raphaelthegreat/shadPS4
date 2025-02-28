@@ -82,7 +82,7 @@ void SharedMemoryBarrierPass(IR::Program& program, const RuntimeInfo& runtime_in
         cs_info.workgroup_size[0] * cs_info.workgroup_size[1] * cs_info.workgroup_size[2];
     // The compiler can only omit barriers when the local workgroup size is the same as the HW
     // subgroup.
-    if (shared_memory_size == 0 || threadgroup_size != GcnSubgroupSize ||
+    if (shared_memory_size == 0 || threadgroup_size > GcnSubgroupSize ||
         !profile.needs_lds_barriers) {
         return;
     }
