@@ -566,7 +566,7 @@ int PS4_SYSV_ABI sceNetEpollWait() {
 }
 
 int* PS4_SYSV_ABI sceNetErrnoLoc() {
-    LOG_ERROR(Lib_Net, "(STUBBED) called");
+    LOG_TRACE(Lib_Net, "(STUBBED) called");
     return &net_errno;
 }
 
