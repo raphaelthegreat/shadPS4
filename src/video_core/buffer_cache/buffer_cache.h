@@ -9,20 +9,12 @@
 #include "common/slot_vector.h"
 #include "common/types.h"
 #include "video_core/buffer_cache/buffer.h"
-#include "video_core/buffer_cache/memory_tracker.h"
 #include "video_core/buffer_cache/range_set.h"
 #include "video_core/multi_level_page_table.h"
 
 namespace AmdGpu {
 struct Liverpool;
 }
-
-namespace Shader {
-namespace Gcn {
-struct FetchShaderData;
-}
-struct Info;
-} // namespace Shader
 
 namespace Vulkan {
 class GraphicsPipeline;
@@ -35,6 +27,8 @@ using BufferId = Common::SlotId;
 static constexpr BufferId NULL_BUFFER_ID{0};
 
 class TextureCache;
+class MemoryTracker;
+class PageManager;
 
 class BufferCache {
 public:
@@ -56,6 +50,12 @@ public:
         VAddr end;
         bool has_stream_leap = false;
     };
+
+    using IntervalSet =
+        boost::icl::interval_set<VAddr, std::less,
+                                 ICL_INTERVAL_INSTANCE(ICL_INTERVAL_DEFAULT, VAddr, std::less),
+                                 RangeSetsAllocator>;
+    using IntervalType = typename IntervalSet::interval_type;
 
 public:
     explicit BufferCache(const Vulkan::Instance& instance, Vulkan::Scheduler& scheduler,
@@ -80,6 +80,12 @@ public:
 
     /// Invalidates any buffer in the logical page range.
     void InvalidateMemory(VAddr device_addr, u64 size);
+
+    /// Waits on pending downloads in the logical page range.
+    void ReadMemory(VAddr device_addr, u64 size);
+
+    /// Flushes GPU regions written in this command list to the CPU.
+    void FlushCommitedDownloads();
 
     /// Binds host vertex buffers for the current draw.
     void BindVertexBuffers(const Vulkan::GraphicsPipeline& pipeline);
@@ -128,6 +134,8 @@ private:
         }
     }
 
+    void MarkWrittenBuffer(VAddr device_addr, u32 size);
+
     void DownloadBufferMemory(Buffer& buffer, VAddr device_addr, u64 size);
 
     [[nodiscard]] OverlapResult ResolveOverlaps(VAddr device_addr, u32 wanted_size);
@@ -153,14 +161,14 @@ private:
     Vulkan::Scheduler& scheduler;
     AmdGpu::Liverpool* liverpool;
     TextureCache& texture_cache;
-    PageManager& tracker;
+    std::unique_ptr<MemoryTracker> memory_tracker;
     StreamBuffer staging_buffer;
     StreamBuffer stream_buffer;
     Buffer gds_buffer;
     std::shared_mutex mutex;
     Common::SlotVector<Buffer> slot_buffers;
-    RangeSet gpu_modified_ranges;
-    MemoryTracker memory_tracker;
+    IntervalSet gpu_modified_ranges;
+    IntervalSet uncommitted_gpu_modified_ranges;
     PageTable page_table;
 };
 
