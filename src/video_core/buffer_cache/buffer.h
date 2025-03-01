@@ -143,6 +143,7 @@ public:
     bool is_picked{};
     bool is_coherent{};
     bool is_deleted{};
+    bool has_gpu{};
     int stream_score = 0;
     size_t size_bytes = 0;
     std::span<u8> mapped_data;

@@ -59,7 +59,7 @@ void AjmContext::WorkerThread(std::stop_token stop) {
     while (!stop.stop_requested()) {
         auto batch = batch_queue.PopWait(stop);
         if (batch != nullptr) {
-            ProcessBatch(batch->id, batch->jobs);
+            //ProcessBatch(batch->id, batch->jobs);
             batch->finished.release();
         }
     }

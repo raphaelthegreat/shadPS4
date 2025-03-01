@@ -29,7 +29,7 @@ public:
 
     /// Updates read/write watches in the pages touching the specified region
     template <s32 delta, bool is_read = false>
-    void UpdatePageWatchers(VAddr addr, u64 size);
+    void UpdatePageWatchers(VAddr addr, u64 size) const;
 
     /// Returns page aligned address.
     static constexpr VAddr GetPageAddr(VAddr addr) {

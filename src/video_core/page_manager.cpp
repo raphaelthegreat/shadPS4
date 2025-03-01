@@ -151,6 +151,8 @@ struct PageManager::Impl {
         const auto addr = reinterpret_cast<VAddr>(fault_address);
         if (Common::IsWriteError(context)) {
             return rasterizer->InvalidateMemory(addr, 1);
+        } else {
+            return rasterizer->ReadMemory(addr, 1);
         }
         return false;
     }
@@ -172,9 +174,8 @@ struct PageManager::Impl {
                 range_bytes = 0;
             }
         };
-
         // Iterate requested pages.
-        const size_t page_end = Common::AlignUp(addr + size, PAGE_SIZE) >> PAGE_BITS;
+        const size_t page_end = Common::DivCeil(addr + size, PAGE_SIZE);
         for (; page != page_end; ++page) {
             PageState& state = cached_pages[page];
 
@@ -223,9 +224,17 @@ struct PageManager::Impl {
         template <bool is_read, s32 delta>
         u8 AddDelta() {
             if constexpr (is_read) {
-                return num_read_watchers += delta;
+                if constexpr (delta == 1) {
+                    return ++num_read_watchers;
+                } else {
+                    return --num_read_watchers;
+                }
             } else {
-                return num_write_watchers += delta;
+                if constexpr (delta == 1) {
+                    return ++num_write_watchers;
+                } else {
+                    return --num_write_watchers;
+                }
             }
         }
     };
@@ -251,8 +260,13 @@ void PageManager::OnGpuUnmap(VAddr address, size_t size) {
 }
 
 template <s32 delta, bool is_read>
-void PageManager::UpdatePageWatchers(VAddr addr, u64 size) {
+void PageManager::UpdatePageWatchers(VAddr addr, u64 size) const {
     impl->UpdatePageWatchers<delta, is_read>(addr, size);
 }
+
+template void PageManager::UpdatePageWatchers<1, true>(VAddr addr, u64 size) const;
+template void PageManager::UpdatePageWatchers<1, false>(VAddr addr, u64 size) const;
+template void PageManager::UpdatePageWatchers<-1, true>(VAddr addr, u64 size) const;
+template void PageManager::UpdatePageWatchers<-1, false>(VAddr addr, u64 size) const;
 
 } // namespace VideoCore

@@ -80,6 +80,7 @@ public:
 
     /// Invalidates any buffer in the logical page range.
     void InvalidateMemory(VAddr device_addr, u64 size);
+    void CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, bool src_gds);
 
     /// Waits on pending downloads in the logical page range.
     void ReadMemory(VAddr device_addr, u64 size);
@@ -167,7 +168,7 @@ private:
     Buffer gds_buffer;
     std::shared_mutex mutex;
     Common::SlotVector<Buffer> slot_buffers;
-    IntervalSet gpu_modified_ranges;
+    RangeSet gpu_modified_ranges;
     IntervalSet uncommitted_gpu_modified_ranges;
     PageTable page_table;
 };
