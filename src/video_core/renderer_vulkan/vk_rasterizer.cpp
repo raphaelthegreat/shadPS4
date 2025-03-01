@@ -18,7 +18,7 @@
 #endif
 
 namespace Vulkan {
-
+static bool stencil_clear = false;
 static Shader::PushData MakeUserData(const AmdGpu::Liverpool::Regs& regs) {
     Shader::PushData push_data{};
     push_data.step0 = regs.vgt_instance_step_rate_0;
@@ -186,10 +186,14 @@ RenderState Rasterizer::PrepareRenderState(u32 mrt_mask) {
         image.binding.is_target = 1u;
 
         const auto slice = image_view.info.range.base.layer;
-        const bool is_depth_clear = regs.depth_render_control.depth_clear_enable ||
-                                    texture_cache.IsMetaCleared(htile_address, slice);
-        const bool is_stencil_clear = regs.depth_render_control.stencil_clear_enable;
+        const bool is_depth_clear = (regs.depth_render_control.depth_clear_enable ||
+                                    texture_cache.IsMetaCleared(htile_address, slice)) && !stencil_clear;
+        const bool is_stencil_clear = regs.depth_render_control.stencil_clear_enable || stencil_clear;
         ASSERT(desc.view_info.range.extent.levels == 1);
+
+        if (stencil_clear) {
+            stencil_clear = false;
+        }
 
         state.width = std::min<u32>(state.width, image.info.size.width);
         state.height = std::min<u32>(state.height, image.info.size.height);
@@ -471,6 +475,9 @@ bool Rasterizer::IsComputeMetaClear(const Pipeline* pipeline) {
     }
 
     const auto& info = pipeline->GetStage(Shader::LogicalStage::Compute);
+    if (info.pgm_hash == 0xc1ec90ca) {
+        stencil_clear = true;
+    }
 
     // Assume if a shader reads and writes metas at the same time, it is a copy shader.
     for (const auto& desc : info.buffers) {
