@@ -400,9 +400,7 @@ bool PipelineCache::RefreshGraphicsKey() {
     };
 
     infos.fill(nullptr);
-    if (!TryBindStage(Stage::Fragment, LogicalStage::Fragment)) {
-        return false;
-    }
+    TryBindStage(Stage::Fragment, LogicalStage::Fragment);
 
     const auto* fs_info = infos[static_cast<u32>(LogicalStage::Fragment)];
     key.mrt_mask = fs_info ? fs_info->mrt_mask : 0u;

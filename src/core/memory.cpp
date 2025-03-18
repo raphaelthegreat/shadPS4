@@ -84,13 +84,24 @@ u64 MemoryManager::ClampRangeSize(VAddr virtual_addr, u64 size) {
 }
 
 bool MemoryManager::TryWriteBacking(void* address, const void* data, u32 num_bytes) {
-    const VAddr virtual_addr = std::bit_cast<VAddr>(address);
-    const auto& vma = FindVMA(virtual_addr)->second;
-    if (vma.type != VMAType::Direct) {
+    VAddr virtual_addr = std::bit_cast<VAddr>(address);
+    const u8* src_data = std::bit_cast<const u8*>(data);
+    auto vma = FindVMA(virtual_addr);
+    if (vma->second.type != VMAType::Direct) {
         return false;
     }
-    u8* backing = impl.BackingBase() + vma.phys_base + (virtual_addr - vma.base);
-    memcpy(backing, data, num_bytes);
+    while (num_bytes > 0) {
+        ASSERT(vma->second.type == VMAType::Direct);
+        const u64 offset_in_vma = virtual_addr - vma->first;
+        const u64 copy_bytes = std::min<u64>(vma->second.size - offset_in_vma, num_bytes);
+        u8* base_ptr = impl.BackingBase() + vma->second.phys_base;
+        memcpy(base_ptr + offset_in_vma, src_data, copy_bytes);
+        num_bytes -= copy_bytes;
+        virtual_addr += copy_bytes;
+        ++vma;
+    }
+    //u8* backing = impl.BackingBase() + vma.phys_base + (virtual_addr - vma.base);
+    //memcpy(backing, data, num_bytes);
     return true;
 }
 

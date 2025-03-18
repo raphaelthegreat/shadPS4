@@ -67,7 +67,7 @@ void BufferCache::InvalidateMemory(VAddr device_addr, u64 size) {
 }
 
 void BufferCache::ReadMemory(VAddr device_addr, u64 size) {
-    LOG_ERROR(Render_Vulkan, "Read memory addr = {:#x}, size = {:#x}", device_addr, size);
+    //LOG_ERROR(Render_Vulkan, "Read memory addr = {:#x}, size = {:#x}", device_addr, size);
     if (std::this_thread::get_id() != liverpool->gpu_id) {
         ASSERT(slot_buffers[FindBuffer(device_addr, size)].has_gpu);
         std::binary_semaphore commandWait{0};
@@ -145,8 +145,8 @@ void BufferCache::DownloadBufferMemory(Buffer& buffer, VAddr device_addr, u64 si
                 constexpr u64 mask = ~(align - 1ULL);
                 total_size_bytes += (new_size + align - 1) & mask;
             };
-            add_download(device_addr_out, device_addr_out + range_size);
-            //gpu_modified_ranges.ForEachInRange(device_addr_out, range_size, add_download);
+            //add_download(device_addr_out, device_addr_out + range_size);
+            gpu_modified_ranges.ForEachInRange(device_addr_out, range_size, add_download);
             gpu_modified_ranges.Subtract(device_addr_out, range_size);
         });
     if (total_size_bytes == 0) {
@@ -422,7 +422,7 @@ std::pair<Buffer*, u32> BufferCache::ObtainBuffer(VAddr device_addr, u32 size, b
     // For small uniform buffers that have not been modified by gpu
     // use device local stream buffer to reduce renderpass breaks.
     static constexpr u64 StreamThreshold = CACHING_PAGESIZE * 2;
-    if (false&&!is_written && size <= StreamThreshold && !IsRegionGpuModified(device_addr, size)) {
+    if (!is_written && size <= StreamThreshold && !IsRegionGpuModified(device_addr, size)) {
         const u64 offset = stream_buffer.Copy(device_addr, size, instance.UniformMinAlignment());
         return {&stream_buffer, offset};
     }
