@@ -89,6 +89,9 @@ void Visit(Info& info, const IR::Inst& inst) {
     case IR::Opcode::UnpackUfloat10_11_11:
         info.uses_unpack_10_11_11 = true;
         break;
+    case IR::Opcode::Phi:
+        ASSERT(inst.NumArgs() > 0);
+        break;
     default:
         break;
     }

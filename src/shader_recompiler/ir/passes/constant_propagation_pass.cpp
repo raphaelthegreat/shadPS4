@@ -1,9 +1,10 @@
 // SPDX-FileCopyrightText: Copyright 2021 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
-
+#pragma clang optimize off
 #include <bit>
 #include <optional>
 #include <type_traits>
+#include <stack>
 #include "common/func_traits.h"
 #include "shader_recompiler/ir/basic_block.h"
 #include "shader_recompiler/ir/ir_emitter.h"
@@ -252,96 +253,6 @@ void FoldCmpClass(IR::Block& block, IR::Inst& inst) {
     }
 }
 
-template <size_t N>
-using InstList = boost::container::small_vector<IR::Inst*, N>;
-
-static InstList<8> WriteLaneBFS(IR::Inst* inst) {
-    // Breadth-first search visiting the right most arguments first
-    InstList<8> writes;
-    InstList<16> visited;
-    std::queue<IR::Inst*> queue;
-    queue.push(inst);
-
-    while (!queue.empty()) {
-        // Pop one instruction from the queue
-        IR::Inst* inst{queue.front()};
-        queue.pop();
-        if (inst->GetOpcode() == IR::Opcode::WriteLane) {
-            // We found a possible write lane source
-            if (std::ranges::find(writes, inst) == writes.end()) {
-                writes.push_back(inst);
-            }
-        }
-        // Only search through phis and readlane instructions.
-        // If there are other instructions in-between that use the value we can't eliminate.
-        if (inst->GetOpcode() != IR::Opcode::ReadLane && inst->GetOpcode() != IR::Opcode::Phi) {
-            continue;
-        }
-        // Visit the right most arguments first
-        for (size_t arg = inst->NumArgs(); arg--;) {
-            auto arg_value{inst->Arg(arg)};
-            if (arg_value.IsImmediate()) {
-                continue;
-            }
-            // Queue instruction if it hasn't been visited
-            IR::Inst* arg_inst{arg_value.InstRecursive()};
-            if (std::ranges::find(visited, arg_inst) == visited.end()) {
-                visited.push_back(arg_inst);
-                queue.push(arg_inst);
-            }
-        }
-    }
-    return writes;
-}
-
-void FoldReadLane(IR::Block& block, IR::Inst& inst) {
-    const u32 lane = inst.Arg(1).U32();
-    IR::Inst* prod = inst.Arg(0).InstRecursive();
-
-    const auto search_chain = [lane](const IR::Inst* prod) -> IR::Value {
-        while (prod->GetOpcode() == IR::Opcode::WriteLane) {
-            if (prod->Arg(2).U32() == lane) {
-                return prod->Arg(1);
-            }
-            prod = prod->Arg(0).InstRecursive();
-        }
-        return {};
-    };
-
-    if (prod->GetOpcode() == IR::Opcode::WriteLane) {
-        if (const IR::Value value = search_chain(prod); !value.IsEmpty()) {
-            inst.ReplaceUsesWith(value);
-        }
-        return;
-    }
-
-    if (prod->GetOpcode() == IR::Opcode::Phi) {
-        boost::container::small_vector<IR::Value, 2> phi_args;
-        for (size_t arg_index = 0; arg_index < prod->NumArgs(); ++arg_index) {
-            const IR::Inst* arg{prod->Arg(arg_index).InstRecursive()};
-            if (arg->GetOpcode() != IR::Opcode::WriteLane) {
-                return;
-            }
-            const IR::Value value = search_chain(arg);
-            if (value.IsEmpty()) {
-                continue;
-            }
-            phi_args.emplace_back(value);
-        }
-        if (std::ranges::all_of(phi_args, [&](IR::Value value) { return value == phi_args[0]; })) {
-            inst.ReplaceUsesWith(phi_args[0]);
-            return;
-        }
-        const auto insert_point = IR::Block::InstructionList::s_iterator_to(*prod);
-        IR::Inst* const new_phi{&*block.PrependNewInst(insert_point, IR::Opcode::Phi)};
-        new_phi->SetFlags(IR::Type::U32);
-        for (size_t arg_index = 0; arg_index < phi_args.size(); arg_index++) {
-            new_phi->AddPhiOperand(prod->PhiBlock(arg_index), phi_args[arg_index]);
-        }
-        inst.ReplaceUsesWith(IR::Value{new_phi});
-    }
-}
-
 void ConstantPropagation(IR::Block& block, IR::Inst& inst) {
     switch (inst.GetOpcode()) {
     case IR::Opcode::IAdd32:
@@ -451,8 +362,6 @@ void ConstantPropagation(IR::Block& block, IR::Inst& inst) {
     case IR::Opcode::SelectF32:
     case IR::Opcode::SelectF64:
         return FoldSelect(inst);
-    case IR::Opcode::ReadLane:
-        return FoldReadLane(block, inst);
     case IR::Opcode::FPNeg32:
         FoldWhenAllImmediates(inst, [](f32 a) { return -a; });
         return;

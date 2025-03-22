@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
+
 #include "common/assert.h"
 #include "shader_recompiler/info.h"
 #include "shader_recompiler/ir/attribute.h"
@@ -7,6 +8,7 @@
 #include "shader_recompiler/ir/ir_emitter.h"
 #include "shader_recompiler/ir/opcodes.h"
 #include "shader_recompiler/ir/pattern_matching.h"
+#include "shader_recompiler/ir/passes/ir_passes.h"
 #include "shader_recompiler/ir/program.h"
 #include "shader_recompiler/runtime_info.h"
 
@@ -544,6 +546,8 @@ void HullShaderTransform(IR::Program& program, RuntimeInfo& runtime_info) {
         // }
         // But as long as we treat invocation ID as 0 for all threads, shouldn't matter functionally
     }
+
+    ConstantPropagationPass(program.post_order_blocks);
 }
 
 void DomainShaderTransform(IR::Program& program, RuntimeInfo& runtime_info) {
@@ -587,6 +591,8 @@ void DomainShaderTransform(IR::Program& program, RuntimeInfo& runtime_info) {
             }
         }
     }
+
+    ConstantPropagationPass(program.post_order_blocks);
 }
 
 // Run before either hull or domain transform
@@ -735,6 +741,8 @@ void TessellationPreprocess(IR::Program& program, RuntimeInfo& runtime_info) {
             }
         }
     }
+
+    ConstantPropagationPass(program.post_order_blocks);
 }
 
 } // namespace Shader::Optimization

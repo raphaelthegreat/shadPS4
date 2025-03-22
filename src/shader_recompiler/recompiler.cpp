@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
-
+#pragma clang optimize off
 #include "common/config.h"
 #include "common/io_file.h"
 #include "common/path_util.h"
@@ -66,23 +66,17 @@ IR::Program TranslateProgram(std::span<const u32> code, Pools& pools, Info& info
     const auto stage = program.info.stage;
 
     Shader::Optimization::SsaRewritePass(program.post_order_blocks);
+    Shader::Optimization::ConstantPropagationPass(program.post_order_blocks);
     Shader::Optimization::IdentityRemovalPass(program.blocks);
     if (info.l_stage == LogicalStage::TessellationControl) {
-        // Tess passes require previous const prop passes for now (for simplicity). TODO allow
-        // fine grained folding or opportunistic folding we set an operand to an immediate
-        Shader::Optimization::ConstantPropagationPass(program.post_order_blocks);
         Shader::Optimization::TessellationPreprocess(program, runtime_info);
-        Shader::Optimization::ConstantPropagationPass(program.post_order_blocks);
         Shader::Optimization::HullShaderTransform(program, runtime_info);
     } else if (info.l_stage == LogicalStage::TessellationEval) {
-        Shader::Optimization::ConstantPropagationPass(program.post_order_blocks);
         Shader::Optimization::TessellationPreprocess(program, runtime_info);
-        Shader::Optimization::ConstantPropagationPass(program.post_order_blocks);
         Shader::Optimization::DomainShaderTransform(program, runtime_info);
     }
-    Shader::Optimization::ConstantPropagationPass(program.post_order_blocks);
     Shader::Optimization::RingAccessElimination(program, runtime_info, stage);
-    Shader::Optimization::ConstantPropagationPass(program.post_order_blocks);
+    Shader::Optimization::ReadLaneEliminationPass(program);
     Shader::Optimization::FlattenExtendedUserdataPass(program);
     Shader::Optimization::ResourceTrackingPass(program);
     Shader::Optimization::LowerBufferFormatToRaw(program);
@@ -90,11 +84,7 @@ IR::Program TranslateProgram(std::span<const u32> code, Pools& pools, Info& info
     Shader::Optimization::SharedMemoryBarrierPass(program, runtime_info, profile);
     Shader::Optimization::IdentityRemovalPass(program.blocks);
     Shader::Optimization::DeadCodeEliminationPass(program);
-    Shader::Optimization::ConstantPropagationPass(program.post_order_blocks);
     Shader::Optimization::CollectShaderInfoPass(program);
-    if (info.pgm_hash == 0xee29a0b1) {
-        LOG_INFO(Render_Vulkan, "{}", IR::DumpProgram(program));
-    }
 
     return program;
 }

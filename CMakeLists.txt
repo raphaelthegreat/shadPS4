@@ -764,6 +764,7 @@ set(SHADER_RECOMPILER src/shader_recompiler/exception.h
                       src/shader_recompiler/ir/passes/identity_removal_pass.cpp
                       src/shader_recompiler/ir/passes/ir_passes.h
                       src/shader_recompiler/ir/passes/lower_buffer_format_to_raw.cpp
+                      src/shader_recompiler/ir/passes/readlane_elimination_pass.cpp
                       src/shader_recompiler/ir/passes/resource_tracking_pass.cpp
                       src/shader_recompiler/ir/passes/ring_access_elimination.cpp
                       src/shader_recompiler/ir/passes/shader_info_collection_pass.cpp
@@ -1118,6 +1119,10 @@ cmrc_add_resource_library(embedded-resources
         ALIAS res::embedded
         NAMESPACE res
         ${RESOURCEFOLDER})
+
+target_sources(embedded-resources
+  PRIVATE
+)
 
 target_link_libraries(shadps4 PRIVATE res::embedded)
 

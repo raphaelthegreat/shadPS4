@@ -29,5 +29,6 @@ void SharedMemoryBarrierPass(IR::Program& program, const RuntimeInfo& runtime_in
                              const Profile& profile);
 void SharedMemoryToStoragePass(IR::Program& program, const RuntimeInfo& runtime_info,
                                const Profile& profile);
+void ReadLaneEliminationPass(IR::Program& program);
 
 } // namespace Shader::Optimization
