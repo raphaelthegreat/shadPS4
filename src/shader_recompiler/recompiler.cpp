@@ -92,6 +92,9 @@ IR::Program TranslateProgram(std::span<const u32> code, Pools& pools, Info& info
     Shader::Optimization::DeadCodeEliminationPass(program);
     Shader::Optimization::ConstantPropagationPass(program.post_order_blocks);
     Shader::Optimization::CollectShaderInfoPass(program);
+    if (info.pgm_hash == 0xee29a0b1) {
+        LOG_INFO(Render_Vulkan, "{}", IR::DumpProgram(program));
+    }
 
     return program;
 }

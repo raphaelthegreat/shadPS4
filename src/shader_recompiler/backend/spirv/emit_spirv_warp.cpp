@@ -33,7 +33,8 @@ Id EmitReadLane(EmitContext& ctx, Id value, u32 lane) {
 
 Id EmitWriteLane(EmitContext& ctx, Id value, Id write_value, u32 lane) {
     LOG_WARNING(Render_Vulkan, "WriteLane in shader {:#x}", ctx.info.pgm_hash);
-    return ctx.OpGroupNonUniformAny(ctx.U32[1], SubgroupScope(ctx), write_value);
+    //return ctx.OpWriteInvocationAMD(ctx.U32[1], value, write_value, ctx.ConstU32(lane));
+    return ctx.u32_zero_value;
 }
 
 } // namespace Shader::Backend::SPIRV

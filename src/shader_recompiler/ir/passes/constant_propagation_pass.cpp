@@ -7,6 +7,7 @@
 #include "common/func_traits.h"
 #include "shader_recompiler/ir/basic_block.h"
 #include "shader_recompiler/ir/ir_emitter.h"
+#include "shader_recompiler/ir/breadth_first_search.h"
 
 namespace Shader::Optimization {
 
@@ -249,6 +250,48 @@ void FoldCmpClass(IR::Block& block, IR::Inst& inst) {
     } else {
         UNREACHABLE();
     }
+}
+
+template <size_t N>
+using InstList = boost::container::small_vector<IR::Inst*, N>;
+
+static InstList<8> WriteLaneBFS(IR::Inst* inst) {
+    // Breadth-first search visiting the right most arguments first
+    InstList<8> writes;
+    InstList<16> visited;
+    std::queue<IR::Inst*> queue;
+    queue.push(inst);
+
+    while (!queue.empty()) {
+        // Pop one instruction from the queue
+        IR::Inst* inst{queue.front()};
+        queue.pop();
+        if (inst->GetOpcode() == IR::Opcode::WriteLane) {
+            // We found a possible write lane source
+            if (std::ranges::find(writes, inst) == writes.end()) {
+                writes.push_back(inst);
+            }
+        }
+        // Only search through phis and readlane instructions.
+        // If there are other instructions in-between that use the value we can't eliminate.
+        if (inst->GetOpcode() != IR::Opcode::ReadLane && inst->GetOpcode() != IR::Opcode::Phi) {
+            continue;
+        }
+        // Visit the right most arguments first
+        for (size_t arg = inst->NumArgs(); arg--;) {
+            auto arg_value{inst->Arg(arg)};
+            if (arg_value.IsImmediate()) {
+                continue;
+            }
+            // Queue instruction if it hasn't been visited
+            IR::Inst* arg_inst{arg_value.InstRecursive()};
+            if (std::ranges::find(visited, arg_inst) == visited.end()) {
+                visited.push_back(arg_inst);
+                queue.push(arg_inst);
+            }
+        }
+    }
+    return writes;
 }
 
 void FoldReadLane(IR::Block& block, IR::Inst& inst) {

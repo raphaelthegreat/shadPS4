@@ -247,6 +247,8 @@ void SetupCapabilities(const Info& info, const Profile& profile, EmitContext& ct
     ctx.AddCapability(spv::Capability::Int64);
     ctx.AddCapability(spv::Capability::UniformAndStorageBuffer8BitAccess);
     ctx.AddCapability(spv::Capability::UniformAndStorageBuffer16BitAccess);
+    ctx.AddExtension("SPV_AMD_shader_ballot");
+    ctx.AddCapability(spv::Capability::Groups);
     if (info.uses_fp16) {
         ctx.AddCapability(spv::Capability::Float16);
     }
