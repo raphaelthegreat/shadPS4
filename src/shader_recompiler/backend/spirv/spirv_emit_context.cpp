@@ -708,7 +708,7 @@ void EmitContext::DefineBuffers() {
         // to query buffer sizes, bind it now.
         info.buffers.push_back({
             .used_types = IR::Type::U32,
-            .inline_cbuf = AmdGpu::Buffer::Null(),
+            .inline_cbuf = AmdGpu::Buffer::Null(info.flattened_ud_buf.size()),
             .buffer_type = BufferType::ReadConstUbo,
         });
     }

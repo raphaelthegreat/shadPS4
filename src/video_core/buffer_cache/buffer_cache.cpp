@@ -285,9 +285,11 @@ void BufferCache::BindIndexBuffer(u32 index_offset) {
 
 void BufferCache::InlineData(VAddr address, const void* value, u32 num_bytes, bool is_gds) {
     ASSERT_MSG(address % 4 == 0, "GDS offset must be dword aligned");
-    if (!is_gds && !IsRegionRegistered(address, num_bytes)) {
+    if (!is_gds) {
         memcpy(std::bit_cast<void*>(address), value, num_bytes);
-        return;
+        if (!IsRegionRegistered(address, num_bytes)) {
+            return;
+        }
     }
     scheduler.EndRendering();
     const Buffer* buffer = [&] {
@@ -339,23 +341,19 @@ void BufferCache::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, 
         // Without a readback there's nothing we can do with this
         // Fallback to creating dst buffer on GPU to at least have this data there
     }
-    if (!src_gds && !IsRegionRegistered(src, num_bytes)) {
-        InlineData(dst, std::bit_cast<void*>(src), num_bytes, dst_gds);
-        return;
-    }
     auto& src_buffer = [&] -> const Buffer& {
         if (src_gds) {
             return gds_buffer;
         }
-        const BufferId buffer_id = FindBuffer(src, num_bytes);
-        return slot_buffers[buffer_id];
+        const auto [buffer, offset] = ObtainBuffer(src, num_bytes, false);
+        return *buffer;
     }();
     auto& dst_buffer = [&] -> const Buffer& {
         if (dst_gds) {
             return gds_buffer;
         }
-        const BufferId buffer_id = FindBuffer(dst, num_bytes);
-        return slot_buffers[buffer_id];
+        const auto [buffer, offset] = ObtainBuffer(dst, num_bytes, true);
+        return *buffer;
     }();
     vk::BufferCopy region{
         .srcOffset = src_buffer.Offset(src),
@@ -785,14 +783,34 @@ void BufferCache::SynchronizeBuffer(Buffer& buffer, VAddr device_addr, u32 size,
 }
 
 bool BufferCache::SynchronizeBufferFromImage(Buffer& buffer, VAddr device_addr, u32 size) {
-    static constexpr FindFlags find_flags =
-        FindFlags::NoCreate | FindFlags::RelaxDim | FindFlags::RelaxFmt | FindFlags::RelaxSize;
-    TextureCache::BaseDesc desc{};
-    desc.info.guest_address = device_addr;
-    desc.info.guest_size = size;
-    const ImageId image_id = texture_cache.FindImage(desc, find_flags);
-    if (!image_id) {
+    boost::container::small_vector<ImageId, 8> image_ids;
+    texture_cache.ForEachImageInRegion(device_addr, size, [&](ImageId image_id, Image& image) {
+        if (image.info.guest_address != device_addr) {
+            return;
+        }
+        image_ids.push_back(image_id);
+    });
+    if (image_ids.empty()) {
         return false;
+    }
+    ImageId image_id = NULL_IMAGE_ID;
+    if (image_ids.size() == 1) {
+        image_id = image_ids.back();
+    } else {
+        LOG_WARNING(Render_Vulkan, "Begin addr={:#x}, size={:#x}", device_addr, size);
+        for (const ImageId img_id : image_ids) {
+            auto& image = texture_cache.GetImage(img_id);
+            LOG_WARNING(Render_Vulkan, "Image {}x{} addr={:#x} size={:#x}",
+                        image.info.size.width, image.info.size.height, image.info.guest_address, image.info.guest_size);
+            if (image.info.guest_size == size) {
+                image_id = img_id;
+                break;
+            }
+        }
+        if (image_id == NULL_IMAGE_ID) {
+            return false;
+        }
+        //ASSERT(image_id != NULL_IMAGE_ID);
     }
     Image& image = texture_cache.GetImage(image_id);
     // Only perform sync if image is:

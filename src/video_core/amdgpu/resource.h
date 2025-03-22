@@ -31,9 +31,11 @@ struct Buffer {
     u32 _padding1 : 6;
     u32 type : 2; // overlaps with T# type, so should be 0 for buffer
 
-    static constexpr Buffer Null() {
+    static constexpr Buffer Null(u32 num_dwords = 0) {
         Buffer buffer{};
         buffer.base_address = 1;
+        buffer.stride = sizeof(u32);
+        buffer.num_records = num_dwords;
         return buffer;
     }
 

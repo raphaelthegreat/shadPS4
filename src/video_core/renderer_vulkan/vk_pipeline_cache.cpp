@@ -209,7 +209,7 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
         // When binding a UBO, we calculate its size considering the offset in the larger buffer
         // cache underlying resource. In some cases, it may produce sizes exceeding the system
         // maximum allowed UBO range, so we need to reduce the threshold to prevent issues.
-        .max_ubo_size = instance.UniformMaxSize() - instance.UniformMinAlignment(),
+        .max_ubo_size = 64_KB,
         .max_viewport_width = instance.GetMaxViewportWidth(),
         .max_viewport_height = instance.GetMaxViewportHeight(),
         .max_shared_memory_size = instance.MaxComputeSharedMemorySize(),
@@ -407,6 +407,7 @@ bool PipelineCache::RefreshGraphicsKey() {
 
     switch (regs.stage_enable.raw) {
     case Liverpool::ShaderStageEnable::VgtStages::EsGs: {
+        return false;
         if (!instance.IsGeometryStageSupported() || !IsGsFeaturesSupported()) {
             return false;
         }

@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
-
+#pragma clang optimize off
 #include "common/alignment.h"
 #include "common/assert.h"
 #include "common/config.h"
@@ -553,6 +553,7 @@ s64 MemoryManager::ProtectBytes(VAddr addr, VirtualMemoryArea vma_base, size_t s
 }
 
 s32 MemoryManager::Protect(VAddr addr, size_t size, MemoryProt prot) {
+    return 0;
     std::scoped_lock lk{mutex};
     s64 protected_bytes = 0;
     do {

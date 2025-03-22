@@ -77,7 +77,7 @@ void Visit(Info& info, const IR::Inst& inst) {
         if (!info.has_readconst) {
             info.buffers.push_back({
                 .used_types = IR::Type::U32,
-                .inline_cbuf = AmdGpu::Buffer::Null(),
+                .inline_cbuf = AmdGpu::Buffer::Null(info.flattened_ud_buf.size()),
                 .buffer_type = BufferType::ReadConstUbo,
             });
             info.has_readconst = true;

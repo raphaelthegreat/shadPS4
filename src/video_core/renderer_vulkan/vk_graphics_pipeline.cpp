@@ -110,8 +110,8 @@ GraphicsPipeline::GraphicsPipeline(
     };
 
     const vk::PipelineMultisampleStateCreateInfo multisampling = {
-        .rasterizationSamples =
-            LiverpoolToVK::NumSamples(key.num_samples, instance.GetFramebufferSampleCounts()),
+        .rasterizationSamples = vk::SampleCountFlagBits::e1,
+            /*LiverpoolToVK::NumSamples(key.num_samples, instance.GetFramebufferSampleCounts()),*/
         .sampleShadingEnable = false,
     };
 

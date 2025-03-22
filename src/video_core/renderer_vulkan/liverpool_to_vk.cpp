@@ -46,7 +46,7 @@ vk::CompareOp CompareOp(Liverpool::CompareFunc func) {
     case Liverpool::CompareFunc::Always:
         return vk::CompareOp::eAlways;
     case Liverpool::CompareFunc::Equal:
-        return vk::CompareOp::eEqual;
+        return vk::CompareOp::eLessOrEqual;
     case Liverpool::CompareFunc::GreaterEqual:
         return vk::CompareOp::eGreaterOrEqual;
     case Liverpool::CompareFunc::Greater:

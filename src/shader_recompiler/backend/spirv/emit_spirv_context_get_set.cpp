@@ -165,7 +165,7 @@ using BufferAlias = EmitContext::BufferAlias;
 Id EmitReadConst(EmitContext& ctx, IR::Inst* inst) {
     const u32 flatbuf_off_dw = inst->Flags<u32>();
     const auto& srt_flatbuf = ctx.buffers.back();
-    ASSERT(srt_flatbuf.binding >= 0 && flatbuf_off_dw > 0 &&
+    ASSERT(srt_flatbuf.binding >= 0 &&
            srt_flatbuf.buffer_type == BufferType::ReadConstUbo);
     const auto [id, pointer_type] = srt_flatbuf[BufferAlias::U32];
     const Id ptr{

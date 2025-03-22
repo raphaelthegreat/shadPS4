@@ -150,6 +150,7 @@ s32 PS4_SYSV_ABI sceKernelReserveVirtualRange(void** addr, u64 len, int flags, u
             LOG_ERROR(Kernel_Vmm, "Alignment value is invalid!");
             return ORBIS_KERNEL_ERROR_EINVAL;
         }
+        len = Common::AlignUp(len, alignment);
     }
 
     auto* memory = Core::Memory::Instance();
