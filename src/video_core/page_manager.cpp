@@ -5,6 +5,7 @@
 #include "common/assert.h"
 #include "common/debug.h"
 #include "common/signal_context.h"
+#include "common/spin_lock.h"
 #include "core/memory.h"
 #include "core/signals.h"
 #include "video_core/page_manager.h"
@@ -12,6 +13,7 @@
 
 #ifndef _WIN64
 #include <sys/mman.h>
+#include "common/adaptive_mutex.h"
 #ifdef ENABLE_USERFAULTFD
 #include <thread>
 #include <fcntl.h>
@@ -22,6 +24,7 @@
 #endif
 #else
 #include <windows.h>
+#include "common/spin_lock.h"
 #endif
 
 #ifdef __linux__
@@ -32,25 +35,41 @@
 
 namespace VideoCore {
 
-constexpr size_t PAGE_SIZE = 4_KB;
-constexpr size_t PAGE_BITS = 12;
-
 struct PageManager::Impl {
     struct PageState {
-        u8 num_watchers{};
+        u8 num_write_watchers : 7;
+        // At the moment only buffer cache can request read watchers.
+        // And buffers cannot overlap, thus only 1 can exist per page.
+        u8 num_read_watchers : 1;
 
-        Core::MemoryPermission Perm() const noexcept {
-            return num_watchers == 0 ? Core::MemoryPermission::ReadWrite
-                                     : Core::MemoryPermission::Read;
+        Core::MemoryPermission WritePerm() const noexcept {
+            return num_write_watchers == 0 ? Core::MemoryPermission::Write
+                                           : Core::MemoryPermission::None;
         }
 
-        template <s32 delta>
+        Core::MemoryPermission ReadPerm() const noexcept {
+            return num_read_watchers == 0 ? Core::MemoryPermission::Read
+                                          : Core::MemoryPermission::None;
+        }
+
+        Core::MemoryPermission Perms() const noexcept {
+            return ReadPerm() | WritePerm();
+        }
+
+        template <s32 delta, bool is_read>
         u8 AddDelta() {
-            if constexpr (delta == 1) {
-                return ++num_watchers;
+            if constexpr (is_read) {
+                if constexpr (delta == 1) {
+                    return ++num_read_watchers;
+                } else {
+                    return --num_read_watchers;
+                }
             } else {
-                ASSERT_MSG(num_watchers > 0, "Not enough watchers");
-                return --num_watchers;
+                if constexpr (delta == 1) {
+                    return ++num_write_watchers;
+                } else {
+                    return --num_write_watchers;
+                }
             }
         }
     };
@@ -185,12 +204,14 @@ struct PageManager::Impl {
         const auto addr = reinterpret_cast<VAddr>(fault_address);
         if (Common::IsWriteError(context)) {
             return rasterizer->InvalidateMemory(addr, 1);
+        } else {
+            return rasterizer->ReadMemory(addr, 1);
         }
         return false;
     }
 
 #endif
-    template <s32 delta>
+    template <s32 delta, bool is_read>
     void UpdatePageWatchers(VAddr addr, u64 size) {
         RENDERER_TRACE;
         boost::container::small_vector<UpdateProtectRange, 16> update_ranges;
@@ -198,7 +219,7 @@ struct PageManager::Impl {
             std::scoped_lock lk(lock);
 
             size_t page = addr >> PAGE_BITS;
-            auto perms = cached_pages[page].Perm();
+            auto perms = cached_pages[page].Perms();
             u64 range_begin = 0;
             u64 range_bytes = 0;
 
@@ -223,10 +244,10 @@ struct PageManager::Impl {
                 PageState& state = cached_pages[page];
 
                 // Apply the change to the page state
-                const u8 new_count = state.AddDelta<delta>();
+                const u8 new_count = state.AddDelta<delta, is_read>();
 
                 // If the protection changed add pending (un)protect action
-                if (auto new_perms = state.Perm(); new_perms != perms) [[unlikely]] {
+                if (auto new_perms = state.Perms(); new_perms != perms) [[unlikely]] {
                     release_pending();
                     perms = new_perms;
                 }
@@ -273,12 +294,14 @@ void PageManager::OnGpuUnmap(VAddr address, size_t size) {
     impl->OnUnmap(address, size);
 }
 
-template <s32 delta>
+template <s32 delta, bool is_read>
 void PageManager::UpdatePageWatchers(VAddr addr, u64 size) const {
-    impl->UpdatePageWatchers<delta>(addr, size);
+    impl->UpdatePageWatchers<delta, is_read>(addr, size);
 }
 
-template void PageManager::UpdatePageWatchers<1>(VAddr addr, u64 size) const;
-template void PageManager::UpdatePageWatchers<-1>(VAddr addr, u64 size) const;
+template void PageManager::UpdatePageWatchers<1, true>(VAddr addr, u64 size) const;
+template void PageManager::UpdatePageWatchers<1, false>(VAddr addr, u64 size) const;
+template void PageManager::UpdatePageWatchers<-1, true>(VAddr addr, u64 size) const;
+template void PageManager::UpdatePageWatchers<-1, false>(VAddr addr, u64 size) const;
 
 } // namespace VideoCore
