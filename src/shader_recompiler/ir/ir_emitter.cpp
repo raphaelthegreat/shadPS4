@@ -1430,7 +1430,7 @@ Value IREmitter::IAddCary(const U32& a, const U32& b) {
     }
     switch (a.Type()) {
     case Type::U32:
-        return Inst<U32>(Opcode::IAddCary32, a, b);
+        return Inst(Opcode::IAddCary32, a, b);
     default:
         ThrowInvalidType(a.Type());
     }
