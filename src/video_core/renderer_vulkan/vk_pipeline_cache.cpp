@@ -35,49 +35,51 @@ constexpr static std::array DescriptorHeapSizes = {
     vk::DescriptorPoolSize{vk::DescriptorType::eSampler, 1024},
 };
 
-void GatherVertexOutputs(Shader::VertexRuntimeInfo& info,
-                         const AmdGpu::Liverpool::VsOutputControl& ctl) {
-    const auto add_output = [&](VsOutput x, VsOutput y, VsOutput z, VsOutput w) {
-        if (x != VsOutput::None || y != VsOutput::None || z != VsOutput::None ||
-            w != VsOutput::None) {
-            info.outputs[info.num_outputs++] = Shader::VsOutputMap{x, y, z, w};
-        }
-    };
-    // VS_OUT_MISC_VEC
-    add_output(ctl.use_vtx_point_size ? VsOutput::PointSprite : VsOutput::None,
-               ctl.use_vtx_edge_flag
-                   ? VsOutput::EdgeFlag
-                   : (ctl.use_vtx_gs_cut_flag ? VsOutput::GsCutFlag : VsOutput::None),
-               ctl.use_vtx_kill_flag
-                   ? VsOutput::KillFlag
-                   : (ctl.use_vtx_render_target_idx ? VsOutput::GsMrtIndex : VsOutput::None),
-               ctl.use_vtx_viewport_idx ? VsOutput::GsVpIndex : VsOutput::None);
-    // VS_OUT_CCDIST0
-    add_output(ctl.IsClipDistEnabled(0)
-                   ? VsOutput::ClipDist0
-                   : (ctl.IsCullDistEnabled(0) ? VsOutput::CullDist0 : VsOutput::None),
-               ctl.IsClipDistEnabled(1)
-                   ? VsOutput::ClipDist1
-                   : (ctl.IsCullDistEnabled(1) ? VsOutput::CullDist1 : VsOutput::None),
-               ctl.IsClipDistEnabled(2)
-                   ? VsOutput::ClipDist2
-                   : (ctl.IsCullDistEnabled(2) ? VsOutput::CullDist2 : VsOutput::None),
-               ctl.IsClipDistEnabled(3)
-                   ? VsOutput::ClipDist3
-                   : (ctl.IsCullDistEnabled(3) ? VsOutput::CullDist3 : VsOutput::None));
-    // VS_OUT_CCDIST1
-    add_output(ctl.IsClipDistEnabled(4)
-                   ? VsOutput::ClipDist4
-                   : (ctl.IsCullDistEnabled(4) ? VsOutput::CullDist4 : VsOutput::None),
-               ctl.IsClipDistEnabled(5)
-                   ? VsOutput::ClipDist5
-                   : (ctl.IsCullDistEnabled(5) ? VsOutput::CullDist5 : VsOutput::None),
-               ctl.IsClipDistEnabled(6)
-                   ? VsOutput::ClipDist6
-                   : (ctl.IsCullDistEnabled(6) ? VsOutput::CullDist6 : VsOutput::None),
-               ctl.IsClipDistEnabled(7)
-                   ? VsOutput::ClipDist7
-                   : (ctl.IsCullDistEnabled(7) ? VsOutput::CullDist7 : VsOutput::None));
+u32 MapVertexOutputs(std::span<Shader::VsOutputMap, 3> outputs,
+                     const AmdGpu::Liverpool::VsOutputControl& ctl) {
+    u32 num_outputs = 0;
+    if (ctl.vs_out_misc_enable) {
+        auto& misc_vec = outputs[num_outputs++];
+        misc_vec[0] = ctl.use_vtx_point_size ? VsOutput::PointSprite : VsOutput::None;
+        misc_vec[1] = ctl.use_vtx_edge_flag
+                          ? VsOutput::EdgeFlag
+                          : (ctl.use_vtx_gs_cut_flag ? VsOutput::GsCutFlag : VsOutput::None);
+        misc_vec[2] = ctl.use_vtx_kill_flag
+                          ? VsOutput::KillFlag
+                          : (ctl.use_vtx_render_target_idx ? VsOutput::GsMrtIndex : VsOutput::None);
+        misc_vec[3] = ctl.use_vtx_viewport_idx ? VsOutput::GsVpIndex : VsOutput::None;
+    }
+    if (ctl.vs_out_ccdist0_enable) {
+        auto& ccdist0 = outputs[num_outputs++];
+        ccdist0[0] = ctl.IsClipDistEnabled(0)
+                         ? VsOutput::ClipDist0
+                         : (ctl.IsCullDistEnabled(0) ? VsOutput::CullDist0 : VsOutput::None);
+        ccdist0[1] = ctl.IsClipDistEnabled(1)
+                         ? VsOutput::ClipDist1
+                         : (ctl.IsCullDistEnabled(1) ? VsOutput::CullDist1 : VsOutput::None);
+        ccdist0[2] = ctl.IsClipDistEnabled(2)
+                         ? VsOutput::ClipDist2
+                         : (ctl.IsCullDistEnabled(2) ? VsOutput::CullDist2 : VsOutput::None);
+        ccdist0[3] = ctl.IsClipDistEnabled(3)
+                         ? VsOutput::ClipDist3
+                         : (ctl.IsCullDistEnabled(3) ? VsOutput::CullDist3 : VsOutput::None);
+    }
+    if (ctl.vs_out_ccdist1_enable) {
+        auto& ccdist1 = outputs[num_outputs++];
+        ccdist1[0] = ctl.IsClipDistEnabled(4)
+                         ? VsOutput::ClipDist4
+                         : (ctl.IsCullDistEnabled(4) ? VsOutput::CullDist4 : VsOutput::None);
+        ccdist1[1] = ctl.IsClipDistEnabled(5)
+                         ? VsOutput::ClipDist5
+                         : (ctl.IsCullDistEnabled(5) ? VsOutput::CullDist5 : VsOutput::None);
+        ccdist1[2] = ctl.IsClipDistEnabled(6)
+                         ? VsOutput::ClipDist6
+                         : (ctl.IsCullDistEnabled(6) ? VsOutput::CullDist6 : VsOutput::None);
+        ccdist1[3] = ctl.IsClipDistEnabled(7)
+                         ? VsOutput::ClipDist7
+                         : (ctl.IsCullDistEnabled(7) ? VsOutput::CullDist7 : VsOutput::None);
+    }
+    return num_outputs;
 }
 
 const Shader::RuntimeInfo& PipelineCache::BuildRuntimeInfo(Stage stage, LogicalStage l_stage) {
@@ -121,7 +123,7 @@ const Shader::RuntimeInfo& PipelineCache::BuildRuntimeInfo(Stage stage, LogicalS
     }
     case Stage::Vertex: {
         BuildCommon(regs.vs_program);
-        GatherVertexOutputs(info.vs_info, regs.vs_output_control);
+        info.vs_info.num_outputs = MapVertexOutputs(info.vs_info.outputs, regs.vs_output_control);
         info.vs_info.emulate_depth_negative_one_to_one =
             !instance.IsDepthClipControlSupported() &&
             regs.clipper_control.clip_space == Liverpool::ClipSpace::MinusWToW;
@@ -135,6 +137,7 @@ const Shader::RuntimeInfo& PipelineCache::BuildRuntimeInfo(Stage stage, LogicalS
     }
     case Stage::Geometry: {
         BuildCommon(regs.gs_program);
+        info.gs_info.num_outputs = MapVertexOutputs(info.gs_info.outputs, regs.vs_output_control);
         auto& gs_info = info.gs_info;
         gs_info.output_vertices = regs.vgt_gs_max_vert_out;
         gs_info.num_invocations =

@@ -255,6 +255,7 @@ public:
     Id frag_depth{};
     Id clip_distances{};
     Id cull_distances{};
+    Id gl_layer{};
 
     Id patch_vertices{};
     Id output_tess_level_outer{};
@@ -383,6 +384,7 @@ private:
     void DefineArithmeticTypes();
     void DefineInterfaces();
     void DefineInputs();
+    void DefineVertexBlock();
     void DefineOutputs();
     void DefinePushDataBlock();
     void DefineBuffers();

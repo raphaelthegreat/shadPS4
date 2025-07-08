@@ -122,7 +122,7 @@ RenderState Rasterizer::PrepareRenderState(u32 mrt_mask) {
     if (regs.color_control.degamma_enable) {
         LOG_WARNING(Render_Vulkan, "Color buffers require gamma correction");
     }
-
+    // ASSERT(regs.color_control.rop3.Value() == 0xCC);
     const bool skip_cb_binding =
         regs.color_control.mode == AmdGpu::Liverpool::ColorControl::OperationMode::Disable;
     for (auto col_buf_id = 0u; col_buf_id < Liverpool::NumColorBuffers; ++col_buf_id) {
@@ -162,6 +162,7 @@ RenderState Rasterizer::PrepareRenderState(u32 mrt_mask) {
         const auto mip = image_view.info.range.base.level;
         state.width = std::min<u32>(state.width, std::max(image.info.size.width >> mip, 1u));
         state.height = std::min<u32>(state.height, std::max(image.info.size.height >> mip, 1u));
+        state.num_layers = std::min<u32>(state.num_layers, image_view.info.range.extent.layers);
         state.color_attachments[state.num_color_attachments++] = {
             .imageView = *image_view.image_view,
             .imageLayout = vk::ImageLayout::eUndefined,
@@ -195,6 +196,7 @@ RenderState Rasterizer::PrepareRenderState(u32 mrt_mask) {
         state.height = std::min<u32>(state.height, image.info.size.height);
         state.has_depth = regs.depth_buffer.DepthValid();
         state.has_stencil = regs.depth_buffer.StencilValid();
+        state.num_layers = std::min<u32>(state.num_layers, image_view.info.range.extent.layers);
         if (state.has_depth) {
             state.depth_attachment = {
                 .imageView = *image_view.image_view,
@@ -216,6 +218,10 @@ RenderState Rasterizer::PrepareRenderState(u32 mrt_mask) {
             };
         }
         texture_cache.TouchMeta(htile_address, slice, false);
+    }
+
+    if (state.num_layers == std::numeric_limits<u32>::max()) {
+        state.num_layers = 1;
     }
 
     return state;

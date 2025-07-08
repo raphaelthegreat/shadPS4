@@ -143,6 +143,8 @@ struct HullRuntimeInfo {
 static constexpr auto GsMaxOutputStreams = 4u;
 using GsOutputPrimTypes = std::array<AmdGpu::GsOutputPrimitiveType, GsMaxOutputStreams>;
 struct GeometryRuntimeInfo {
+    u32 num_outputs;
+    std::array<VsOutputMap, 3> outputs;
     u32 num_invocations{};
     u32 output_vertices{};
     u32 in_vertex_data_size{};

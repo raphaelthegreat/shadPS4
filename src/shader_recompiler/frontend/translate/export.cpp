@@ -2,12 +2,13 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "shader_recompiler/frontend/translate/translate.h"
+#include "shader_recompiler/ir/position.h"
 #include "shader_recompiler/ir/reinterpret.h"
 #include "shader_recompiler/runtime_info.h"
 
 namespace Shader::Gcn {
 
-u32 SwizzleMrtComponent(const PsColorBuffer& color_buffer, u32 comp) {
+static u32 SwizzleMrtComponent(const PsColorBuffer& color_buffer, u32 comp) {
     const auto [r, g, b, a] = color_buffer.swizzle;
     const std::array swizzle_array = {r, g, b, a};
     const auto swizzled_comp_type = static_cast<u32>(swizzle_array[comp]);
@@ -126,8 +127,10 @@ void Translator::ExportCompressed(IR::Attribute attribute, u32 idx, const IR::U3
 
 void Translator::ExportUncompressed(IR::Attribute attribute, u32 comp, const IR::F32& value) {
     if (IsMrt(attribute)) {
-        ExportMrtUncompressed(attribute, comp, value);
-        return;
+        return ExportMrtUncompressed(attribute, comp, value);
+    }
+    if (IsPosition(attribute)) {
+        return IR::ExportPosition(ir, runtime_info.vs_info, attribute, comp, value);
     }
     ir.SetAttribute(attribute, value, comp);
 }

@@ -45,7 +45,7 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
                 .offset = {0, 0},
                 .extent = {width, height},
             },
-        .layerCount = 1,
+        .layerCount = render_state.num_layers,
         .colorAttachmentCount = render_state.num_color_attachments,
         .pColorAttachments = render_state.num_color_attachments > 0
                                  ? render_state.color_attachments.data()

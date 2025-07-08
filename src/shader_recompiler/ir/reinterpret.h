@@ -4,7 +4,7 @@
 #pragma once
 
 #include "shader_recompiler/ir/ir_emitter.h"
-#include "video_core/amdgpu/types.h"
+#include "video_core/amdgpu/pixel_format.h"
 
 namespace Shader::IR {
 

@@ -875,7 +875,7 @@ void TextureCache::DeleteImage(ImageId image_id) {
     if (meta_info.htile_addr) {
         surface_metas.erase(meta_info.htile_addr);
     }
-
+    return;
     // Reclaim image and any image views it references.
     scheduler.DeferOperation([this, image_id] {
         Image& image = slot_images[image_id];
