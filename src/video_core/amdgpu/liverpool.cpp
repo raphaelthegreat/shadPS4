@@ -17,6 +17,7 @@
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 extern u32 num_flushes;
 extern u64 fence_tick;
+extern u32 draw_id;
 namespace AmdGpu {
 
 static const char* dcb_task_name{"DCB_TASK"};
@@ -127,6 +128,8 @@ void Liverpool::Process(std::stop_token stoken) {
 
                 std::scoped_lock lock{queue.m_access};
                 queue.submits.pop();
+
+                //LOG_WARNING(Render, "End command list");
 
                 --num_submits;
                 std::scoped_lock lock2{submit_mutex};
