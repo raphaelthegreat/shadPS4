@@ -363,7 +363,7 @@ void Image::CopyImage(Image& src_image) {
                 .aspectMask = aspect_mask & ~vk::ImageAspectFlagBits::eStencil,
                 .mipLevel = mip,
                 .baseArrayLayer = 0,
-                .layerCount = src_info.resources.layers,
+                .layerCount = info.resources.layers,
             },
             .extent = {mip_w, mip_h, mip_d},
         });
@@ -388,9 +388,9 @@ void Image::CopyImageWithBuffer(Image& src_image, vk::Buffer buffer, u64 offset)
 
     boost::container::small_vector<vk::BufferImageCopy, 8> buffer_copies;
     for (u32 mip = 0; mip < num_mips; ++mip) {
-        const auto mip_w = std::max(src_info.size.width >> mip, 1u);
-        const auto mip_h = std::max(src_info.size.height >> mip, 1u);
-        const auto mip_d = std::max(src_info.size.depth >> mip, 1u);
+        const auto mip_w = std::max(info.size.width >> mip, 1u);
+        const auto mip_h = std::max(info.size.height >> mip, 1u);
+        const auto mip_d = std::max(info.size.depth >> mip, 1u);
 
         buffer_copies.emplace_back(vk::BufferImageCopy{
             .bufferOffset = offset,
