@@ -160,10 +160,10 @@ void CollectShaderInfoPass(IR::Program& program, const Profile& profile) {
         }
     }
 
-    if (info.stores.GetAny(IR::Attribute::RenderTargetIndex)) {
+    if (info.stores.GetAny(IR::Attribute::RenderTargetIndex) || info.loads.GetAny(IR::Attribute::RenderTargetIndex)) {
         info.has_layer_output = true;
     }
-    if (info.stores.GetAny(IR::Attribute::ViewportIndex)) {
+    if (info.stores.GetAny(IR::Attribute::ViewportIndex) || info.loads.GetAny(IR::Attribute::ViewportIndex)) {
         info.has_viewport_index_output = true;
     }
 

@@ -720,7 +720,7 @@ std::span<const SurfaceFormatInfo> SurfaceFormats() {
         CreateSurfaceFormatInfo(AmdGpu::DataFormat::FormatBc6, AmdGpu::NumberFormat::Snorm,
                                 vk::Format::eBc6HSfloatBlock),
         CreateSurfaceFormatInfo(AmdGpu::DataFormat::FormatBc6, AmdGpu::NumberFormat::Srgb,
-                                vk::Format::eBc6HSfloatBlock),
+                                vk::Format::eBc6HUfloatBlock),
         // BC7
         CreateSurfaceFormatInfo(AmdGpu::DataFormat::FormatBc7, AmdGpu::NumberFormat::Unorm,
                                 vk::Format::eBc7UnormBlock),

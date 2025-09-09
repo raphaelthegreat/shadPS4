@@ -1009,7 +1009,8 @@ void PatchImageSampleArgs(IR::Block& block, IR::Inst& inst, Info& info,
     }();
 
     auto converted = ApplyReadNumberConversionVec4(ir, texel, image.GetNumberConversion());
-    if (sampler.force_degamma && image.GetNumberFmt() != AmdGpu::NumberFormat::Srgb) {
+    if ((sampler.force_degamma && image.GetNumberFmt() != AmdGpu::NumberFormat::Srgb) ||
+        (image.GetDataFmt() == AmdGpu::DataFormat::FormatBc6 && image.GetNumberFmt() == AmdGpu::NumberFormat::Srgb)) {
         converted = ApplyForceDegamma(ir, texel, image.DstSelect());
     }
     inst.ReplaceUsesWith(converted);

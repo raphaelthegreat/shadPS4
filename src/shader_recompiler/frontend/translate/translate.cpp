@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
-
+#pragma clang optimize off
 #include "common/config.h"
 #include "common/io_file.h"
 #include "common/path_util.h"
@@ -167,6 +167,13 @@ void Translator::EmitPrologue(IR::Block* first_block) {
         if (runtime_info.fs_info.addr_flags.front_face_ena) {
             if (runtime_info.fs_info.en_flags.front_face_ena) {
                 ir.SetVectorReg(dst_vreg++, ir.GetAttributeU32(IR::Attribute::IsFrontFace));
+            } else {
+                ir.SetVectorReg(dst_vreg++, ir.Imm32(0));
+            }
+        }
+        if (runtime_info.fs_info.addr_flags.ancillary_ena) {
+            if (runtime_info.fs_info.en_flags.ancillary_ena) {
+                ir.SetVectorReg(dst_vreg++, ir.BitFieldInsert(ir.Imm32(0), ir.GetAttributeU32(IR::Attribute::RenderTargetIndex), ir.Imm32(16), ir.Imm32(11)));
             } else {
                 ir.SetVectorReg(dst_vreg++, ir.Imm32(0));
             }

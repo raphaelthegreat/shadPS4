@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
-
+#pragma clang optimize off
 #include <xxhash.h>
 
 #include "common/assert.h"
@@ -443,6 +443,10 @@ ImageId TextureCache::FindImage(BaseDesc& desc, bool exact_fmt) {
             continue;
         }
         image_id = cache_id;
+    }
+
+    if (info.size.width == 32 && info.size.height == 32) {
+        printf("bad\n");
     }
 
     // Try to resolve overlaps (if any)

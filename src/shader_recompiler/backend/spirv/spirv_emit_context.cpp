@@ -370,6 +370,10 @@ void EmitContext::DefineInputs() {
         if (info.loads.GetAny(IR::Attribute::FragCoord)) {
             frag_coord = DefineVariable(F32[4], spv::BuiltIn::FragCoord, spv::StorageClass::Input);
         }
+        if (info.loads.GetAny(IR::Attribute::RenderTargetIndex)) {
+            output_layer = DefineVariable(S32[1], spv::BuiltIn::Layer, spv::StorageClass::Input);
+            Decorate(output_layer, spv::Decoration::Flat);
+        }
         if (info.stores.Get(IR::Attribute::Depth)) {
             frag_depth = DefineVariable(F32[1], spv::BuiltIn::FragDepth, spv::StorageClass::Output);
         }
