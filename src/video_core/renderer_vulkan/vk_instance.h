@@ -60,19 +60,25 @@ public:
 
     /// Retrieve queue information
     u32 GetGraphicsQueueFamilyIndex() const {
-        return queue_family_index;
+        return graphics_family_index;
     }
 
-    u32 GetPresentQueueFamilyIndex() const {
-        return queue_family_index;
-    }
-
-    vk::Queue GetGraphicsQueue() const {
+    vk::Queue GetGraphicsAndPresentQueue() const {
         return graphics_queue;
     }
 
-    vk::Queue GetPresentQueue() const {
-        return present_queue;
+    std::span<const vk::Queue> GetTransferQueues() const {
+        return num_transfer_queues ? std::span{transfer_queues.data(), num_transfer_queues}
+                                   : std::span{&graphics_queue, 1};
+    }
+
+    std::mutex& GetGraphicsAndPresentLock() const {
+        return graphics_mutex;
+    }
+
+    std::span<const std::mutex> GetTransferLocks() const {
+        return num_transfer_queues ? std::span{transfer_mutexes.data(), num_transfer_queues}
+                                   : std::span{&graphics_mutex, 1};
     }
 
     TracyVkCtx GetProfilerContext() const {
@@ -444,6 +450,9 @@ private:
     /// Creates the VMA allocator handle
     void CreateAllocator();
 
+    /// Fetches graphics and transfer queues
+    void CreateQueues(std::span<const vk::QueueFamilyProperties> family_properties);
+
     /// Collects various information from the device.
     void CollectDeviceParameters();
     void CollectPhysicalMemoryInfo();
@@ -473,13 +482,17 @@ private:
     vk::UniqueDebugUtilsMessengerEXT debug_callback{};
     std::string vendor_name;
     VmaAllocator allocator{};
-    vk::Queue present_queue;
     vk::Queue graphics_queue;
+    std::array<vk::Queue, 4> transfer_queues;
+    u32 num_transfer_queues{};
+    mutable std::mutex graphics_mutex;
+    std::array<std::mutex, 4> transfer_mutexes;
     std::vector<vk::PhysicalDevice> physical_devices;
     std::vector<std::string> available_extensions;
     std::unordered_map<vk::Format, vk::FormatProperties3> format_properties;
     TracyVkCtx profiler_context{};
-    u32 queue_family_index{0};
+    u32 graphics_family_index{};
+    u32 transfer_family_index{};
     bool custom_border_color{};
     bool fragment_shader_barycentric{};
     bool amd_shader_explicit_vertex_parameter{};

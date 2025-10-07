@@ -3,27 +3,16 @@
 
 #pragma once
 
+#include <mutex>
+
 #include "common/config.h"
 #include "common/div_ceil.h"
-#include "common/logging/log.h"
-
-#ifdef __linux__
-#include "common/adaptive_mutex.h"
-#else
-#include "common/spin_lock.h"
-#endif
 #include "common/debug.h"
 #include "common/types.h"
 #include "video_core/buffer_cache/region_definitions.h"
 #include "video_core/page_manager.h"
 
 namespace VideoCore {
-
-#ifdef PTHREAD_ADAPTIVE_MUTEX_INITIALIZER_NP
-using LockType = Common::AdaptiveMutex;
-#else
-using LockType = Common::SpinLock;
-#endif
 
 /**
  * Allows tracking CPU and GPU modification of pages in a contigious 16MB virtual address region.
@@ -48,10 +37,6 @@ public:
         return cpu_addr;
     }
 
-    static constexpr size_t SanitizeAddress(size_t address) {
-        return static_cast<size_t>(std::max<s64>(static_cast<s64>(address), 0LL));
-    }
-
     template <Type type>
     RegionBits& GetRegionBits() noexcept {
         if constexpr (type == Type::CPU) {
@@ -70,6 +55,22 @@ public:
         }
     }
 
+    void LockPages(u64 offset, u64 size) {
+        const size_t start_page = offset / TRACKER_BYTES_PER_PAGE;
+        const size_t end_page = Common::DivCeil(offset + size, TRACKER_BYTES_PER_PAGE);
+        for (u64 page = start_page; page != end_page; ++page) {
+            locks[page].lock();
+        }
+    }
+
+    void UnlockPages(u64 offset, u64 size) {
+        const size_t start_page = offset / TRACKER_BYTES_PER_PAGE;
+        const size_t end_page = Common::DivCeil(offset + size, TRACKER_BYTES_PER_PAGE);
+        for (u64 page = start_page; page != end_page; ++page) {
+            locks[page].unlock();
+        }
+    }
+
     /**
      * Change the state of a range of pages
      *
@@ -80,9 +81,8 @@ public:
     void ChangeRegionState(u64 dirty_addr, u64 size) noexcept(type == Type::GPU) {
         RENDERER_TRACE;
         const size_t offset = dirty_addr - cpu_addr;
-        const size_t start_page = SanitizeAddress(offset) / TRACKER_BYTES_PER_PAGE;
-        const size_t end_page =
-            Common::DivCeil(SanitizeAddress(offset + size), TRACKER_BYTES_PER_PAGE);
+        const size_t start_page = offset / TRACKER_BYTES_PER_PAGE;
+        const size_t end_page = Common::DivCeil(offset + size, TRACKER_BYTES_PER_PAGE);
         if (start_page >= NUM_PAGES_PER_REGION || end_page <= start_page) {
             return;
         }
@@ -112,9 +112,8 @@ public:
     void ForEachModifiedRange(VAddr query_cpu_range, s64 size, auto&& func) {
         RENDERER_TRACE;
         const size_t offset = query_cpu_range - cpu_addr;
-        const size_t start_page = SanitizeAddress(offset) / TRACKER_BYTES_PER_PAGE;
-        const size_t end_page =
-            Common::DivCeil(SanitizeAddress(offset + size), TRACKER_BYTES_PER_PAGE);
+        const size_t start_page = offset / TRACKER_BYTES_PER_PAGE;
+        const size_t end_page = Common::DivCeil(offset + size, TRACKER_BYTES_PER_PAGE);
         if (start_page >= NUM_PAGES_PER_REGION || end_page <= start_page) {
             return;
         }
@@ -145,9 +144,8 @@ public:
     template <Type type>
     [[nodiscard]] bool IsRegionModified(u64 offset, u64 size) noexcept {
         RENDERER_TRACE;
-        const size_t start_page = SanitizeAddress(offset) / TRACKER_BYTES_PER_PAGE;
-        const size_t end_page =
-            Common::DivCeil(SanitizeAddress(offset + size), TRACKER_BYTES_PER_PAGE);
+        const size_t start_page = offset / TRACKER_BYTES_PER_PAGE;
+        const size_t end_page = Common::DivCeil(offset + size, TRACKER_BYTES_PER_PAGE);
         if (start_page >= NUM_PAGES_PER_REGION || end_page <= start_page) {
             return false;
         }
@@ -156,8 +154,6 @@ public:
         RegionBits test(bits, start_page, end_page);
         return test.Any();
     }
-
-    LockType lock;
 
 private:
     /**
@@ -186,6 +182,7 @@ private:
 
     PageManager* tracker;
     VAddr cpu_addr = 0;
+    std::array<std::mutex, NUM_PAGES_PER_REGION> locks{};
     RegionBits cpu;
     RegionBits gpu;
     RegionBits writeable;

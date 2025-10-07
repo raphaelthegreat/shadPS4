@@ -104,10 +104,10 @@ Buffer::Buffer(const Vulkan::Instance& instance_, Vulkan::Scheduler& scheduler_,
                VAddr cpu_addr_, vk::BufferUsageFlags flags, u64 size_bytes_)
     : cpu_addr{cpu_addr_}, size_bytes{size_bytes_}, instance{&instance_}, scheduler{&scheduler_},
       usage{usage_}, buffer{instance->GetDevice(), instance->GetAllocator()} {
-    // Create buffer object.
     const vk::BufferCreateInfo buffer_ci = {
         .size = size_bytes,
         .usage = flags,
+        .sharingMode = vk::SharingMode::eConcurrent,
     };
     VmaAllocationInfo alloc_info{};
     buffer.Create(buffer_ci, usage, &alloc_info);
@@ -119,7 +119,7 @@ Buffer::Buffer(const Vulkan::Instance& instance_, Vulkan::Scheduler& scheduler_,
     VkMemoryPropertyFlags property_flags{};
     vmaGetAllocationMemoryProperties(instance->GetAllocator(), buffer.allocation, &property_flags);
     if (alloc_info.pMappedData) {
-        mapped_data = std::span<u8>{std::bit_cast<u8*>(alloc_info.pMappedData), size_bytes};
+        mapped_data = std::span{std::bit_cast<u8*>(alloc_info.pMappedData), size_bytes};
     }
     is_coherent = property_flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 }

@@ -41,15 +41,7 @@ void Swapchain::Create(u32 width_, u32 height_) {
 
     SetSurfaceProperties();
 
-    const std::array queue_family_indices = {
-        instance.GetGraphicsQueueFamilyIndex(),
-        instance.GetPresentQueueFamilyIndex(),
-    };
-
-    const bool exclusive = queue_family_indices[0] == queue_family_indices[1];
-    const u32 queue_family_indices_count = exclusive ? 1u : 2u;
-    const vk::SharingMode sharing_mode =
-        exclusive ? vk::SharingMode::eExclusive : vk::SharingMode::eConcurrent;
+    const auto queue_family_index = instance.GetGraphicsQueueFamilyIndex();
     const auto format = needs_hdr ? SURFACE_FORMAT_HDR : surface_format;
     const vk::SwapchainCreateInfoKHR swapchain_info = {
         .surface = surface,
@@ -60,9 +52,9 @@ void Swapchain::Create(u32 width_, u32 height_) {
         .imageArrayLayers = 1,
         .imageUsage = vk::ImageUsageFlagBits::eColorAttachment |
                       vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst,
-        .imageSharingMode = sharing_mode,
-        .queueFamilyIndexCount = queue_family_indices_count,
-        .pQueueFamilyIndices = queue_family_indices.data(),
+        .imageSharingMode = vk::SharingMode::eExclusive,
+        .queueFamilyIndexCount = 1U,
+        .pQueueFamilyIndices = &queue_family_index,
         .preTransform = transform,
         .compositeAlpha = composite_alpha,
         .presentMode = present_mode,
@@ -103,8 +95,8 @@ void Swapchain::SetHDR(bool hdr) {
 }
 
 bool Swapchain::AcquireNextImage() {
-    vk::Device device = instance.GetDevice();
-    vk::Result result =
+    const vk::Device device = instance.GetDevice();
+    const vk::Result result =
         device.acquireNextImageKHR(swapchain, std::numeric_limits<u64>::max(),
                                    image_acquired[frame_index], VK_NULL_HANDLE, &image_index);
 
@@ -118,17 +110,13 @@ bool Swapchain::AcquireNextImage() {
         needs_recreation = true;
         break;
     default:
-        LOG_CRITICAL(Render_Vulkan, "Swapchain acquire returned unknown result {}",
-                     vk::to_string(result));
-        UNREACHABLE();
-        break;
+        UNREACHABLE_MSG("Swapchain acquire returned unknown result {}", vk::to_string(result));
     }
 
     return !needs_recreation;
 }
 
 bool Swapchain::Present() {
-
     const vk::PresentInfoKHR present_info = {
         .waitSemaphoreCount = 1,
         .pWaitSemaphores = &present_ready[image_index],
@@ -137,7 +125,7 @@ bool Swapchain::Present() {
         .pImageIndices = &image_index,
     };
 
-    auto result = instance.GetPresentQueue().presentKHR(present_info);
+    auto result = instance.GetGraphicsAndPresentQueue().presentKHR(present_info);
     if (result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR) {
         needs_recreation = true;
     } else {

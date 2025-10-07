@@ -127,6 +127,10 @@ void Liverpool::Process(std::stop_token stoken) {
             if (task.done()) {
                 task.destroy();
 
+                if (rasterizer) {
+                    rasterizer->Flush();
+                }
+
                 std::scoped_lock lock{queue.m_access};
                 queue.submits.pop();
 
@@ -921,7 +925,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
                 rasterizer->CopyBuffer(dma_data->DstAddress<VAddr>(), dma_data->SrcAddress<VAddr>(),
                                        dma_data->NumBytes(), false, false);
             } else {
-                UNREACHABLE_MSG("WriteData src_sel = {}, dst_sel = {}",
+                UNREACHABLE_MSG("DmaData src_sel = {}, dst_sel = {}",
                                 u32(dma_data->src_sel.Value()), u32(dma_data->dst_sel.Value()));
             }
             break;

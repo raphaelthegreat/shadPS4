@@ -341,25 +341,63 @@ bool Instance::CreateDevice() {
         return false;
     }
 
-    bool graphics_queue_found = false;
+    bool graphics_family_found = false;
     for (std::size_t i = 0; i < family_properties.size(); i++) {
         const u32 index = static_cast<u32>(i);
-        if (family_properties[i].queueFlags & vk::QueueFlagBits::eGraphics) {
-            queue_family_index = index;
-            graphics_queue_found = true;
+        const auto flags = family_properties[i].queueFlags;
+        if (flags & vk::QueueFlagBits::eGraphics) {
+            graphics_family_found = true;
+            graphics_family_index = index;
         }
     }
 
-    if (!graphics_queue_found) {
+    if (!graphics_family_found) {
         LOG_CRITICAL(Render_Vulkan, "Unable to find graphics and/or present queues.");
         return false;
     }
 
+    // Try to find a dedicated transfer queue family
+    bool transfer_family_found = false;
+    for (std::size_t i = 0; i < family_properties.size(); i++) {
+        const u32 index = static_cast<u32>(i);
+        const auto flags = family_properties[i].queueFlags;
+        if ((flags & (vk::QueueFlagBits::eTransfer | vk::QueueFlagBits::eGraphics | vk::QueueFlagBits::eCompute)) == vk::QueueFlagBits::eTransfer) {
+            transfer_family_found = true;
+            transfer_family_index = index;
+            break;
+        }
+    }
+
+    // If no dedicated transfer queue family, check for a compute queue family that supports transfer
+    if (!transfer_family_found) {
+        for (std::size_t i = 0; i < family_properties.size(); i++) {
+            const u32 index = static_cast<u32>(i);
+            const auto flags = family_properties[i].queueFlags;
+            if ((flags & (vk::QueueFlagBits::eTransfer | vk::QueueFlagBits::eGraphics)) == vk::QueueFlagBits::eTransfer) {
+                transfer_family_found = true;
+                transfer_family_index = index;
+                break;
+            }
+        }
+    }
+
+    // If still not found, probably means the hardware doesn't support multiple queues at all
+    if (!transfer_family_found) {
+        transfer_family_index = graphics_family_index;
+    }
+
     static constexpr std::array queue_priorities = {1.0f};
-    const vk::DeviceQueueCreateInfo queue_info = {
-        .queueFamilyIndex = queue_family_index,
-        .queueCount = static_cast<u32>(queue_priorities.size()),
-        .pQueuePriorities = queue_priorities.data(),
+    const std::array queue_infos = {
+        vk::DeviceQueueCreateInfo{
+            .queueFamilyIndex = graphics_family_index,
+            .queueCount = static_cast<u32>(queue_priorities.size()),
+            .pQueuePriorities = queue_priorities.data(),
+        },
+        vk::DeviceQueueCreateInfo{
+            .queueFamilyIndex = transfer_family_index,
+            .queueCount = static_cast<u32>(queue_priorities.size()),
+            .pQueuePriorities = queue_priorities.data(),
+        },
     };
 
     const auto topology_list_restart_features =
@@ -369,8 +407,8 @@ bool Instance::CreateDevice() {
     const auto vk13_features = feature_chain.get<vk::PhysicalDeviceVulkan13Features>();
     vk::StructureChain device_chain = {
         vk::DeviceCreateInfo{
-            .queueCreateInfoCount = 1u,
-            .pQueueCreateInfos = &queue_info,
+            .queueCreateInfoCount = 1u + (graphics_family_index != transfer_family_index),
+            .pQueueCreateInfos = queue_infos.data(),
             .enabledExtensionCount = static_cast<u32>(enabled_extensions.size()),
             .ppEnabledExtensionNames = enabled_extensions.data(),
         },
@@ -572,9 +610,6 @@ bool Instance::CreateDevice() {
 
     VULKAN_HPP_DEFAULT_DISPATCHER.init(*device);
 
-    graphics_queue = device->getQueue(queue_family_index, 0);
-    present_queue = device->getQueue(queue_family_index, 0);
-
     if (calibrated_timestamps) {
         const auto [time_domains_result, time_domains] =
             physical_device.getCalibrateableTimeDomainsEXT();
@@ -607,6 +642,7 @@ bool Instance::CreateDevice() {
     }
 
     CreateAllocator();
+    CreateQueues(family_properties);
     return true;
 }
 
@@ -629,6 +665,24 @@ void Instance::CreateAllocator() {
     if (result != VK_SUCCESS) {
         UNREACHABLE_MSG("Failed to initialize VMA with error {}",
                         vk::to_string(vk::Result{result}));
+    }
+}
+
+void Instance::CreateQueues(std::span<const vk::QueueFamilyProperties> family_properties) {
+    graphics_queue = device->getQueue(graphics_family_index, 0);
+    if (graphics_family_index != transfer_family_index) {
+        num_transfer_queues = std::min(family_properties[transfer_family_index].queueCount, 4U);
+        for (u32 i = 0; i < num_transfer_queues; ++i) {
+            transfer_queues[i] = device->getQueue(transfer_family_index, i);
+        }
+    } else {
+        u32 num_queues = family_properties[graphics_family_index].queueCount;
+        if (num_queues != 1) {
+            num_transfer_queues = std::min(num_queues - 1, 4U);
+            for (u32 i = 1; i < num_transfer_queues; ++i) {
+                transfer_queues[i] = device->getQueue(graphics_family_index, i);
+            }
+        }
     }
 }
 

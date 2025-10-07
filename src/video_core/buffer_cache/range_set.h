@@ -291,7 +291,7 @@ public:
             return;
         }
         auto end_it = m_ranges_map.upper_bound(search_interval);
-        for (; it != end_it; it++) {
+        for (; it != end_it; ++it) {
             VAddr inter_addr_end = it->first.upper();
             VAddr inter_addr = it->first.lower();
             if (inter_addr_end > end_address) {

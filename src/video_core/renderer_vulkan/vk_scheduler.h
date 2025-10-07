@@ -340,7 +340,9 @@ struct DynamicState {
 
 class Scheduler {
 public:
-    explicit Scheduler(const Instance& instance);
+    explicit Scheduler(const Instance& instance,
+                       vk::Queue queue = VK_NULL_HANDLE,
+                       std::mutex* submit_mutex = nullptr);
     ~Scheduler();
 
     /// Sends the current execution context to the GPU
@@ -405,8 +407,6 @@ public:
         pending_ops.emplace(std::move(func), CurrentTick());
     }
 
-    static std::mutex submit_mutex;
-
 private:
     void AllocateWorkerCommandBuffers();
 
@@ -417,6 +417,8 @@ private:
     MasterSemaphore master_semaphore;
     CommandPool command_pool;
     DynamicState dynamic_state;
+    vk::Queue queue;
+    std::mutex* submit_mutex;
     vk::CommandBuffer current_cmdbuf;
     std::condition_variable_any event_cv;
     struct PendingOp {

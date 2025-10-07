@@ -15,8 +15,8 @@ ResourcePool::ResourcePool(MasterSemaphore* master_semaphore_, std::size_t grow_
 
 std::size_t ResourcePool::CommitResource() {
     u64 gpu_tick = master_semaphore->KnownGpuTick();
-    const auto search = [this, gpu_tick](std::size_t begin,
-                                         std::size_t end) -> std::optional<std::size_t> {
+    const auto search = [this, &gpu_tick](std::size_t begin,
+                                          std::size_t end) -> std::optional<std::size_t> {
         for (std::size_t iterator = begin; iterator < end; ++iterator) {
             if (gpu_tick >= ticks[iterator]) {
                 ticks[iterator] = master_semaphore->CurrentTick();

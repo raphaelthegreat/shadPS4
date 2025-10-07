@@ -9,14 +9,18 @@
 
 namespace Vulkan {
 
-std::mutex Scheduler::submit_mutex;
-
-Scheduler::Scheduler(const Instance& instance)
-    : instance{instance}, master_semaphore{instance}, command_pool{instance, &master_semaphore} {
+Scheduler::Scheduler(const Instance& instance, vk::Queue queue_, std::mutex* submit_mutex_)
+    : instance{instance}, master_semaphore{instance},
+      command_pool{instance, &master_semaphore}, queue{queue_}, submit_mutex{submit_mutex_} {
 #if TRACY_GPU_ENABLED
     profiler_scope = reinterpret_cast<tracy::VkCtxScope*>(std::malloc(sizeof(tracy::VkCtxScope)));
 #endif
     AllocateWorkerCommandBuffers();
+    ASSERT(queue && submit_mutex || (!queue && !submit_mutex));
+    if (!queue) {
+        queue = instance.GetGraphicsAndPresentQueue();
+        submit_mutex = &instance.GetGraphicsAndPresentLock();
+    }
 }
 
 Scheduler::~Scheduler() {
@@ -127,7 +131,7 @@ void Scheduler::AllocateWorkerCommandBuffers() {
 }
 
 void Scheduler::SubmitExecution(SubmitInfo& info) {
-    std::scoped_lock lk{submit_mutex};
+    std::scoped_lock lk{*submit_mutex};
     const u64 signal_value = master_semaphore.NextTick();
 
 #if TRACY_GPU_ENABLED
@@ -170,7 +174,7 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
     };
 
     ImGui::Core::TextureManager::Submit();
-    auto submit_result = instance.GetGraphicsQueue().submit(submit_info, info.fence);
+    auto submit_result = queue.submit(submit_info, info.fence);
     ASSERT_MSG(submit_result != vk::Result::eErrorDeviceLost, "Device lost during submit");
 
     master_semaphore.Refresh();
