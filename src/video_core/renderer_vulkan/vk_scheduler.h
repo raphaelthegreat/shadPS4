@@ -4,13 +4,12 @@
 #pragma once
 
 #include <condition_variable>
-#include <mutex>
 #include <queue>
 
 #include "common/unique_function.h"
 #include "video_core/amdgpu/regs_color.h"
 #include "video_core/amdgpu/regs_primitive.h"
-#include "video_core/renderer_vulkan/vk_master_semaphore.h"
+#include "video_core/renderer_vulkan/vk_logical_queue.h"
 #include "video_core/renderer_vulkan/vk_resource_pool.h"
 
 namespace tracy {
@@ -42,30 +41,6 @@ struct RenderState {
 
     bool operator==(const RenderState& other) const noexcept {
         return std::memcmp(this, &other, sizeof(RenderState)) == 0;
-    }
-};
-
-struct SubmitInfo {
-    std::array<vk::Semaphore, 3> wait_semas;
-    std::array<u64, 3> wait_ticks;
-    std::array<vk::Semaphore, 3> signal_semas;
-    std::array<u64, 3> signal_ticks;
-    vk::Fence fence;
-    u32 num_wait_semas;
-    u32 num_signal_semas;
-
-    void AddWait(vk::Semaphore semaphore, u64 tick = 1) {
-        wait_semas[num_wait_semas] = semaphore;
-        wait_ticks[num_wait_semas++] = tick;
-    }
-
-    void AddSignal(vk::Semaphore semaphore, u64 tick = 1) {
-        signal_semas[num_signal_semas] = semaphore;
-        signal_ticks[num_signal_semas++] = tick;
-    }
-
-    void AddSignal(vk::Fence fence) {
-        this->fence = fence;
     }
 };
 
@@ -345,11 +320,11 @@ public:
 
     /// Sends the current execution context to the GPU
     /// and increments the scheduler timeline semaphore.
-    void Flush(SubmitInfo& info);
+    u64 Flush(SubmitInfo& info);
 
     /// Sends the current execution context to the GPU
     /// and increments the scheduler timeline semaphore.
-    void Flush();
+    u64 Flush();
 
     /// Sends the current execution context to the GPU and waits for it to complete.
     void Finish();
@@ -383,21 +358,21 @@ public:
 
     /// Returns the current command buffer tick.
     [[nodiscard]] u64 CurrentTick() const noexcept {
-        return master_semaphore.CurrentTick();
+        return queue.CurrentTick();
     }
 
     /// Returns true when a tick has been triggered by the GPU.
     [[nodiscard]] bool IsFree(u64 tick) noexcept {
-        if (master_semaphore.IsFree(tick)) {
+        if (queue.IsFree(tick)) {
             return true;
         }
-        master_semaphore.Refresh();
-        return master_semaphore.IsFree(tick);
+        queue.Refresh();
+        return queue.IsFree(tick);
     }
 
     /// Returns the master timeline semaphore.
-    [[nodiscard]] MasterSemaphore* GetMasterSemaphore() noexcept {
-        return &master_semaphore;
+    [[nodiscard]] LogicalQueue& GetQueue() noexcept {
+        return queue;
     }
 
     /// Defers an operation until the gpu has reached the current cpu tick.
@@ -405,16 +380,14 @@ public:
         pending_ops.emplace(std::move(func), CurrentTick());
     }
 
-    static std::mutex submit_mutex;
-
 private:
     void AllocateWorkerCommandBuffers();
 
-    void SubmitExecution(SubmitInfo& info);
+    u64 SubmitExecution(SubmitInfo& info);
 
 private:
     const Instance& instance;
-    MasterSemaphore master_semaphore;
+    LogicalQueue queue;
     CommandPool command_pool;
     DynamicState dynamic_state;
     vk::CommandBuffer current_cmdbuf;

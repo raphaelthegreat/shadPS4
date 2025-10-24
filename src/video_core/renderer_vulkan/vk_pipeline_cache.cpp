@@ -220,7 +220,7 @@ const Shader::RuntimeInfo& PipelineCache::BuildRuntimeInfo(Stage stage, LogicalS
 PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
                              AmdGpu::Liverpool* liverpool_)
     : instance{instance_}, scheduler{scheduler_}, liverpool{liverpool_},
-      desc_heap{instance, scheduler.GetMasterSemaphore(), DescriptorHeapSizes} {
+      desc_heap{instance, scheduler.GetQueue(), DescriptorHeapSizes} {
     const auto& vk12_props = instance.GetVk12Properties();
     profile = Shader::Profile{
         .supported_spirv = SpirvVersion1_6,

@@ -72,12 +72,7 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
         .pBindings = bindings.data(),
     };
     const auto device = instance.GetDevice();
-    auto [descriptor_set_result, descriptor_set] =
-        device.createDescriptorSetLayoutUnique(desc_layout_ci);
-    ASSERT_MSG(descriptor_set_result == vk::Result::eSuccess,
-               "Failed to create compute descriptor set layout: {}",
-               vk::to_string(descriptor_set_result));
-    desc_layout = std::move(descriptor_set);
+    desc_layout = Check(device.createDescriptorSetLayoutUnique(desc_layout_ci));
 
     const vk::DescriptorSetLayout set_layout = *desc_layout;
     const vk::PipelineLayoutCreateInfo layout_info = {
@@ -86,21 +81,15 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
         .pushConstantRangeCount = 1U,
         .pPushConstantRanges = &push_constants,
     };
-    auto [layout_result, layout] = instance.GetDevice().createPipelineLayoutUnique(layout_info);
-    ASSERT_MSG(layout_result == vk::Result::eSuccess,
-               "Failed to create compute pipeline layout: {}", vk::to_string(layout_result));
-    pipeline_layout = std::move(layout);
+    pipeline_layout = Check(device.createPipelineLayoutUnique(layout_info));
     SetObjectName(device, *pipeline_layout, "Compute PipelineLayout {}", debug_str);
 
     const vk::ComputePipelineCreateInfo compute_pipeline_ci = {
         .stage = shader_ci,
         .layout = *pipeline_layout,
     };
-    auto [pipeline_result, pipe] =
-        instance.GetDevice().createComputePipelineUnique(pipeline_cache, compute_pipeline_ci);
-    ASSERT_MSG(pipeline_result == vk::Result::eSuccess, "Failed to create compute pipeline: {}",
-               vk::to_string(pipeline_result));
-    pipeline = std::move(pipe);
+    pipeline = Check<"create compute pipeline">(
+        device.createComputePipelineUnique(pipeline_cache, compute_pipeline_ci));
     SetObjectName(device, *pipeline, "Compute Pipeline {}", debug_str);
 }
 

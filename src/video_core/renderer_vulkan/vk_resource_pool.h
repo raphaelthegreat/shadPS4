@@ -14,7 +14,7 @@
 namespace Vulkan {
 
 class Instance;
-class MasterSemaphore;
+class LogicalQueue;
 
 /**
  * Handles a pool of resources protected by fences. Manages resource overflow allocating more
@@ -22,8 +22,7 @@ class MasterSemaphore;
  */
 class ResourcePool {
 public:
-    explicit ResourcePool() = default;
-    explicit ResourcePool(MasterSemaphore* master_semaphore, std::size_t grow_step);
+    explicit ResourcePool(LogicalQueue& queue, std::size_t grow_step);
     virtual ~ResourcePool() = default;
 
     ResourcePool& operator=(ResourcePool&&) noexcept = default;
@@ -43,7 +42,7 @@ private:
     std::size_t ManageOverflow();
 
 protected:
-    MasterSemaphore* master_semaphore{nullptr};
+    LogicalQueue* queue{nullptr};
     std::size_t grow_step = 0;     ///< Number of new resources created after an overflow
     std::size_t hint_iterator = 0; ///< Hint to where the next free resources is likely to be found
     std::vector<u64> ticks;        ///< Ticks for each resource
@@ -51,7 +50,7 @@ protected:
 
 class CommandPool final : public ResourcePool {
 public:
-    explicit CommandPool(const Instance& instance, MasterSemaphore* master_semaphore);
+    explicit CommandPool(const Instance& instance, LogicalQueue& queue);
     ~CommandPool() override;
 
     void Allocate(std::size_t begin, std::size_t end) override;
@@ -68,7 +67,7 @@ class DescriptorHeap final {
     static constexpr u32 DescriptorSetBatch = 32;
 
 public:
-    explicit DescriptorHeap(const Instance& instance, MasterSemaphore* master_semaphore,
+    explicit DescriptorHeap(const Instance& instance, LogicalQueue& queue,
                             std::span<const vk::DescriptorPoolSize> pool_sizes,
                             u32 descriptor_heap_count = 1024);
     ~DescriptorHeap();
@@ -80,7 +79,7 @@ private:
 
 private:
     vk::Device device;
-    MasterSemaphore* master_semaphore;
+    LogicalQueue& queue;
     u32 descriptor_heap_count;
     std::span<const vk::DescriptorPoolSize> pool_sizes;
     vk::DescriptorPool curr_pool;

@@ -5,21 +5,21 @@
 #include <optional>
 #include "common/assert.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
-#include "video_core/renderer_vulkan/vk_master_semaphore.h"
+#include "video_core/renderer_vulkan/vk_logical_queue.h"
 #include "video_core/renderer_vulkan/vk_resource_pool.h"
 
 namespace Vulkan {
 
-ResourcePool::ResourcePool(MasterSemaphore* master_semaphore_, std::size_t grow_step_)
-    : master_semaphore{master_semaphore_}, grow_step{grow_step_} {}
+ResourcePool::ResourcePool(LogicalQueue& queue_, std::size_t grow_step_)
+    : queue{&queue_}, grow_step{grow_step_} {}
 
 std::size_t ResourcePool::CommitResource() {
-    u64 gpu_tick = master_semaphore->KnownGpuTick();
-    const auto search = [this, gpu_tick](std::size_t begin,
-                                         std::size_t end) -> std::optional<std::size_t> {
+    u64 gpu_tick = queue->KnownGpuTick();
+    const auto search = [this, &gpu_tick](std::size_t begin,
+                                          std::size_t end) -> std::optional<std::size_t> {
         for (std::size_t iterator = begin; iterator < end; ++iterator) {
             if (gpu_tick >= ticks[iterator]) {
-                ticks[iterator] = master_semaphore->CurrentTick();
+                ticks[iterator] = queue->CurrentTick();
                 return iterator;
             }
         }
@@ -30,8 +30,8 @@ std::size_t ResourcePool::CommitResource() {
     auto found = search(hint_iterator, ticks.size());
     if (!found) {
         // Refresh semaphore to query updated results
-        master_semaphore->Refresh();
-        gpu_tick = master_semaphore->KnownGpuTick();
+        queue->Refresh();
+        gpu_tick = queue->KnownGpuTick();
         found = search(hint_iterator, ticks.size());
     }
     if (!found) {
@@ -41,7 +41,7 @@ std::size_t ResourcePool::CommitResource() {
             // Both searches failed, the pool is full; handle it.
             const std::size_t free_resource = ManageOverflow();
 
-            ticks[free_resource] = master_semaphore->CurrentTick();
+            ticks[free_resource] = queue->CurrentTick();
             found = free_resource;
         }
     }
@@ -60,7 +60,7 @@ std::size_t ResourcePool::ManageOverflow() {
 
 constexpr std::size_t COMMAND_BUFFER_POOL_SIZE = 4;
 
-CommandPool::CommandPool(const Instance& instance, MasterSemaphore* master_semaphore)
+CommandPool::CommandPool(const Instance& instance, LogicalQueue& master_semaphore)
     : ResourcePool{master_semaphore, COMMAND_BUFFER_POOL_SIZE}, instance{instance} {
     const vk::CommandPoolCreateInfo pool_create_info = {
         .flags = vk::CommandPoolCreateFlagBits::eTransient |
@@ -68,10 +68,7 @@ CommandPool::CommandPool(const Instance& instance, MasterSemaphore* master_semap
         .queueFamilyIndex = instance.GetGraphicsQueueFamilyIndex(),
     };
     const vk::Device device = instance.GetDevice();
-    auto [pool_result, pool] = device.createCommandPoolUnique(pool_create_info);
-    ASSERT_MSG(pool_result == vk::Result::eSuccess, "Failed to create command pool: {}",
-               vk::to_string(pool_result));
-    cmd_pool = std::move(pool);
+    cmd_pool = Check<"create command pool">(device.createCommandPoolUnique(pool_create_info));
     SetObjectName(device, *cmd_pool, "CommandPool");
 }
 
@@ -87,9 +84,7 @@ void CommandPool::Allocate(std::size_t begin, std::size_t end) {
     };
 
     const vk::Device device = instance.GetDevice();
-    const auto result =
-        device.allocateCommandBuffers(&buffer_alloc_info, cmd_buffers.data() + begin);
-    ASSERT(result == vk::Result::eSuccess);
+    Check(device.allocateCommandBuffers(&buffer_alloc_info, cmd_buffers.data() + begin));
 
     for (std::size_t i = begin; i < end; ++i) {
         SetObjectName(device, cmd_buffers[i], "CommandPool: Command Buffer {}", i);
@@ -101,18 +96,18 @@ vk::CommandBuffer CommandPool::Commit() {
     return cmd_buffers[index];
 }
 
-DescriptorHeap::DescriptorHeap(const Instance& instance, MasterSemaphore* master_semaphore_,
+DescriptorHeap::DescriptorHeap(const Instance& instance, LogicalQueue& queue_,
                                std::span<const vk::DescriptorPoolSize> pool_sizes_,
                                u32 descriptor_heap_count_)
-    : device{instance.GetDevice()}, master_semaphore{master_semaphore_},
-      descriptor_heap_count{descriptor_heap_count_}, pool_sizes{pool_sizes_} {
+    : device{instance.GetDevice()}, queue{queue_}, descriptor_heap_count{descriptor_heap_count_},
+      pool_sizes{pool_sizes_} {
     CreateDescriptorPool();
 }
 
 DescriptorHeap::~DescriptorHeap() {
     device.destroyDescriptorPool(curr_pool);
     for (const auto [pool, tick] : pending_pools) {
-        master_semaphore->Wait(tick);
+        queue.Wait(tick);
         device.destroyDescriptorPool(pool);
     }
 }
@@ -151,23 +146,18 @@ vk::DescriptorSet DescriptorHeap::Commit(vk::DescriptorSetLayout set_layout) {
     ASSERT_MSG(result == vk::Result::eErrorOutOfPoolMemory ||
                    result == vk::Result::eErrorFragmentedPool,
                "Unexpected error during descriptor set allocation: {}", vk::to_string(result));
-    pending_pools.emplace_back(curr_pool, master_semaphore->CurrentTick());
-    if (const auto [pool, tick] = pending_pools.front(); master_semaphore->IsFree(tick)) {
+    pending_pools.emplace_back(curr_pool, queue.CurrentTick());
+    if (const auto [pool, tick] = pending_pools.front(); queue.IsFree(tick)) {
         curr_pool = pool;
         pending_pools.pop_front();
-
-        const auto reset_result = device.resetDescriptorPool(curr_pool);
-        ASSERT_MSG(reset_result == vk::Result::eSuccess,
-                   "Unexpected error resetting descriptor pool: {}", vk::to_string(reset_result));
+        Check(device.resetDescriptorPool(curr_pool));
     } else {
         CreateDescriptorPool();
     }
 
     // Attempt to allocate again with fresh pool.
     alloc_info.descriptorPool = curr_pool;
-    result = device.allocateDescriptorSets(&alloc_info, desc_sets.data());
-    ASSERT_MSG(result == vk::Result::eSuccess,
-               "Unexpected error during descriptor set allocation {}", vk::to_string(result));
+    Check(device.allocateDescriptorSets(&alloc_info, desc_sets.data()));
 
     // We've changed pool so also reset descriptor batch cache.
     descriptor_sets.clear();
@@ -184,10 +174,7 @@ void DescriptorHeap::CreateDescriptorPool() {
         .poolSizeCount = static_cast<u32>(pool_sizes.size()),
         .pPoolSizes = pool_sizes.data(),
     };
-    auto [pool_result, pool] = device.createDescriptorPool(pool_info);
-    ASSERT_MSG(pool_result == vk::Result::eSuccess, "Failed to create descriptor pool: {}",
-               vk::to_string(pool_result));
-    curr_pool = pool;
+    curr_pool = Check<"create descriptor pool">(device.createDescriptorPool(pool_info));
 }
 
 } // namespace Vulkan

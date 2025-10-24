@@ -148,7 +148,7 @@ void TextureCache::DownloadedImagesThread(const std::stop_token& token) {
             downloaded_images_queue.pop();
         }
 
-        scheduler.GetMasterSemaphore()->Wait(image.tick);
+        scheduler.GetQueue().Wait(image.tick);
         memory->TryWriteBacking(std::bit_cast<u8*>(image.device_addr), image.download,
                                 image.download_size);
     }

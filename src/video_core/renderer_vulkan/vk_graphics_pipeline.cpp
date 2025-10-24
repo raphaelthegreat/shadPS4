@@ -44,7 +44,6 @@ GraphicsPipeline::GraphicsPipeline(
     std::span<const vk::ShaderModule> modules)
     : Pipeline{instance, scheduler, desc_heap, profile, pipeline_cache}, key{key_},
       fetch_shader{std::move(fetch_shader_)} {
-    const vk::Device device = instance.GetDevice();
     std::ranges::copy(infos, stages.begin());
     BuildDescSetLayout();
     const auto debug_str = GetDebugString();
@@ -55,6 +54,7 @@ GraphicsPipeline::GraphicsPipeline(
         .size = sizeof(Shader::PushData),
     };
 
+    const auto device = instance.GetDevice();
     const vk::DescriptorSetLayout set_layout = *desc_layout;
     const vk::PipelineLayoutCreateInfo layout_info = {
         .setLayoutCount = 1U,
@@ -62,10 +62,7 @@ GraphicsPipeline::GraphicsPipeline(
         .pushConstantRangeCount = 1,
         .pPushConstantRanges = &push_constants,
     };
-    auto [layout_result, layout] = instance.GetDevice().createPipelineLayoutUnique(layout_info);
-    ASSERT_MSG(layout_result == vk::Result::eSuccess,
-               "Failed to create graphics pipeline layout: {}", vk::to_string(layout_result));
-    pipeline_layout = std::move(layout);
+    pipeline_layout = Check(device.createPipelineLayoutUnique(layout_info));
     SetObjectName(device, *pipeline_layout, "Graphics PipelineLayout {}", debug_str);
 
     VertexInputs<vk::VertexInputAttributeDescription> vertex_attributes;
@@ -373,11 +370,8 @@ GraphicsPipeline::GraphicsPipeline(
         .layout = *pipeline_layout,
     };
 
-    auto [pipeline_result, pipe] =
-        device.createGraphicsPipelineUnique(pipeline_cache, pipeline_info);
-    ASSERT_MSG(pipeline_result == vk::Result::eSuccess, "Failed to create graphics pipeline: {}",
-               vk::to_string(pipeline_result));
-    pipeline = std::move(pipe);
+    pipeline = Check<"create graphics pipeline">(
+        device.createGraphicsPipelineUnique(pipeline_cache, pipeline_info));
     SetObjectName(device, *pipeline, "Graphics Pipeline {}", debug_str);
 }
 
@@ -481,11 +475,7 @@ void GraphicsPipeline::BuildDescSetLayout() {
         .bindingCount = static_cast<u32>(bindings.size()),
         .pBindings = bindings.data(),
     };
-    auto [layout_result, layout] =
-        instance.GetDevice().createDescriptorSetLayoutUnique(desc_layout_ci);
-    ASSERT_MSG(layout_result == vk::Result::eSuccess,
-               "Failed to create graphics descriptor set layout: {}", vk::to_string(layout_result));
-    desc_layout = std::move(layout);
+    desc_layout = Check(instance.GetDevice().createDescriptorSetLayoutUnique(desc_layout_ci));
 }
 
 } // namespace Vulkan

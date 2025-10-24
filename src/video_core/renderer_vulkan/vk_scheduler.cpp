@@ -3,16 +3,15 @@
 
 #include "common/assert.h"
 #include "common/debug.h"
-#include "imgui/renderer/texture_manager.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 
 namespace Vulkan {
 
-std::mutex Scheduler::submit_mutex;
-
-Scheduler::Scheduler(const Instance& instance)
-    : instance{instance}, master_semaphore{instance}, command_pool{instance, &master_semaphore} {
+Scheduler::Scheduler(const Instance& instance_)
+    : instance{instance_},
+      queue{instance_, instance_.GetGraphicsQueue(), instance_.GetGraphicsQueueFamilyIndex()},
+      command_pool{instance, queue} {
 #if TRACY_GPU_ENABLED
     profiler_scope = reinterpret_cast<tracy::VkCtxScope*>(std::malloc(sizeof(tracy::VkCtxScope)));
 #endif
@@ -59,14 +58,14 @@ void Scheduler::EndRendering() {
     current_cmdbuf.endRendering();
 }
 
-void Scheduler::Flush(SubmitInfo& info) {
+u64 Scheduler::Flush(SubmitInfo& info) {
     // When flushing, we only send data to the driver; no waiting is necessary.
-    SubmitExecution(info);
+    return SubmitExecution(info);
 }
 
-void Scheduler::Flush() {
+u64 Scheduler::Flush() {
     SubmitInfo info{};
-    Flush(info);
+    return Flush(info);
 }
 
 void Scheduler::Finish() {
@@ -78,12 +77,12 @@ void Scheduler::Finish() {
 }
 
 void Scheduler::Wait(u64 tick) {
-    if (tick >= master_semaphore.CurrentTick()) {
+    if (tick >= queue.CurrentTick()) {
         // Make sure we are not waiting for the current tick without signalling
         SubmitInfo info{};
         Flush(info);
     }
-    master_semaphore.Wait(tick);
+    queue.Wait(tick);
 
     // CAUTION: This can introduce unexpected variation in the wait time.
     // We don't currently sync the GPU, and some games are very sensitive to this.
@@ -96,8 +95,8 @@ void Scheduler::Wait(u64 tick) {
 }
 
 void Scheduler::PopPendingOperations() {
-    master_semaphore.Refresh();
-    while (!pending_ops.empty() && master_semaphore.IsFree(pending_ops.front().gpu_tick)) {
+    queue.Refresh();
+    while (!pending_ops.empty() && queue.IsFree(pending_ops.front().gpu_tick)) {
         pending_ops.front().callback();
         pending_ops.pop();
     }
@@ -126,10 +125,7 @@ void Scheduler::AllocateWorkerCommandBuffers() {
 #endif
 }
 
-void Scheduler::SubmitExecution(SubmitInfo& info) {
-    std::scoped_lock lk{submit_mutex};
-    const u64 signal_value = master_semaphore.NextTick();
-
+u64 Scheduler::SubmitExecution(SubmitInfo& info) {
 #if TRACY_GPU_ENABLED
     auto* profiler_ctx = instance.GetProfilerContext();
     if (profiler_ctx) {
@@ -139,45 +135,10 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
 #endif
 
     EndRendering();
-    auto end_result = current_cmdbuf.end();
-    ASSERT_MSG(end_result == vk::Result::eSuccess, "Failed to end command buffer: {}",
-               vk::to_string(end_result));
-
-    const vk::Semaphore timeline = master_semaphore.Handle();
-    info.AddSignal(timeline, signal_value);
-
-    static constexpr std::array<vk::PipelineStageFlags, 2> wait_stage_masks = {
-        vk::PipelineStageFlagBits::eAllCommands,
-        vk::PipelineStageFlagBits::eColorAttachmentOutput,
-    };
-
-    const vk::TimelineSemaphoreSubmitInfo timeline_si = {
-        .waitSemaphoreValueCount = info.num_wait_semas,
-        .pWaitSemaphoreValues = info.wait_ticks.data(),
-        .signalSemaphoreValueCount = info.num_signal_semas,
-        .pSignalSemaphoreValues = info.signal_ticks.data(),
-    };
-
-    const vk::SubmitInfo submit_info = {
-        .pNext = &timeline_si,
-        .waitSemaphoreCount = info.num_wait_semas,
-        .pWaitSemaphores = info.wait_semas.data(),
-        .pWaitDstStageMask = wait_stage_masks.data(),
-        .commandBufferCount = 1U,
-        .pCommandBuffers = &current_cmdbuf,
-        .signalSemaphoreCount = info.num_signal_semas,
-        .pSignalSemaphores = info.signal_semas.data(),
-    };
-
-    ImGui::Core::TextureManager::Submit();
-    auto submit_result = instance.GetGraphicsQueue().submit(submit_info, info.fence);
-    ASSERT_MSG(submit_result != vk::Result::eErrorDeviceLost, "Device lost during submit");
-
-    master_semaphore.Refresh();
+    const u64 signal_value = queue.Submit(info, current_cmdbuf);
     AllocateWorkerCommandBuffers();
-
-    // Apply pending operations
     PopPendingOperations();
+    return signal_value;
 }
 
 void DynamicState::Commit(const Instance& instance, const vk::CommandBuffer& cmdbuf) {

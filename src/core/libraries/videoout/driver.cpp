@@ -209,7 +209,7 @@ void VideoOutDriver::Flip(const Request& req) {
 }
 
 void VideoOutDriver::DrawBlankFrame() {
-    const auto empty_frame = presenter->PrepareBlankFrame(false);
+    const auto empty_frame = presenter->PrepareBlankFrame();
     presenter->Present(empty_frame);
 }
 
@@ -247,10 +247,8 @@ bool VideoOutDriver::SubmitFlip(VideoOutPort* port, s32 index, s64 flip_arg,
 }
 
 void VideoOutDriver::SubmitFlipInternal(VideoOutPort* port, s32 index, s64 flip_arg, bool is_eop) {
-    Vulkan::Frame* frame;
-    if (index == -1) {
-        frame = presenter->PrepareBlankFrame(false);
-    } else {
+    Vulkan::Frame* frame{};
+    if (index != -1) {
         const auto& buffer = port->buffer_slots[index];
         const auto& group = port->groups[buffer.group_index];
         frame = presenter->PrepareFrame(group, buffer.address_left);
@@ -299,7 +297,7 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
             const auto request = receive_request();
             if (!request) {
                 if (timer.GetTotalWait().count() < 0) { // Dont draw too fast
-                    if (!main_port.is_open) {
+                    if (!main_port.is_open || request.index == -1) {
                         DrawBlankFrame();
                     } else if (ImGui::Core::MustKeepDrawing()) {
                         DrawLastFrame();

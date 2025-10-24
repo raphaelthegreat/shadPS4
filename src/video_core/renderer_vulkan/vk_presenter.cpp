@@ -106,21 +106,37 @@ Presenter::Presenter(Frontend::WindowSDL& window_, AmdGpu::Liverpool* liverpool_
     : window{window_}, liverpool{liverpool_},
       instance{window, Config::getGpuId(), Config::vkValidationEnabled(),
                Config::getVkCrashDiagnosticEnabled()},
-      draw_scheduler{instance}, present_scheduler{instance}, flip_scheduler{instance},
-      swapchain{instance, window},
+      present_queue{instance, instance.GetPresentQueue(), instance.GetPresentQueueFamilyIndex()},
+      draw_scheduler{instance}, swapchain{instance, window},
       rasterizer{std::make_unique<Rasterizer>(instance, draw_scheduler, liverpool)},
       texture_cache{rasterizer->GetTextureCache()} {
     const u32 num_images = swapchain.GetImageCount();
     const vk::Device device = instance.GetDevice();
 
-    // Create presentation frames.
+    const vk::CommandPoolCreateInfo pool_create_info = {
+        .flags = vk::CommandPoolCreateFlagBits::eTransient |
+                 vk::CommandPoolCreateFlagBits::eResetCommandBuffer,
+        .queueFamilyIndex = instance.GetGraphicsQueueFamilyIndex(),
+    };
+    present_command_pool =
+        Check<"create present command pool">(device.createCommandPool(pool_create_info));
+
+    const vk::CommandBufferAllocateInfo buffer_alloc_info = {
+        .commandPool = present_command_pool,
+        .level = vk::CommandBufferLevel::ePrimary,
+        .commandBufferCount = num_images * 2,
+    };
+    const auto cmd_buffers =
+        Check<"allocate present command buffers">(device.allocateCommandBuffers(buffer_alloc_info));
+
     present_frames.resize(num_images);
     for (u32 i = 0; i < num_images; i++) {
         Frame& frame = present_frames[i];
         frame.id = i;
-        auto fence = Check<"create present done fence">(
-            device.createFence({.flags = vk::FenceCreateFlagBits::eSignaled}));
-        frame.present_done = fence;
+        frame.present_done =
+            Check(device.createFence({.flags = vk::FenceCreateFlagBits::eSignaled}));
+        frame.render_cmdbuf = cmd_buffers[2 * i];
+        frame.present_cmdbuf = cmd_buffers[2 * i + 1];
         free_queue.push(&frame);
     }
 
@@ -138,6 +154,7 @@ Presenter::~Presenter() {
     ImGui::Layer::RemoveLayer(Common::Singleton<Core::Devtools::Layer>::Instance());
     draw_scheduler.Finish();
     const vk::Device device = instance.GetDevice();
+    device.destroyCommandPool(present_command_pool);
     for (auto& frame : present_frames) {
         vmaDestroyImage(instance.GetAllocator(), frame.image, frame.allocation);
         device.destroyImageView(frame.image_view);
@@ -224,9 +241,8 @@ Frame* Presenter::PrepareLastFrame() {
     }
 
     Frame* frame = last_submit_frame;
-
     while (true) {
-        vk::Result result = instance.GetDevice().waitForFences(frame->present_done, false,
+        const auto result = instance.GetDevice().waitForFences(frame->present_done, false,
                                                                std::numeric_limits<u64>::max());
         if (result == vk::Result::eSuccess) {
             break;
@@ -237,39 +253,6 @@ Frame* Presenter::PrepareLastFrame() {
         ASSERT_MSG(result != vk::Result::eErrorDeviceLost,
                    "Device lost during waiting for a frame");
     }
-
-    auto& scheduler = flip_scheduler;
-    scheduler.EndRendering();
-    const auto cmdbuf = scheduler.CommandBuffer();
-
-    const auto frame_subresources = vk::ImageSubresourceRange{
-        .aspectMask = vk::ImageAspectFlagBits::eColor,
-        .baseMipLevel = 0,
-        .levelCount = 1,
-        .baseArrayLayer = 0,
-        .layerCount = VK_REMAINING_ARRAY_LAYERS,
-    };
-
-    const auto pre_barrier =
-        vk::ImageMemoryBarrier2{.srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-                                .srcAccessMask = vk::AccessFlagBits2::eColorAttachmentRead,
-                                .dstStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput,
-                                .dstAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite,
-                                .oldLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-                                .newLayout = vk::ImageLayout::eGeneral,
-                                .image = frame->image,
-                                .subresourceRange{frame_subresources}};
-
-    cmdbuf.pipelineBarrier2(vk::DependencyInfo{
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &pre_barrier,
-    });
-
-    // Flush frame creation commands.
-    frame->ready_semaphore = scheduler.GetMasterSemaphore()->Handle();
-    frame->ready_tick = scheduler.CurrentTick();
-    SubmitInfo info{};
-    scheduler.Flush(info);
     return frame;
 }
 
@@ -344,21 +327,17 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
     DebugState.output_resolution = {frame->width, frame->height};
 
     // Flush frame creation commands.
-    frame->ready_semaphore = draw_scheduler.GetMasterSemaphore()->Handle();
-    frame->ready_tick = draw_scheduler.CurrentTick();
-    SubmitInfo info{};
-    draw_scheduler.Flush(info);
+    frame->ready_semaphore = draw_scheduler.GetQueue().Semaphore();
+    frame->ready_tick = draw_scheduler.Flush();
     return frame;
 }
 
-Frame* Presenter::PrepareBlankFrame(bool present_thread) {
+Frame* Presenter::PrepareBlankFrame() {
     // Request a free presentation frame.
     Frame* frame = GetRenderFrame();
 
-    auto& scheduler = present_thread ? present_scheduler : draw_scheduler;
-    scheduler.EndRendering();
-
-    const auto cmdbuf = scheduler.CommandBuffer();
+    const auto cmdbuf = frame->render_cmdbuf;
+    Check(cmdbuf.begin({.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit}));
 
     constexpr vk::ImageSubresourceRange simple_subresource = {
         .aspectMask = vk::ImageAspectFlagBits::eColor,
@@ -417,15 +396,13 @@ Frame* Presenter::PrepareBlankFrame(bool present_thread) {
     });
 
     // Flush frame creation commands.
-    frame->ready_semaphore = scheduler.GetMasterSemaphore()->Handle();
-    frame->ready_tick = scheduler.CurrentTick();
     SubmitInfo info{};
-    scheduler.Flush(info);
+    frame->ready_semaphore = present_queue.Semaphore();
+    frame->ready_tick = present_queue.Submit(info, cmdbuf);
     return frame;
 }
 
 void Presenter::Present(Frame* frame, bool is_reusing_frame) {
-    // Free the frame for reuse
     const auto free_frame = [&] {
         if (!is_reusing_frame) {
             last_submit_frame = frame;
@@ -453,30 +430,20 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame) {
     // Reset fence for queue submission. Do it here instead of GetRenderFrame() because we may
     // skip frame because of slow swapchain recreation. If a frame skip occurs, we skip signal
     // the frame's present fence and future GetRenderFrame() call will hang waiting for this frame.
-    const auto reset_result = instance.GetDevice().resetFences(frame->present_done);
-    ASSERT_MSG(reset_result == vk::Result::eSuccess,
-               "Unexpected error resetting present done fence: {}", vk::to_string(reset_result));
+    Check<"reset present done fence">(instance.GetDevice().resetFences(frame->present_done));
 
-    ImGuiID dockId = ImGui::Core::NewFrame(is_reusing_frame);
-
+    ImGuiID dock_id = ImGui::Core::NewFrame(is_reusing_frame);
     const vk::Image swapchain_image = swapchain.Image();
     const vk::ImageView swapchain_image_view = swapchain.ImageView();
 
-    auto& scheduler = present_scheduler;
-    const auto cmdbuf = scheduler.CommandBuffer();
-
-    if (Config::getVkHostMarkersEnabled()) {
-        cmdbuf.beginDebugUtilsLabelEXT(vk::DebugUtilsLabelEXT{
-            .pLabelName = "Present",
-        });
-    }
+    const auto cmdbuf = frame->present_cmdbuf;
+    Check(cmdbuf.begin({.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit}));
 
     {
         auto* profiler_ctx = instance.GetProfilerContext();
         TracyVkNamedZoneC(profiler_ctx, renderer_gpu_zone, cmdbuf, "Host frame",
                           MarkersPalette::GpuMarkerColor, profiler_ctx != nullptr);
 
-        const vk::Extent2D extent = swapchain.GetExtent();
         const std::array pre_barriers{
             vk::ImageMemoryBarrier{
                 .srcAccessMask = vk::AccessFlagBits::eNone,
@@ -533,12 +500,13 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame) {
                                vk::PipelineStageFlagBits::eColorAttachmentOutput,
                                vk::DependencyFlagBits::eByRegion, {}, {}, pre_barriers);
 
-        { // Draw the game
+        {
+            // Draw the game
             ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{0.0f});
             ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
             ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
             ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.0f, 0.0f, 0.0f, 1.0f));
-            ImGui::SetNextWindowDockID(dockId, ImGuiCond_Once);
+            ImGui::SetNextWindowDockID(dock_id, ImGuiCond_Once);
             ImGui::Begin("Display##game_display", nullptr, ImGuiWindowFlags_NoNav);
 
             auto game_texture = frame->imgui_texture;
@@ -593,20 +561,16 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame) {
         }
     }
 
-    if (Config::getVkHostMarkersEnabled()) {
-        cmdbuf.endDebugUtilsLabelEXT();
-    }
-
     // Flush vulkan commands.
     SubmitInfo info{};
     info.AddWait(swapchain.GetImageAcquiredSemaphore());
     info.AddWait(frame->ready_semaphore, frame->ready_tick);
     info.AddSignal(swapchain.GetPresentReadySemaphore());
     info.AddSignal(frame->present_done);
-    scheduler.Flush(info);
+    present_queue.Submit(info, cmdbuf);
 
     // Present to swapchain.
-    std::scoped_lock submit_lock{Scheduler::submit_mutex};
+    std::scoped_lock submit_lock{LogicalQueue::submit_mutex};
     if (!swapchain.Present()) {
         swapchain.Recreate(window.GetWidth(), window.GetHeight());
     }
@@ -623,7 +587,6 @@ Frame* Presenter::GetRenderFrame() {
     {
         std::unique_lock lock{free_mutex};
         free_cv.wait(lock, [this] { return !free_queue.empty(); });
-        LOG_DEBUG(Render_Vulkan, "Got render frame, remaining {}", free_queue.size() - 1);
 
         // Take the frame from the queue
         frame = free_queue.front();

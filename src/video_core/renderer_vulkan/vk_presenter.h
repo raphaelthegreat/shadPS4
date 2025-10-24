@@ -32,17 +32,13 @@ struct Frame {
     vk::ImageView image_view;
     vk::Fence present_done;
     vk::Semaphore ready_semaphore;
-    u64 ready_tick;
-    bool is_hdr{false};
+    vk::CommandBuffer render_cmdbuf;
+    vk::CommandBuffer present_cmdbuf;
+    u64 ready_tick{};
+    bool is_hdr{};
     u8 id{};
 
     ImTextureID imgui_texture;
-};
-
-enum SchedulerType {
-    Draw,
-    Present,
-    CpuFlip,
 };
 
 class Rasterizer;
@@ -95,10 +91,11 @@ public:
     Frame* PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& attribute,
                         VAddr cpu_address);
 
-    Frame* PrepareBlankFrame(bool present_thread);
+    Frame* PrepareBlankFrame();
+
+    Frame* PrepareLastFrame();
 
     void Present(Frame* frame, bool is_reusing_frame = false);
-    Frame* PrepareLastFrame();
 
 private:
     Frame* GetRenderFrame();
@@ -119,9 +116,9 @@ private:
     Frontend::WindowSDL& window;
     AmdGpu::Liverpool* liverpool;
     Instance instance;
+    vk::CommandPool present_command_pool;
+    LogicalQueue present_queue;
     Scheduler draw_scheduler;
-    Scheduler present_scheduler;
-    Scheduler flip_scheduler;
     Swapchain swapchain;
     std::unique_ptr<Rasterizer> rasterizer;
     VideoCore::TextureCache& texture_cache;
