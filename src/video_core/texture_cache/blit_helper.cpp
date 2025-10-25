@@ -89,6 +89,13 @@ void BlitHelper::ReinterpretColorAsMsDepth(u32 width, u32 height, u32 num_sample
         device.destroyImageView(depth_view);
     });
 
+    const MsPipelineKey key{num_samples, dst_pixel_format, false};
+    auto it = std::ranges::find(color_to_ms_depth_pl, key, &MsPipeline::first);
+    if (it == color_to_ms_depth_pl.end()) {
+        CreateColorToMSDepthPipeline(key);
+        it = --color_to_ms_depth_pl.end();
+    }
+
     Vulkan::RenderState state{};
     state.has_depth = true;
     state.width = width;
@@ -102,48 +109,44 @@ void BlitHelper::ReinterpretColorAsMsDepth(u32 width, u32 height, u32 num_sample
     };
     scheduler.BeginRendering(state);
 
-    const auto cmdbuf = scheduler.CommandBuffer();
-    const vk::DescriptorImageInfo image_info = {
-        .sampler = VK_NULL_HANDLE,
-        .imageView = color_view,
-        .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-    };
-    const vk::WriteDescriptorSet texture_write = {
-        .dstSet = VK_NULL_HANDLE,
-        .dstBinding = 0U,
-        .dstArrayElement = 0U,
-        .descriptorCount = 1U,
-        .descriptorType = vk::DescriptorType::eSampledImage,
-        .pImageInfo = &image_info,
-    };
-    cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eGraphics, *single_texture_pl_layout, 0U,
-                                texture_write);
+    scheduler.Record(
+        [this, width, height, color_view, pipeline = *it->second](vk::CommandBuffer cmdbuf) {
+            const vk::DescriptorImageInfo image_info = {
+                .sampler = VK_NULL_HANDLE,
+                .imageView = color_view,
+                .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+            };
+            const vk::WriteDescriptorSet texture_write = {
+                .dstSet = VK_NULL_HANDLE,
+                .dstBinding = 0U,
+                .dstArrayElement = 0U,
+                .descriptorCount = 1U,
+                .descriptorType = vk::DescriptorType::eSampledImage,
+                .pImageInfo = &image_info,
+            };
+            cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eGraphics, *single_texture_pl_layout,
+                                        0U, texture_write);
 
-    const MsPipelineKey key{num_samples, dst_pixel_format, false};
-    auto it = std::ranges::find(color_to_ms_depth_pl, key, &MsPipeline::first);
-    if (it == color_to_ms_depth_pl.end()) {
-        CreateColorToMSDepthPipeline(key);
-        it = --color_to_ms_depth_pl.end();
-    }
-    cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, *it->second);
+            cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
 
-    const vk::Viewport viewport = {
-        .x = 0,
-        .y = 0,
-        .width = float(state.width),
-        .height = float(state.height),
-        .minDepth = 0.f,
-        .maxDepth = 1.f,
-    };
-    cmdbuf.setViewportWithCount(viewport);
+            const vk::Viewport viewport = {
+                .x = 0,
+                .y = 0,
+                .width = float(width),
+                .height = float(height),
+                .minDepth = 0.f,
+                .maxDepth = 1.f,
+            };
+            cmdbuf.setViewportWithCount(viewport);
 
-    const vk::Rect2D scissor = {
-        .offset = {0, 0},
-        .extent = {state.width, state.height},
-    };
-    cmdbuf.setScissorWithCount(scissor);
+            const vk::Rect2D scissor = {
+                .offset = {0, 0},
+                .extent = {width, height},
+            };
+            cmdbuf.setScissorWithCount(scissor);
 
-    cmdbuf.draw(3, 1, 0, 0);
+            cmdbuf.draw(3, 1, 0, 0);
+        });
 
     scheduler.EndRendering();
     scheduler.GetDynamicState().Invalidate();
@@ -193,6 +196,13 @@ void BlitHelper::CopyBetweenMsImages(u32 width, u32 height, u32 num_samples,
         device.destroyImageView(dst_view);
     });
 
+    const MsPipelineKey key{num_samples, pixel_format, src_msaa};
+    auto it = std::ranges::find(ms_image_copy_pl, key, &MsPipeline::first);
+    if (it == ms_image_copy_pl.end()) {
+        CreateMsCopyPipeline(key);
+        it = --ms_image_copy_pl.end();
+    }
+
     Vulkan::RenderState state{};
     state.width = width;
     state.height = height;
@@ -204,48 +214,44 @@ void BlitHelper::CopyBetweenMsImages(u32 width, u32 height, u32 num_samples,
     };
     scheduler.BeginRendering(state);
 
-    const auto cmdbuf = scheduler.CommandBuffer();
-    const vk::DescriptorImageInfo image_info = {
-        .sampler = VK_NULL_HANDLE,
-        .imageView = src_view,
-        .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-    };
-    const vk::WriteDescriptorSet texture_write = {
-        .dstSet = VK_NULL_HANDLE,
-        .dstBinding = 0U,
-        .dstArrayElement = 0U,
-        .descriptorCount = 1U,
-        .descriptorType = vk::DescriptorType::eSampledImage,
-        .pImageInfo = &image_info,
-    };
-    cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eGraphics, *single_texture_pl_layout, 0U,
-                                texture_write);
+    scheduler.Record(
+        [this, width, height, src_view, pipeline = *it->second](vk::CommandBuffer cmdbuf) {
+            const vk::DescriptorImageInfo image_info = {
+                .sampler = VK_NULL_HANDLE,
+                .imageView = src_view,
+                .imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+            };
+            const vk::WriteDescriptorSet texture_write = {
+                .dstSet = VK_NULL_HANDLE,
+                .dstBinding = 0U,
+                .dstArrayElement = 0U,
+                .descriptorCount = 1U,
+                .descriptorType = vk::DescriptorType::eSampledImage,
+                .pImageInfo = &image_info,
+            };
+            cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eGraphics, *single_texture_pl_layout,
+                                        0U, texture_write);
 
-    const MsPipelineKey key{num_samples, pixel_format, src_msaa};
-    auto it = std::ranges::find(ms_image_copy_pl, key, &MsPipeline::first);
-    if (it == ms_image_copy_pl.end()) {
-        CreateMsCopyPipeline(key);
-        it = --ms_image_copy_pl.end();
-    }
-    cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, *it->second);
+            cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline);
 
-    const vk::Viewport viewport = {
-        .x = 0,
-        .y = 0,
-        .width = float(state.width),
-        .height = float(state.height),
-        .minDepth = 0.f,
-        .maxDepth = 1.f,
-    };
-    cmdbuf.setViewportWithCount(viewport);
+            const vk::Viewport viewport = {
+                .x = 0,
+                .y = 0,
+                .width = float(width),
+                .height = float(height),
+                .minDepth = 0.f,
+                .maxDepth = 1.f,
+            };
+            cmdbuf.setViewportWithCount(viewport);
 
-    const vk::Rect2D scissor = {
-        .offset = {0, 0},
-        .extent = {state.width, state.height},
-    };
-    cmdbuf.setScissorWithCount(scissor);
+            const vk::Rect2D scissor = {
+                .offset = {0, 0},
+                .extent = {width, height},
+            };
+            cmdbuf.setScissorWithCount(scissor);
 
-    cmdbuf.draw(3, 1, 0, 0);
+            cmdbuf.draw(3, 1, 0, 0);
+        });
 
     scheduler.EndRendering();
     scheduler.GetDynamicState().Invalidate();

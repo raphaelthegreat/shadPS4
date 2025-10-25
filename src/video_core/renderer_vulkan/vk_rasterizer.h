@@ -49,11 +49,10 @@ public:
     void DispatchDirect();
     void DispatchIndirect(VAddr address, u32 offset, u32 size);
 
-    void ScopeMarkerBegin(const std::string_view& str, bool from_guest = false);
+    void ScopeMarkerBegin(std::string_view str, bool from_guest = false);
     void ScopeMarkerEnd(bool from_guest = false);
-    void ScopedMarkerInsert(const std::string_view& str, bool from_guest = false);
-    void ScopedMarkerInsertColor(const std::string_view& str, const u32 color,
-                                 bool from_guest = false);
+    void ScopedMarkerInsert(std::string_view str, bool from_guest = false);
+    void ScopedMarkerInsertColor(std::string_view str, const u32 color, bool from_guest = false);
 
     void InlineData(VAddr address, const void* value, u32 num_bytes, bool is_gds);
     void CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, bool src_gds);
@@ -64,7 +63,6 @@ public:
     void MapMemory(VAddr addr, u64 size);
     void UnmapMemory(VAddr addr, u64 size);
 
-    void CpSync();
     u64 Flush();
     void Finish();
     void OnSubmit();
@@ -130,8 +128,6 @@ private:
     using RenderTargetInfo = std::pair<VideoCore::ImageId, VideoCore::TextureCache::ImageDesc>;
     std::array<RenderTargetInfo, AmdGpu::NUM_COLOR_BUFFERS> cb_descs;
     std::pair<VideoCore::ImageId, VideoCore::TextureCache::ImageDesc> db_desc;
-    boost::container::static_vector<vk::DescriptorImageInfo, Shader::NUM_IMAGES> image_infos;
-    boost::container::static_vector<vk::DescriptorBufferInfo, Shader::NUM_BUFFERS> buffer_infos;
     boost::container::static_vector<VideoCore::ImageId, Shader::NUM_IMAGES> bound_images;
 
     Pipeline::DescriptorWrites set_writes;

@@ -4,10 +4,12 @@
 #pragma once
 
 #include "shader_recompiler/profile.h"
+#include "shader_recompiler/resource.h"
 #include "shader_recompiler/runtime_info.h"
 #include "video_core/renderer_vulkan/vk_common.h"
 
-#include <boost/container/small_vector.hpp>
+#include <deque>
+#include <vector>
 
 namespace Shader {
 struct Info;
@@ -57,8 +59,23 @@ public:
         return is_compute;
     }
 
-    using DescriptorWrites = boost::container::small_vector<vk::WriteDescriptorSet, 16>;
-    using BufferBarriers = boost::container::small_vector<vk::BufferMemoryBarrier2, 16>;
+    struct DescriptorWrites {
+        std::deque<vk::DescriptorImageInfo> image_infos;
+        std::deque<vk::DescriptorBufferInfo> buffer_infos;
+        std::vector<vk::WriteDescriptorSet> writes;
+
+        void Reset() {
+            writes.clear();
+            image_infos.clear();
+            buffer_infos.clear();
+        }
+
+        bool Empty() const {
+            return writes.empty();
+        }
+    };
+
+    using BufferBarriers = std::vector<vk::BufferMemoryBarrier2>;
 
     void BindResources(DescriptorWrites& set_writes, const BufferBarriers& buffer_barriers,
                        const Shader::PushData& push_data) const;

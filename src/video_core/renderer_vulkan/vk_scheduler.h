@@ -4,21 +4,21 @@
 #pragma once
 
 #include <condition_variable>
+#include <mutex>
+#include <thread>
 #include <queue>
 
+#include "common/alignment.h"
 #include "common/unique_function.h"
 #include "video_core/amdgpu/regs_color.h"
 #include "video_core/amdgpu/regs_primitive.h"
 #include "video_core/renderer_vulkan/vk_logical_queue.h"
 #include "video_core/renderer_vulkan/vk_resource_pool.h"
 
-namespace tracy {
-class VkCtxScope;
-}
-
 namespace Vulkan {
 
 class Instance;
+class Scheduler;
 
 struct RenderState {
     std::array<vk::RenderingAttachmentInfo, 8> color_attachments;
@@ -131,7 +131,7 @@ struct DynamicState {
     bool feedback_loop_enabled{};
 
     /// Commits the dynamic state to the provided command buffer.
-    void Commit(const Instance& instance, const vk::CommandBuffer& cmdbuf);
+    void Commit(const Instance& instance, Scheduler& scheduler);
 
     /// Invalidates all dynamic state to be flushed into the next command buffer.
     void Invalidate() {
@@ -329,8 +329,25 @@ public:
     /// Sends the current execution context to the GPU and waits for it to complete.
     void Finish();
 
+    /// Waits for the worker thread to finish executing everything. After this function returns it's
+    /// safe to touch worker resources.
+    void WaitWorker();
+
     /// Waits for the given tick to trigger on the GPU.
     void Wait(u64 tick);
+
+    /// Sends currently recorded work to the worker thread.
+    void DispatchWork();
+
+    /// Records the command to the current chunk.
+    template <typename T>
+    void Record(T&& command) {
+        if (chunk->Record(command)) {
+            return;
+        }
+        DispatchWork();
+        (void)chunk->Record(command);
+    }
 
     /// Attempts to execute operations whose tick the GPU has caught up with.
     void PopPendingOperations();
@@ -349,11 +366,6 @@ public:
     /// Returns the current pipeline dynamic state tracking.
     DynamicState& GetDynamicState() {
         return dynamic_state;
-    }
-
-    /// Returns the current command buffer.
-    vk::CommandBuffer CommandBuffer() const {
-        return current_cmdbuf;
     }
 
     /// Returns the current command buffer tick.
@@ -381,17 +393,112 @@ public:
     }
 
 private:
+    class Command {
+    public:
+        virtual ~Command() = default;
+
+        virtual void Execute(vk::CommandBuffer cmdbuf) = 0;
+
+        Command* GetNext() const {
+            return next;
+        }
+
+        void SetNext(Command* next_) {
+            next = next_;
+        }
+
+    private:
+        Command* next = nullptr;
+    };
+
+    template <typename T>
+    class TypedCommand final : public Command {
+    public:
+        explicit TypedCommand(T&& command_) : command{std::move(command_)} {}
+        ~TypedCommand() override = default;
+
+        TypedCommand(TypedCommand&&) = delete;
+        TypedCommand& operator=(TypedCommand&&) = delete;
+
+        void Execute(vk::CommandBuffer cmdbuf) override {
+            command(cmdbuf);
+        }
+
+    private:
+        T command;
+    };
+
+    class CommandChunk final {
+    public:
+        void ExecuteAll(vk::CommandBuffer cmdbuf);
+
+        template <typename T>
+        bool Record(T& command) {
+            using FuncType = TypedCommand<T>;
+            static_assert(sizeof(FuncType) < sizeof(data), "Lambda is too large");
+
+            recorded_counts++;
+            command_offset = Common::AlignUp(command_offset, alignof(FuncType));
+            if (command_offset > sizeof(data) - sizeof(FuncType)) {
+                return false;
+            }
+            Command* const current_last = last;
+            last = new (data.data() + command_offset) FuncType(std::move(command));
+
+            if (current_last) {
+                current_last->SetNext(last);
+            } else {
+                first = last;
+            }
+            command_offset += sizeof(FuncType);
+            return true;
+        }
+
+        void MarkSubmit() {
+            submit = true;
+        }
+
+        bool Empty() const {
+            return recorded_counts == 0;
+        }
+
+        bool HasSubmit() const {
+            return submit;
+        }
+
+    private:
+        Command* first = nullptr;
+        Command* last = nullptr;
+
+        std::size_t recorded_counts = 0;
+        std::size_t command_offset = 0;
+        bool submit = false;
+        alignas(std::max_align_t) std::array<u8, 0x8000> data{};
+    };
+
+private:
+    void WorkerThread(std::stop_token stop_token);
+
     void AllocateWorkerCommandBuffers();
 
     u64 SubmitExecution(SubmitInfo& info);
+
+    void AcquireNewChunk();
 
 private:
     const Instance& instance;
     LogicalQueue queue;
     CommandPool command_pool;
     DynamicState dynamic_state;
+    std::unique_ptr<CommandChunk> chunk;
+    std::queue<std::unique_ptr<CommandChunk>> work_queue;
+    std::vector<std::unique_ptr<CommandChunk>> chunk_reserve;
     vk::CommandBuffer current_cmdbuf;
+    std::mutex execution_mutex;
+    std::mutex reserve_mutex;
+    std::mutex queue_mutex;
     std::condition_variable_any event_cv;
+    std::jthread worker_thread;
     struct PendingOp {
         Common::UniqueFunction<void> callback;
         u64 gpu_tick;
@@ -399,7 +506,6 @@ private:
     std::queue<PendingOp> pending_ops;
     RenderState render_state;
     bool is_rendering = false;
-    tracy::VkCtxScope* profiler_scope{};
 };
 
 } // namespace Vulkan

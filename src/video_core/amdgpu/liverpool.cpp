@@ -127,6 +127,10 @@ void Liverpool::Process(std::stop_token stoken) {
             if (task.done()) {
                 task.destroy();
 
+                if (rasterizer) {
+                    rasterizer->Flush();
+                }
+
                 std::scoped_lock lock{queue.m_access};
                 queue.submits.pop();
 
@@ -774,9 +778,6 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 break;
             }
             case PM4ItOpcode::PfpSyncMe: {
-                if (rasterizer) {
-                    rasterizer->CpSync();
-                }
                 break;
             }
             case PM4ItOpcode::StrmoutBufferUpdate: {

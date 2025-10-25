@@ -4,6 +4,7 @@
 #pragma once
 
 #include <atomic>
+#include <mutex>
 #include "common/types.h"
 #include "video_core/renderer_vulkan/vk_common.h"
 
@@ -72,6 +73,9 @@ public:
 
     /// Submits work to the owned queue and advances current tick
     u64 Submit(SubmitInfo& info, vk::CommandBuffer cmdbuf);
+
+    /// Submits work to the owned queue
+    void SubmitNoAdvance(const SubmitInfo& info, vk::CommandBuffer cmdbuf);
 
     static std::mutex submit_mutex;
 

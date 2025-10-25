@@ -191,58 +191,62 @@ TileManager::Result TileManager::DetileImage(vk::Buffer in_buffer, u32 in_offset
         vmaDestroyBuffer(instance.GetAllocator(), out_buffer, out_allocation);
     });
 
+    const auto pipeline = GetTilingPipeline(info, false);
+
     scheduler.EndRendering();
+    scheduler.Record([this, in_buffer, in_offset, guest_size = info.guest_size, out_buffer,
+                      params_buffer_info, num_bits = info.num_bits,
+                      pipeline](vk::CommandBuffer cmdbuf) {
+        cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline);
 
-    const auto cmdbuf = scheduler.CommandBuffer();
-    cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, GetTilingPipeline(info, false));
+        const vk::DescriptorBufferInfo tiled_buffer_info{
+            .buffer = in_buffer,
+            .offset = in_offset,
+            .range = guest_size,
+        };
 
-    const vk::DescriptorBufferInfo tiled_buffer_info{
-        .buffer = in_buffer,
-        .offset = in_offset,
-        .range = info.guest_size,
-    };
+        const vk::DescriptorBufferInfo linear_buffer_info{
+            .buffer = out_buffer,
+            .offset = 0,
+            .range = guest_size,
+        };
 
-    const vk::DescriptorBufferInfo linear_buffer_info{
-        .buffer = out_buffer,
-        .offset = 0,
-        .range = info.guest_size,
-    };
+        const std::array<vk::WriteDescriptorSet, 3> set_writes = {{
+            {
+                .dstSet = VK_NULL_HANDLE,
+                .dstBinding = 0,
+                .dstArrayElement = 0,
+                .descriptorCount = 1,
+                .descriptorType = vk::DescriptorType::eStorageBuffer,
+                .pBufferInfo = &tiled_buffer_info,
+            },
+            {
+                .dstSet = VK_NULL_HANDLE,
+                .dstBinding = 1,
+                .dstArrayElement = 0,
+                .descriptorCount = 1,
+                .descriptorType = vk::DescriptorType::eStorageBuffer,
+                .pBufferInfo = &linear_buffer_info,
+            },
+            {
+                .dstSet = VK_NULL_HANDLE,
+                .dstBinding = 2,
+                .dstArrayElement = 0,
+                .descriptorCount = 1,
+                .descriptorType = vk::DescriptorType::eUniformBuffer,
+                .pBufferInfo = &params_buffer_info,
+            },
+        }};
+        cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, *pl_layout, 0, set_writes);
 
-    const std::array<vk::WriteDescriptorSet, 3> set_writes = {{
-        {
-            .dstSet = VK_NULL_HANDLE,
-            .dstBinding = 0,
-            .dstArrayElement = 0,
-            .descriptorCount = 1,
-            .descriptorType = vk::DescriptorType::eStorageBuffer,
-            .pBufferInfo = &tiled_buffer_info,
-        },
-        {
-            .dstSet = VK_NULL_HANDLE,
-            .dstBinding = 1,
-            .dstArrayElement = 0,
-            .descriptorCount = 1,
-            .descriptorType = vk::DescriptorType::eStorageBuffer,
-            .pBufferInfo = &linear_buffer_info,
-        },
-        {
-            .dstSet = VK_NULL_HANDLE,
-            .dstBinding = 2,
-            .dstArrayElement = 0,
-            .descriptorCount = 1,
-            .descriptorType = vk::DescriptorType::eUniformBuffer,
-            .pBufferInfo = &params_buffer_info,
-        },
-    }};
-    cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, *pl_layout, 0, set_writes);
-
-    const auto dim_x = (info.guest_size / (info.num_bits / 8)) / 64;
-    cmdbuf.dispatch(dim_x, 1, 1);
+        const auto dim_x = (guest_size / (num_bits / 8)) / 64;
+        cmdbuf.dispatch(dim_x, 1, 1);
+    });
     return {out_buffer, 0};
 }
 
-void TileManager::TileImage(Image& in_image, std::span<vk::BufferImageCopy> buffer_copies,
-                            vk::Buffer out_buffer, u32 out_offset, u32 copy_size) {
+void TileManager::TileImage(Image& in_image, Image::Copies& buffer_copies, vk::Buffer out_buffer,
+                            u32 out_offset, u32 copy_size) {
     const auto& info = in_image.info;
     if (!info.props.is_tiled) {
         for (auto& copy : buffer_copies) {
@@ -276,53 +280,58 @@ void TileManager::TileImage(Image& in_image, std::span<vk::BufferImageCopy> buff
         vmaDestroyBuffer(instance.GetAllocator(), temp_buffer, temp_allocation);
     });
 
-    const auto cmdbuf = scheduler.CommandBuffer();
     in_image.Download(buffer_copies, temp_buffer, 0, copy_size);
 
-    cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, GetTilingPipeline(info, true));
+    const auto pipeline = GetTilingPipeline(info, true);
 
-    const vk::DescriptorBufferInfo tiled_buffer_info{
-        .buffer = out_buffer,
-        .offset = out_offset,
-        .range = info.guest_size,
-    };
+    scheduler.Record([this, out_buffer, out_offset, temp_buffer, params_buffer_info,
+                      guest_size = info.guest_size, num_bits = info.num_bits,
+                      pipeline](vk::CommandBuffer cmdbuf) {
+        cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline);
 
-    const vk::DescriptorBufferInfo linear_buffer_info{
-        .buffer = temp_buffer,
-        .offset = 0,
-        .range = info.guest_size,
-    };
+        const vk::DescriptorBufferInfo tiled_buffer_info{
+            .buffer = out_buffer,
+            .offset = out_offset,
+            .range = guest_size,
+        };
 
-    const std::array<vk::WriteDescriptorSet, 3> set_writes = {{
-        {
-            .dstSet = VK_NULL_HANDLE,
-            .dstBinding = 0,
-            .dstArrayElement = 0,
-            .descriptorCount = 1,
-            .descriptorType = vk::DescriptorType::eStorageBuffer,
-            .pBufferInfo = &tiled_buffer_info,
-        },
-        {
-            .dstSet = VK_NULL_HANDLE,
-            .dstBinding = 1,
-            .dstArrayElement = 0,
-            .descriptorCount = 1,
-            .descriptorType = vk::DescriptorType::eStorageBuffer,
-            .pBufferInfo = &linear_buffer_info,
-        },
-        {
-            .dstSet = VK_NULL_HANDLE,
-            .dstBinding = 2,
-            .dstArrayElement = 0,
-            .descriptorCount = 1,
-            .descriptorType = vk::DescriptorType::eUniformBuffer,
-            .pBufferInfo = &params_buffer_info,
-        },
-    }};
-    cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, *pl_layout, 0, set_writes);
+        const vk::DescriptorBufferInfo linear_buffer_info{
+            .buffer = temp_buffer,
+            .offset = 0,
+            .range = guest_size,
+        };
 
-    const auto dim_x = (info.guest_size / (info.num_bits / 8)) / 64;
-    cmdbuf.dispatch(dim_x, 1, 1);
+        const std::array<vk::WriteDescriptorSet, 3> set_writes = {{
+            {
+                .dstSet = VK_NULL_HANDLE,
+                .dstBinding = 0,
+                .dstArrayElement = 0,
+                .descriptorCount = 1,
+                .descriptorType = vk::DescriptorType::eStorageBuffer,
+                .pBufferInfo = &tiled_buffer_info,
+            },
+            {
+                .dstSet = VK_NULL_HANDLE,
+                .dstBinding = 1,
+                .dstArrayElement = 0,
+                .descriptorCount = 1,
+                .descriptorType = vk::DescriptorType::eStorageBuffer,
+                .pBufferInfo = &linear_buffer_info,
+            },
+            {
+                .dstSet = VK_NULL_HANDLE,
+                .dstBinding = 2,
+                .dstArrayElement = 0,
+                .descriptorCount = 1,
+                .descriptorType = vk::DescriptorType::eUniformBuffer,
+                .pBufferInfo = &params_buffer_info,
+            },
+        }};
+        cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, *pl_layout, 0, set_writes);
+
+        const auto dim_x = (guest_size / (num_bits / 8)) / 64;
+        cmdbuf.dispatch(dim_x, 1, 1);
+    });
 }
 
 } // namespace VideoCore

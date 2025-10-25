@@ -55,9 +55,11 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
         .srcAccessMask = vk::AccessFlagBits::eTransferWrite,
         .dstAccessMask = vk::AccessFlagBits::eMemoryRead | vk::AccessFlagBits::eMemoryWrite,
     };
-    scheduler.CommandBuffer().pipelineBarrier(
-        vk::PipelineStageFlagBits::eAllCommands, vk::PipelineStageFlagBits::eTransfer,
-        vk::DependencyFlagBits::eByRegion, READ_BARRIER, {}, {});
+    scheduler.Record([](vk::CommandBuffer cmdbuf) {
+        cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eAllCommands,
+                               vk::PipelineStageFlagBits::eTransfer,
+                               vk::DependencyFlagBits::eByRegion, READ_BARRIER, {}, {});
+    });
 
     static constexpr vk::DeviceSize MaxDistanceForMerge = 64_MB;
     u32 batch_start = 0;
@@ -109,13 +111,19 @@ static bool ExecuteCopyShaderHLE(const Shader::Info& info, const AmdGpu::Compute
         // Execute buffer copies.
         LOG_TRACE(Render_Vulkan, "HLE buffer copy: src_size = {}, dst_size = {}",
                   src_offset_max - src_offset_min, dst_offset_max - dst_offset_min);
-        scheduler.CommandBuffer().copyBuffer(src_buf->Handle(), dst_buf->Handle(), vk_copies);
+        scheduler.Record(
+            [src_buf = src_buf->Handle(), dst_buf = dst_buf->Handle(),
+             copies = std::vector(vk_copies.begin(), vk_copies.end())](vk::CommandBuffer cmdbuf) {
+                cmdbuf.copyBuffer(src_buf, dst_buf, copies);
+            });
         batch_start = batch_end;
     }
 
-    scheduler.CommandBuffer().pipelineBarrier(
-        vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eAllCommands,
-        vk::DependencyFlagBits::eByRegion, WRITE_BARRIER, {}, {});
+    scheduler.Record([](vk::CommandBuffer cmdbuf) {
+        cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer,
+                               vk::PipelineStageFlagBits::eAllCommands,
+                               vk::DependencyFlagBits::eByRegion, WRITE_BARRIER, {}, {});
+    });
 
     return true;
 }

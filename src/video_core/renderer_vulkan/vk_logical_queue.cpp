@@ -65,12 +65,16 @@ void LogicalQueue::Wait(u64 tick) {
 }
 
 u64 LogicalQueue::Submit(SubmitInfo& info, vk::CommandBuffer cmdbuf) {
+    const u64 signal_value = NextTick();
+    info.AddSignal(*semaphore, signal_value);
+    SubmitNoAdvance(info, cmdbuf);
+    return signal_value;
+}
+
+void LogicalQueue::SubmitNoAdvance(const SubmitInfo& info, vk::CommandBuffer cmdbuf) {
     Check(cmdbuf.end());
 
     std::scoped_lock lk{submit_mutex};
-
-    const u64 signal_value = NextTick();
-    info.AddSignal(*semaphore, signal_value);
 
     static constexpr std::array<vk::PipelineStageFlags, 2> wait_stage_masks = {
         vk::PipelineStageFlagBits::eAllCommands,
@@ -99,8 +103,6 @@ u64 LogicalQueue::Submit(SubmitInfo& info, vk::CommandBuffer cmdbuf) {
     auto submit_result = vk_queue.submit(submit_info, info.fence);
     ASSERT_MSG(submit_result != vk::Result::eErrorDeviceLost, "Device lost during submit");
     Refresh();
-
-    return signal_value;
 }
 
 } // namespace Vulkan

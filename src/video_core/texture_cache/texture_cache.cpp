@@ -104,26 +104,29 @@ void TextureCache::DownloadImageMemory(ImageId image_id) {
     ASSERT(download_size <= image.info.guest_size);
     const auto [download, offset] = download_buffer.Map(download_size);
     download_buffer.Commit();
-    const vk::BufferImageCopy image_download = {
-        .bufferOffset = offset,
-        .bufferRowLength = image.info.pitch,
-        .bufferImageHeight = image.info.size.height,
-        .imageSubresource =
-            {
-                .aspectMask = image.info.props.is_depth ? vk::ImageAspectFlagBits::eDepth
-                                                        : vk::ImageAspectFlagBits::eColor,
-                .mipLevel = 0,
-                .baseArrayLayer = 0,
-                .layerCount = image.info.resources.layers,
-            },
-        .imageOffset = {0, 0, 0},
-        .imageExtent = {image.info.size.width, image.info.size.height, 1},
-    };
-    scheduler.EndRendering();
-    const auto cmdbuf = scheduler.CommandBuffer();
     image.Transit(vk::ImageLayout::eTransferSrcOptimal, vk::AccessFlagBits2::eTransferRead, {});
-    cmdbuf.copyImageToBuffer(image.GetImage(), vk::ImageLayout::eTransferSrcOptimal,
-                             download_buffer.Handle(), image_download);
+    scheduler.EndRendering();
+    scheduler.Record([&download_buffer, image = image.GetImage(), offset, pitch = image.info.pitch,
+                      size = image.info.size, props = image.info.props,
+                      layers = image.info.resources.layers](vk::CommandBuffer cmdbuf) {
+        const vk::BufferImageCopy image_download = {
+            .bufferOffset = offset,
+            .bufferRowLength = pitch,
+            .bufferImageHeight = size.height,
+            .imageSubresource =
+                {
+                    .aspectMask = props.is_depth ? vk::ImageAspectFlagBits::eDepth
+                                                 : vk::ImageAspectFlagBits::eColor,
+                    .mipLevel = 0,
+                    .baseArrayLayer = 0,
+                    .layerCount = layers,
+                },
+            .imageOffset = {0, 0, 0},
+            .imageExtent = {size.width, size.height, 1},
+        };
+        cmdbuf.copyImageToBuffer(image, vk::ImageLayout::eTransferSrcOptimal,
+                                 download_buffer.Handle(), image_download);
+    });
 
     {
         std::unique_lock lock(downloaded_images_mutex);
@@ -665,7 +668,7 @@ void TextureCache::RefreshImage(Image& image) {
     const bool is_gpu_modified = True(image.flags & ImageFlagBits::GpuModified);
     const bool is_gpu_dirty = True(image.flags & ImageFlagBits::GpuDirty);
 
-    boost::container::small_vector<vk::BufferImageCopy, 14> image_copies;
+    Image::Copies image_copies;
     for (u32 m = 0; m < num_mips; m++) {
         const u32 width = std::max(image.info.size.width >> m, 1u);
         const u32 height = std::max(image.info.size.height >> m, 1u);
@@ -711,10 +714,12 @@ void TextureCache::RefreshImage(Image& image) {
         buffer_cache.ObtainBufferForImage(image.info.guest_address, image.info.guest_size);
     if (auto barrier = in_buffer->GetBarrier(vk::AccessFlagBits2::eTransferRead,
                                              vk::PipelineStageFlagBits2::eTransfer)) {
-        scheduler.CommandBuffer().pipelineBarrier2(vk::DependencyInfo{
-            .dependencyFlags = vk::DependencyFlagBits::eByRegion,
-            .bufferMemoryBarrierCount = 1,
-            .pBufferMemoryBarriers = &barrier.value(),
+        scheduler.Record([barrier = std::move(barrier)](vk::CommandBuffer cmdbuf) {
+            cmdbuf.pipelineBarrier2(vk::DependencyInfo{
+                .dependencyFlags = vk::DependencyFlagBits::eByRegion,
+                .bufferMemoryBarrierCount = 1,
+                .pBufferMemoryBarriers = &barrier.value(),
+            });
         });
     }
 

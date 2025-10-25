@@ -301,7 +301,7 @@ Image::Barriers Image::GetBarriers(vk::ImageLayout dst_layout, vk::AccessFlags2 
 }
 
 void Image::Transit(vk::ImageLayout dst_layout, vk::AccessFlags2 dst_mask,
-                    std::optional<SubresourceRange> range, vk::CommandBuffer cmdbuf /*= {}*/) {
+                    std::optional<SubresourceRange> range) {
     // Adjust pipieline stage
     const vk::PipelineStageFlags2 dst_pl_stage =
         (dst_mask == vk::AccessFlagBits2::eTransferRead ||
@@ -314,101 +314,103 @@ void Image::Transit(vk::ImageLayout dst_layout, vk::AccessFlags2 dst_mask,
         return;
     }
 
-    if (!cmdbuf) {
-        // When using external cmdbuf you are responsible for ending rp.
-        scheduler->EndRendering();
-        cmdbuf = scheduler->CommandBuffer();
-    }
-    cmdbuf.pipelineBarrier2(vk::DependencyInfo{
-        .imageMemoryBarrierCount = static_cast<u32>(barriers.size()),
-        .pImageMemoryBarriers = barriers.data(),
+    scheduler->EndRendering();
+    scheduler->Record([barriers = std::move(barriers)](vk::CommandBuffer cmdbuf) {
+        cmdbuf.pipelineBarrier2(vk::DependencyInfo{
+            .imageMemoryBarrierCount = static_cast<u32>(barriers.size()),
+            .pImageMemoryBarriers = barriers.data(),
+        });
     });
 }
 
-void Image::Upload(std::span<const vk::BufferImageCopy> upload_copies, vk::Buffer buffer,
-                   u64 offset) {
+void Image::Upload(Copies& upload_copies, vk::Buffer buffer, u64 offset) {
     SetBackingSamples(info.num_samples, false);
     scheduler->EndRendering();
-
-    const vk::BufferMemoryBarrier2 pre_barrier{
-        .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
-        .srcAccessMask = vk::AccessFlagBits2::eMemoryWrite,
-        .dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
-        .dstAccessMask = vk::AccessFlagBits2::eTransferRead,
-        .buffer = buffer,
-        .offset = offset,
-        .size = info.guest_size,
-    };
-    const vk::BufferMemoryBarrier2 post_barrier{
-        .srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
-        .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
-        .dstStageMask = vk::PipelineStageFlagBits2::eAllCommands,
-        .dstAccessMask = vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite,
-        .buffer = buffer,
-        .offset = offset,
-        .size = info.guest_size,
-    };
     const auto image_barriers =
         GetBarriers(vk::ImageLayout::eTransferDstOptimal, vk::AccessFlagBits2::eTransferWrite,
                     vk::PipelineStageFlagBits2::eCopy, {});
-    const auto cmdbuf = scheduler->CommandBuffer();
-    cmdbuf.pipelineBarrier2(vk::DependencyInfo{
-        .dependencyFlags = vk::DependencyFlagBits::eByRegion,
-        .bufferMemoryBarrierCount = 1,
-        .pBufferMemoryBarriers = &pre_barrier,
-        .imageMemoryBarrierCount = static_cast<u32>(image_barriers.size()),
-        .pImageMemoryBarriers = image_barriers.data(),
-    });
-    cmdbuf.copyBufferToImage(buffer, GetImage(), vk::ImageLayout::eTransferDstOptimal,
-                             upload_copies);
-    cmdbuf.pipelineBarrier2(vk::DependencyInfo{
-        .dependencyFlags = vk::DependencyFlagBits::eByRegion,
-        .bufferMemoryBarrierCount = 1,
-        .pBufferMemoryBarriers = &post_barrier,
+    scheduler->Record([buffer, offset, guest_size = info.guest_size, image = GetImage(),
+                       upload_copies = std::move(upload_copies),
+                       image_barriers = std::move(image_barriers)](vk::CommandBuffer cmdbuf) {
+        const vk::BufferMemoryBarrier2 pre_barrier{
+            .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+            .srcAccessMask = vk::AccessFlagBits2::eMemoryWrite,
+            .dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+            .dstAccessMask = vk::AccessFlagBits2::eTransferRead,
+            .buffer = buffer,
+            .offset = offset,
+            .size = guest_size,
+        };
+        const vk::BufferMemoryBarrier2 post_barrier{
+            .srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+            .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+            .dstStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+            .dstAccessMask = vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite,
+            .buffer = buffer,
+            .offset = offset,
+            .size = guest_size,
+        };
+        cmdbuf.pipelineBarrier2(vk::DependencyInfo{
+            .dependencyFlags = vk::DependencyFlagBits::eByRegion,
+            .bufferMemoryBarrierCount = 1,
+            .pBufferMemoryBarriers = &pre_barrier,
+            .imageMemoryBarrierCount = static_cast<u32>(image_barriers.size()),
+            .pImageMemoryBarriers = image_barriers.data(),
+        });
+        cmdbuf.copyBufferToImage(buffer, image, vk::ImageLayout::eTransferDstOptimal,
+                                 upload_copies);
+        cmdbuf.pipelineBarrier2(vk::DependencyInfo{
+            .dependencyFlags = vk::DependencyFlagBits::eByRegion,
+            .bufferMemoryBarrierCount = 1,
+            .pBufferMemoryBarriers = &post_barrier,
+        });
     });
     flags &= ~ImageFlagBits::Dirty;
 }
 
-void Image::Download(std::span<const vk::BufferImageCopy> download_copies, vk::Buffer buffer,
-                     u64 offset, u64 download_size) {
+void Image::Download(Copies& download_copies, vk::Buffer buffer, u64 offset, u64 download_size) {
     SetBackingSamples(info.num_samples);
     scheduler->EndRendering();
 
-    const vk::BufferMemoryBarrier2 pre_barrier = {
-        .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
-        .srcAccessMask = vk::AccessFlagBits2::eMemoryRead,
-        .dstStageMask = vk::PipelineStageFlagBits2::eCopy,
-        .dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
-        .buffer = buffer,
-        .offset = offset,
-        .size = download_size,
-    };
-    const vk::BufferMemoryBarrier2 post_barrier = {
-        .srcStageMask = vk::PipelineStageFlagBits2::eCopy,
-        .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
-        .dstStageMask = vk::PipelineStageFlagBits2::eAllCommands,
-        .dstAccessMask = vk::AccessFlagBits2::eMemoryRead,
-        .buffer = buffer,
-        .offset = offset,
-        .size = download_size,
-    };
     const auto image_barriers =
         GetBarriers(vk::ImageLayout::eTransferSrcOptimal, vk::AccessFlagBits2::eTransferRead,
                     vk::PipelineStageFlagBits2::eCopy, {});
-    auto cmdbuf = scheduler->CommandBuffer();
-    cmdbuf.pipelineBarrier2(vk::DependencyInfo{
-        .dependencyFlags = vk::DependencyFlagBits::eByRegion,
-        .bufferMemoryBarrierCount = 1,
-        .pBufferMemoryBarriers = &pre_barrier,
-        .imageMemoryBarrierCount = static_cast<u32>(image_barriers.size()),
-        .pImageMemoryBarriers = image_barriers.data(),
-    });
-    cmdbuf.copyImageToBuffer(GetImage(), vk::ImageLayout::eTransferSrcOptimal, buffer,
-                             download_copies);
-    cmdbuf.pipelineBarrier2(vk::DependencyInfo{
-        .dependencyFlags = vk::DependencyFlagBits::eByRegion,
-        .bufferMemoryBarrierCount = 1,
-        .pBufferMemoryBarriers = &post_barrier,
+
+    scheduler->Record([buffer, offset, download_size, image = GetImage(),
+                       download_copies = std::move(download_copies),
+                       image_barriers = std::move(image_barriers)](vk::CommandBuffer cmdbuf) {
+        const vk::BufferMemoryBarrier2 pre_barrier = {
+            .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+            .srcAccessMask = vk::AccessFlagBits2::eMemoryRead,
+            .dstStageMask = vk::PipelineStageFlagBits2::eCopy,
+            .dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
+            .buffer = buffer,
+            .offset = offset,
+            .size = download_size,
+        };
+        const vk::BufferMemoryBarrier2 post_barrier = {
+            .srcStageMask = vk::PipelineStageFlagBits2::eCopy,
+            .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+            .dstStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+            .dstAccessMask = vk::AccessFlagBits2::eMemoryRead,
+            .buffer = buffer,
+            .offset = offset,
+            .size = download_size,
+        };
+        cmdbuf.pipelineBarrier2(vk::DependencyInfo{
+            .dependencyFlags = vk::DependencyFlagBits::eByRegion,
+            .bufferMemoryBarrierCount = 1,
+            .pBufferMemoryBarriers = &pre_barrier,
+            .imageMemoryBarrierCount = static_cast<u32>(image_barriers.size()),
+            .pImageMemoryBarriers = image_barriers.data(),
+        });
+        cmdbuf.copyImageToBuffer(image, vk::ImageLayout::eTransferSrcOptimal, buffer,
+                                 download_copies);
+        cmdbuf.pipelineBarrier2(vk::DependencyInfo{
+            .dependencyFlags = vk::DependencyFlagBits::eByRegion,
+            .bufferMemoryBarrierCount = 1,
+            .pBufferMemoryBarriers = &post_barrier,
+        });
     });
 }
 
@@ -500,9 +502,11 @@ void Image::CopyImage(Image& src_image) {
     src_image.Transit(vk::ImageLayout::eTransferSrcOptimal, vk::AccessFlagBits2::eTransferRead, {});
     Transit(vk::ImageLayout::eTransferDstOptimal, vk::AccessFlagBits2::eTransferWrite, {});
 
-    auto cmdbuf = scheduler->CommandBuffer();
-    cmdbuf.copyImage(src_image.GetImage(), src_image.backing->state.layout, GetImage(),
-                     backing->state.layout, image_copies);
+    scheduler->Record([src_image = src_image.GetImage(), image = GetImage(),
+                       image_copies = std::move(image_copies)](vk::CommandBuffer cmdbuf) {
+        cmdbuf.copyImage(src_image, vk::ImageLayout::eTransferSrcOptimal, image,
+                         vk::ImageLayout::eTransferDstOptimal, image_copies);
+    });
 
     Transit(vk::ImageLayout::eGeneral,
             vk::AccessFlagBits2::eShaderRead | vk::AccessFlagBits2::eTransferRead, {});
@@ -517,7 +521,7 @@ void Image::CopyImageWithBuffer(Image& src_image, vk::Buffer buffer, u64 offset)
     SetBackingSamples(info.num_samples, false);
     src_image.SetBackingSamples(src_info.num_samples);
 
-    boost::container::small_vector<vk::BufferImageCopy, 8> buffer_copies;
+    Image::Copies buffer_copies;
     for (u32 mip = 0; mip < num_mips; ++mip) {
         const auto mip_w = std::max(src_info.size.width >> mip, 1u);
         const auto mip_h = std::max(src_info.size.height >> mip, 1u);
@@ -538,52 +542,56 @@ void Image::CopyImageWithBuffer(Image& src_image, vk::Buffer buffer, u64 offset)
         });
     }
 
-    const vk::BufferMemoryBarrier2 pre_copy_barrier = {
-        .srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
-        .srcAccessMask = vk::AccessFlagBits2::eTransferRead,
-        .dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
-        .dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
-        .buffer = buffer,
-        .offset = offset,
-        .size = VK_WHOLE_SIZE,
-    };
-
-    const vk::BufferMemoryBarrier2 post_copy_barrier = {
-        .srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
-        .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
-        .dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
-        .dstAccessMask = vk::AccessFlagBits2::eTransferRead,
-        .buffer = buffer,
-        .offset = offset,
-        .size = VK_WHOLE_SIZE,
-    };
-
     scheduler->EndRendering();
+
     src_image.Transit(vk::ImageLayout::eTransferSrcOptimal, vk::AccessFlagBits2::eTransferRead, {});
     Transit(vk::ImageLayout::eTransferDstOptimal, vk::AccessFlagBits2::eTransferWrite, {});
 
-    auto cmdbuf = scheduler->CommandBuffer();
-    cmdbuf.pipelineBarrier2(vk::DependencyInfo{
-        .dependencyFlags = vk::DependencyFlagBits::eByRegion,
-        .bufferMemoryBarrierCount = 1,
-        .pBufferMemoryBarriers = &pre_copy_barrier,
+    scheduler->Record([buffer, offset, src_image = src_image.GetImage(), image = GetImage(),
+                       aspect_mask = aspect_mask,
+                       buffer_copies = std::move(buffer_copies)](vk::CommandBuffer cmdbuf) mutable {
+        const vk::BufferMemoryBarrier2 pre_copy_barrier = {
+            .srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+            .srcAccessMask = vk::AccessFlagBits2::eTransferRead,
+            .dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+            .dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
+            .buffer = buffer,
+            .offset = offset,
+            .size = VK_WHOLE_SIZE,
+        };
+
+        const vk::BufferMemoryBarrier2 post_copy_barrier = {
+            .srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+            .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+            .dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+            .dstAccessMask = vk::AccessFlagBits2::eTransferRead,
+            .buffer = buffer,
+            .offset = offset,
+            .size = VK_WHOLE_SIZE,
+        };
+
+        cmdbuf.pipelineBarrier2(vk::DependencyInfo{
+            .dependencyFlags = vk::DependencyFlagBits::eByRegion,
+            .bufferMemoryBarrierCount = 1,
+            .pBufferMemoryBarriers = &pre_copy_barrier,
+        });
+
+        cmdbuf.copyImageToBuffer(src_image, vk::ImageLayout::eTransferSrcOptimal, buffer,
+                                 buffer_copies);
+
+        cmdbuf.pipelineBarrier2(vk::DependencyInfo{
+            .dependencyFlags = vk::DependencyFlagBits::eByRegion,
+            .bufferMemoryBarrierCount = 1,
+            .pBufferMemoryBarriers = &post_copy_barrier,
+        });
+
+        for (auto& copy : buffer_copies) {
+            copy.imageSubresource.aspectMask = aspect_mask & ~vk::ImageAspectFlagBits::eStencil;
+        }
+
+        cmdbuf.copyBufferToImage(buffer, image, vk::ImageLayout::eTransferDstOptimal,
+                                 buffer_copies);
     });
-
-    cmdbuf.copyImageToBuffer(src_image.GetImage(), vk::ImageLayout::eTransferSrcOptimal, buffer,
-                             buffer_copies);
-
-    cmdbuf.pipelineBarrier2(vk::DependencyInfo{
-        .dependencyFlags = vk::DependencyFlagBits::eByRegion,
-        .bufferMemoryBarrierCount = 1,
-        .pBufferMemoryBarriers = &post_copy_barrier,
-    });
-
-    for (auto& copy : buffer_copies) {
-        copy.imageSubresource.aspectMask = aspect_mask & ~vk::ImageAspectFlagBits::eStencil;
-    }
-
-    cmdbuf.copyBufferToImage(buffer, GetImage(), vk::ImageLayout::eTransferDstOptimal,
-                             buffer_copies);
 }
 
 void Image::CopyMip(Image& src_image, u32 mip, u32 slice) {
@@ -620,9 +628,11 @@ void Image::CopyMip(Image& src_image, u32 mip, u32 slice) {
     Transit(vk::ImageLayout::eTransferDstOptimal, vk::AccessFlagBits2::eTransferWrite, {});
     src_image.Transit(vk::ImageLayout::eTransferSrcOptimal, vk::AccessFlagBits2::eTransferRead, {});
 
-    const auto cmdbuf = scheduler->CommandBuffer();
-    cmdbuf.copyImage(src_image.GetImage(), src_image.backing->state.layout, GetImage(),
-                     backing->state.layout, image_copy);
+    scheduler->Record([src_image = src_image.GetImage(), image = GetImage(),
+                       image_copy](vk::CommandBuffer cmdbuf) {
+        cmdbuf.copyImage(src_image, vk::ImageLayout::eTransferSrcOptimal, image,
+                         vk::ImageLayout::eTransferDstOptimal, image_copy);
+    });
 }
 
 void Image::Resolve(Image& src_image, const VideoCore::SubresourceRange& mrt0_range,
@@ -636,47 +646,55 @@ void Image::Resolve(Image& src_image, const VideoCore::SubresourceRange& mrt0_ra
 
     const auto [src_layers, dst_layers] = SanitizeCopyLayers(src_image.info, info, 1);
     if (src_image.backing->num_samples == 1) {
-        const vk::ImageCopy region = {
-            .srcSubresource{
-                .aspectMask = vk::ImageAspectFlagBits::eColor,
-                .mipLevel = 0,
-                .baseArrayLayer = mrt0_range.base.layer,
-                .layerCount = src_layers,
-            },
-            .srcOffset = {0, 0, 0},
-            .dstSubresource{
-                .aspectMask = vk::ImageAspectFlagBits::eColor,
-                .mipLevel = 0,
-                .baseArrayLayer = mrt1_range.base.layer,
-                .layerCount = dst_layers,
-            },
-            .dstOffset = {0, 0, 0},
-            .extent = {info.size.width, info.size.height, 1},
-        };
-        scheduler->CommandBuffer().copyImage(src_image.GetImage(),
-                                             vk::ImageLayout::eTransferSrcOptimal, GetImage(),
-                                             vk::ImageLayout::eTransferDstOptimal, region);
+        scheduler->Record([src_layers, dst_layers, size = info.size,
+                           src_image = src_image.GetImage(), image = GetImage(),
+                           src_base = mrt0_range.base.layer,
+                           dst_base = mrt1_range.base.layer](vk::CommandBuffer cmdbuf) {
+            const vk::ImageCopy region = {
+                .srcSubresource{
+                    .aspectMask = vk::ImageAspectFlagBits::eColor,
+                    .mipLevel = 0,
+                    .baseArrayLayer = src_base,
+                    .layerCount = src_layers,
+                },
+                .srcOffset = {0, 0, 0},
+                .dstSubresource{
+                    .aspectMask = vk::ImageAspectFlagBits::eColor,
+                    .mipLevel = 0,
+                    .baseArrayLayer = dst_base,
+                    .layerCount = dst_layers,
+                },
+                .dstOffset = {0, 0, 0},
+                .extent = {size.width, size.height, 1},
+            };
+            cmdbuf.copyImage(src_image, vk::ImageLayout::eTransferSrcOptimal, image,
+                             vk::ImageLayout::eTransferDstOptimal, region);
+        });
     } else {
-        const vk::ImageResolve region = {
-            .srcSubresource{
-                .aspectMask = vk::ImageAspectFlagBits::eColor,
-                .mipLevel = 0,
-                .baseArrayLayer = mrt0_range.base.layer,
-                .layerCount = src_layers,
-            },
-            .srcOffset = {0, 0, 0},
-            .dstSubresource{
-                .aspectMask = vk::ImageAspectFlagBits::eColor,
-                .mipLevel = 0,
-                .baseArrayLayer = mrt1_range.base.layer,
-                .layerCount = dst_layers,
-            },
-            .dstOffset = {0, 0, 0},
-            .extent = {info.size.width, info.size.height, 1},
-        };
-        scheduler->CommandBuffer().resolveImage(src_image.GetImage(),
-                                                vk::ImageLayout::eTransferSrcOptimal, GetImage(),
-                                                vk::ImageLayout::eTransferDstOptimal, region);
+        scheduler->Record([src_layers, dst_layers, size = info.size,
+                           src_image = src_image.GetImage(), image = GetImage(),
+                           src_base = mrt0_range.base.layer,
+                           dst_base = mrt1_range.base.layer](vk::CommandBuffer cmdbuf) {
+            const vk::ImageResolve region = {
+                .srcSubresource{
+                    .aspectMask = vk::ImageAspectFlagBits::eColor,
+                    .mipLevel = 0,
+                    .baseArrayLayer = src_base,
+                    .layerCount = src_layers,
+                },
+                .srcOffset = {0, 0, 0},
+                .dstSubresource{
+                    .aspectMask = vk::ImageAspectFlagBits::eColor,
+                    .mipLevel = 0,
+                    .baseArrayLayer = dst_base,
+                    .layerCount = dst_layers,
+                },
+                .dstOffset = {0, 0, 0},
+                .extent = {size.width, size.height, 1},
+            };
+            cmdbuf.resolveImage(src_image, vk::ImageLayout::eTransferSrcOptimal, image,
+                                vk::ImageLayout::eTransferDstOptimal, region);
+        });
     }
 
     flags |= VideoCore::ImageFlagBits::GpuModified;
@@ -684,18 +702,19 @@ void Image::Resolve(Image& src_image, const VideoCore::SubresourceRange& mrt0_ra
 }
 
 void Image::Clear(const vk::ClearValue& clear_value, const VideoCore::SubresourceRange& range) {
-    const vk::ImageSubresourceRange vk_range = {
-        .aspectMask = vk::ImageAspectFlagBits::eColor,
-        .baseMipLevel = range.base.level,
-        .levelCount = range.extent.levels,
-        .baseArrayLayer = range.base.layer,
-        .layerCount = range.extent.layers,
-    };
     scheduler->EndRendering();
     Transit(vk::ImageLayout::eTransferDstOptimal, vk::AccessFlagBits2::eTransferWrite, {});
-    const auto cmdbuf = scheduler->CommandBuffer();
-    cmdbuf.clearColorImage(GetImage(), vk::ImageLayout::eTransferDstOptimal, clear_value.color,
-                           vk_range);
+    scheduler->Record(
+        [image = GetImage(), range, clear = clear_value.color](vk::CommandBuffer cmdbuf) {
+            const vk::ImageSubresourceRange vk_range = {
+                .aspectMask = vk::ImageAspectFlagBits::eColor,
+                .baseMipLevel = range.base.level,
+                .levelCount = range.extent.levels,
+                .baseArrayLayer = range.base.layer,
+                .layerCount = range.extent.layers,
+            };
+            cmdbuf.clearColorImage(image, vk::ImageLayout::eTransferDstOptimal, clear, vk_range);
+        });
 }
 
 void Image::SetBackingSamples(u32 num_samples, bool copy_backing) {
@@ -733,32 +752,36 @@ void Image::SetBackingSamples(u32 num_samples, bool copy_backing) {
             GetBarriers(vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits2::eShaderRead,
                         vk::PipelineStageFlagBits2::eFragmentShader, std::nullopt);
 
-        // Transition dest backing to color attachment layout, not caring of previous contents
         constexpr auto dst_stage = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
         constexpr auto dst_access = vk::AccessFlagBits2::eColorAttachmentWrite;
         constexpr auto dst_layout = vk::ImageLayout::eColorAttachmentOptimal;
-        barriers.push_back(vk::ImageMemoryBarrier2{
-            .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
-            .srcAccessMask = vk::AccessFlagBits2::eNone,
-            .dstStageMask = dst_stage,
-            .dstAccessMask = dst_access,
-            .oldLayout = vk::ImageLayout::eUndefined,
-            .newLayout = dst_layout,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image = new_backing->image,
-            .subresourceRange{
-                .aspectMask = aspect_mask,
-                .baseMipLevel = 0,
-                .levelCount = 1,
-                .baseArrayLayer = 0,
-                .layerCount = info.resources.layers,
-            },
-        });
-        const auto cmdbuf = scheduler->CommandBuffer();
-        cmdbuf.pipelineBarrier2(vk::DependencyInfo{
-            .imageMemoryBarrierCount = static_cast<u32>(barriers.size()),
-            .pImageMemoryBarriers = barriers.data(),
+
+        scheduler->Record([barriers = std::move(barriers), new_image = new_backing->image.image,
+                           aspect_mask = aspect_mask,
+                           layers = info.resources.layers](vk::CommandBuffer cmdbuf) mutable {
+            // Transition dest backing to color attachment layout, not caring of previous contents
+            barriers.push_back(vk::ImageMemoryBarrier2{
+                .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+                .srcAccessMask = vk::AccessFlagBits2::eNone,
+                .dstStageMask = dst_stage,
+                .dstAccessMask = dst_access,
+                .oldLayout = vk::ImageLayout::eUndefined,
+                .newLayout = dst_layout,
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .image = new_image,
+                .subresourceRange{
+                    .aspectMask = aspect_mask,
+                    .baseMipLevel = 0,
+                    .levelCount = 1,
+                    .baseArrayLayer = 0,
+                    .layerCount = layers,
+                },
+            });
+            cmdbuf.pipelineBarrier2(vk::DependencyInfo{
+                .imageMemoryBarrierCount = static_cast<u32>(barriers.size()),
+                .pImageMemoryBarriers = barriers.data(),
+            });
         });
 
         // Copy between ms and non ms backing images

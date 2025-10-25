@@ -21,39 +21,42 @@ Pipeline::~Pipeline() = default;
 
 void Pipeline::BindResources(DescriptorWrites& set_writes, const BufferBarriers& buffer_barriers,
                              const Shader::PushData& push_data) const {
-    const auto cmdbuf = scheduler.CommandBuffer();
-    const auto bind_point =
-        IsCompute() ? vk::PipelineBindPoint::eCompute : vk::PipelineBindPoint::eGraphics;
-
     if (!buffer_barriers.empty()) {
-        const auto dependencies = vk::DependencyInfo{
-            .dependencyFlags = vk::DependencyFlagBits::eByRegion,
-            .bufferMemoryBarrierCount = u32(buffer_barriers.size()),
-            .pBufferMemoryBarriers = buffer_barriers.data(),
-        };
         scheduler.EndRendering();
-        cmdbuf.pipelineBarrier2(dependencies);
+        scheduler.Record([buffer_barriers](vk::CommandBuffer cmdbuf) {
+            const auto dependencies = vk::DependencyInfo{
+                .dependencyFlags = vk::DependencyFlagBits::eByRegion,
+                .bufferMemoryBarrierCount = u32(buffer_barriers.size()),
+                .pBufferMemoryBarriers = buffer_barriers.data(),
+            };
+            cmdbuf.pipelineBarrier2(dependencies);
+        });
     }
 
-    const auto stage_flags = IsCompute() ? vk::ShaderStageFlagBits::eCompute : AllGraphicsStageBits;
-    cmdbuf.pushConstants(*pipeline_layout, stage_flags, 0u, sizeof(push_data), &push_data);
+    scheduler.Record([is_compute = IsCompute(), uses_push_descriptors = uses_push_descriptors,
+                      pipeline_layout = *pipeline_layout, device = instance.GetDevice(),
+                      desc_layout = *desc_layout, desc_heap = &desc_heap, push_data,
+                      set_writes = std::move(set_writes)](vk::CommandBuffer cmdbuf) mutable {
+        const auto bind_point =
+            is_compute ? vk::PipelineBindPoint::eCompute : vk::PipelineBindPoint::eGraphics;
+        const auto stage_flags =
+            is_compute ? vk::ShaderStageFlagBits::eCompute : AllGraphicsStageBits;
+        cmdbuf.pushConstants(pipeline_layout, stage_flags, 0u, sizeof(push_data), &push_data);
 
-    // Bind descriptor set.
-    if (set_writes.empty()) {
-        return;
-    }
-
-    if (uses_push_descriptors) {
-        cmdbuf.pushDescriptorSetKHR(bind_point, *pipeline_layout, 0, set_writes);
-        return;
-    }
-
-    const auto desc_set = desc_heap.Commit(*desc_layout);
-    for (auto& set_write : set_writes) {
-        set_write.dstSet = desc_set;
-    }
-    instance.GetDevice().updateDescriptorSets(set_writes, {});
-    cmdbuf.bindDescriptorSets(bind_point, *pipeline_layout, 0, desc_set, {});
+        if (set_writes.Empty()) {
+            return;
+        }
+        if (uses_push_descriptors) {
+            cmdbuf.pushDescriptorSetKHR(bind_point, pipeline_layout, 0, set_writes.writes);
+            return;
+        }
+        const auto desc_set = desc_heap->Commit(desc_layout);
+        for (auto& set_write : set_writes.writes) {
+            set_write.dstSet = desc_set;
+        }
+        device.updateDescriptorSets(set_writes.writes, {});
+        cmdbuf.bindDescriptorSets(bind_point, pipeline_layout, 0, desc_set, {});
+    });
 }
 
 std::string Pipeline::GetDebugString() const {
