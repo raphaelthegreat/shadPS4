@@ -127,7 +127,7 @@ void Buffer::Fill(u64 offset, u32 num_bytes, u32 value) {
     scheduler->EndRendering();
     ASSERT_MSG(offset % 4 == 0 && num_bytes % 4 == 0,
                "FillBuffer size must be a multiple of 4 bytes");
-    scheduler->Record([buffer = buffer.buffer, offset, num_bytes, value](vk::CommandBuffer cmdbuf) {
+    scheduler->Record([buffer = Handle(), offset, num_bytes, value](vk::CommandBuffer cmdbuf) {
         const vk::BufferMemoryBarrier2 pre_barrier = {
             .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
             .srcAccessMask = vk::AccessFlagBits2::eMemoryRead,
@@ -152,6 +152,41 @@ void Buffer::Fill(u64 offset, u32 num_bytes, u32 value) {
             .pBufferMemoryBarriers = &pre_barrier,
         });
         cmdbuf.fillBuffer(buffer, offset, num_bytes, value);
+        cmdbuf.pipelineBarrier2(vk::DependencyInfo{
+            .dependencyFlags = vk::DependencyFlagBits::eByRegion,
+            .bufferMemoryBarrierCount = 1,
+            .pBufferMemoryBarriers = &post_barrier,
+        });
+    });
+}
+
+void Buffer::InlineData(u64 offset, u32 value) {
+    scheduler->EndRendering();
+    scheduler->Record([buffer = Handle(), offset, value](vk::CommandBuffer cmdbuf) {
+        const vk::BufferMemoryBarrier2 pre_barrier = {
+            .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+            .srcAccessMask = vk::AccessFlagBits2::eMemoryRead,
+            .dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+            .dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
+            .buffer = buffer,
+            .offset = offset,
+            .size = sizeof(value),
+        };
+        const vk::BufferMemoryBarrier2 post_barrier = {
+            .srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+            .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+            .dstStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+            .dstAccessMask = vk::AccessFlagBits2::eMemoryRead,
+            .buffer = buffer,
+            .offset = offset,
+            .size = sizeof(value),
+        };
+        cmdbuf.pipelineBarrier2(vk::DependencyInfo{
+            .dependencyFlags = vk::DependencyFlagBits::eByRegion,
+            .bufferMemoryBarrierCount = 1,
+            .pBufferMemoryBarriers = &pre_barrier,
+        });
+        cmdbuf.updateBuffer(buffer, offset, sizeof(value), &value);
         cmdbuf.pipelineBarrier2(vk::DependencyInfo{
             .dependencyFlags = vk::DependencyFlagBits::eByRegion,
             .bufferMemoryBarrierCount = 1,
