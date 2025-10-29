@@ -14,10 +14,6 @@
 #include "video_core/texture_cache/image_view.h"
 #include "video_core/texture_cache/texture_cache.h"
 
-#ifdef MemoryBarrier
-#undef MemoryBarrier
-#endif
-
 namespace Vulkan {
 
 static Shader::PushData MakeUserData(const AmdGpu::Regs& regs) {
@@ -397,14 +393,10 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
 
     if (uses_dma) {
         // We only use fault buffer for DMA right now.
-        {
-            Common::RecursiveSharedLock lock{mapped_ranges_mutex};
-            for (auto& range : mapped_ranges) {
-                buffer_cache.SynchronizeBuffersInRange(range.lower(),
-                                                       range.upper() - range.lower());
-            }
+        Common::RecursiveSharedLock lock{mapped_ranges_mutex};
+        for (auto& range : mapped_ranges) {
+            buffer_cache.SynchronizeBuffersInRange(range.lower(), range.upper() - range.lower());
         }
-        buffer_cache.MemoryBarrier();
     }
 
     fault_process_pending |= uses_dma;

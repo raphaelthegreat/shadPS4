@@ -3,8 +3,6 @@
 
 #pragma once
 
-#include <type_traits>
-#include <utility>
 #include <vector>
 
 #include "common/object_pool.h"

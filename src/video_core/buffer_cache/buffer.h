@@ -7,9 +7,11 @@
 #include <optional>
 #include <utility>
 #include <vector>
+#include "common/assert.h"
 #include "common/types.h"
-#include "video_core/amdgpu/resource.h"
 #include "video_core/renderer_vulkan/vk_common.h"
+
+#include <boost/container/small_vector.hpp>
 
 namespace Vulkan {
 class Instance;
@@ -146,6 +148,9 @@ public:
         stage = dst_stage;
         return barrier;
     }
+
+    using Copies = boost::container::small_vector<vk::BufferCopy, 2>;
+    void Copy(Buffer& src_buffer, Copies&& copies);
 
     void Fill(u64 offset, u32 num_bytes, u32 value);
 

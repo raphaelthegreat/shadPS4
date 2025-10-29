@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <shared_mutex>
 #include <boost/container/small_vector.hpp>
 #include "common/lru_cache.h"
 #include "common/slot_vector.h"
@@ -160,9 +159,6 @@ public:
     /// Synchronizes all buffers neede for DMA.
     void SynchronizeDmaBuffers();
 
-    /// Record memory barrier. Used for buffers when accessed via BDA.
-    void MemoryBarrier();
-
     /// Runs the garbage collector.
     void RunGarbageCollector();
 
@@ -199,12 +195,10 @@ private:
     bool SynchronizeBuffer(Buffer& buffer, VAddr device_addr, u32 size, bool is_written,
                            bool is_texel_buffer);
 
-    vk::Buffer UploadCopies(Buffer& buffer, std::span<vk::BufferCopy> copies,
-                            size_t total_size_bytes);
+    Buffer* GetStagingBuffer(Buffer& buffer, std::span<vk::BufferCopy> copies,
+                             size_t total_size_bytes);
 
     bool SynchronizeBufferFromImage(Buffer& buffer, VAddr device_addr, u32 size);
-
-    void WriteDataBuffer(Buffer& buffer, VAddr address, const void* value, u32 num_bytes);
 
     void TouchBuffer(const Buffer& buffer);
 
@@ -223,7 +217,6 @@ private:
     Buffer gds_buffer;
     Buffer bda_pagetable_buffer;
     Buffer fault_buffer;
-    std::shared_mutex slot_buffers_mutex;
     Common::SlotVector<Buffer> slot_buffers;
     u64 total_used_memory = 0;
     u64 trigger_gc_memory = 0;
