@@ -709,15 +709,6 @@ void TextureCache::RefreshImage(Image& image) {
 
     const auto [in_buffer, in_offset] =
         buffer_cache.ObtainBufferForImage(image.info.guest_address, image.info.guest_size);
-    if (auto barrier = in_buffer->GetBarrier(vk::AccessFlagBits2::eTransferRead,
-                                             vk::PipelineStageFlagBits2::eTransfer)) {
-        scheduler.CommandBuffer().pipelineBarrier2(vk::DependencyInfo{
-            .dependencyFlags = vk::DependencyFlagBits::eByRegion,
-            .bufferMemoryBarrierCount = 1,
-            .pBufferMemoryBarriers = &barrier.value(),
-        });
-    }
-
     const auto [buffer, offset] =
         tile_manager.DetileImage(in_buffer->Handle(), in_offset, image.info);
     for (auto& copy : image_copies) {

@@ -211,7 +211,7 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
         buffer_cache.BindIndexBuffer(index_offset);
     }
 
-    pipeline->BindResources(set_writes, buffer_barriers, push_data);
+    pipeline->BindResources(set_writes, push_data);
     UpdateDynamicState(pipeline, is_indexed);
     scheduler.BeginRendering(state);
 
@@ -268,7 +268,7 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
         std::tie(count_buffer, count_base) = buffer_cache.ObtainBuffer(count_address, 4, false);
     }
 
-    pipeline->BindResources(set_writes, buffer_barriers, push_data);
+    pipeline->BindResources(set_writes, push_data);
     UpdateDynamicState(pipeline, is_indexed);
     scheduler.BeginRendering(state);
 
@@ -322,7 +322,7 @@ void Rasterizer::DispatchDirect() {
     }
 
     scheduler.EndRendering();
-    pipeline->BindResources(set_writes, buffer_barriers, push_data);
+    pipeline->BindResources(set_writes, push_data);
 
     const auto cmdbuf = scheduler.CommandBuffer();
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline->Handle());
@@ -349,7 +349,7 @@ void Rasterizer::DispatchIndirect(VAddr address, u32 offset, u32 size) {
     const auto [buffer, base] = buffer_cache.ObtainBuffer(address + offset, size, false);
 
     scheduler.EndRendering();
-    pipeline->BindResources(set_writes, buffer_barriers, push_data);
+    pipeline->BindResources(set_writes, push_data);
 
     const auto cmdbuf = scheduler.CommandBuffer();
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline->Handle());
@@ -385,7 +385,7 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
     }
 
     set_writes.clear();
-    buffer_barriers.clear();
+    // buffer_barriers.clear();
     buffer_infos.clear();
     image_infos.clear();
 
@@ -580,12 +580,11 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, Shader::Backend::Binding
             ASSERT(adjust % 4 == 0);
             push_data.AddOffset(binding.buffer, adjust);
             buffer_infos.emplace_back(vk_buffer->Handle(), offset_aligned, size + adjust);
-            if (auto barrier =
-                    vk_buffer->GetBarrier(desc.is_written ? vk::AccessFlagBits2::eShaderWrite
-                                                          : vk::AccessFlagBits2::eShaderRead,
-                                          vk::PipelineStageFlagBits2::eAllCommands)) {
-                buffer_barriers.emplace_back(*barrier);
-            }
+            // vk_buffer->AddBarrier(buffer_barriers, desc.is_written ?
+            // vk::AccessFlagBits2::eShaderWrite
+            //                                                        :
+            //                                                        vk::AccessFlagBits2::eShaderRead,
+            //                                                          vk::PipelineStageFlagBits2::eAllCommands);
             if (desc.is_written && desc.is_formatted) {
                 texture_cache.InvalidateMemoryFromGPU(vsharp.base_address, size);
             }

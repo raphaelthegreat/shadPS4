@@ -123,6 +123,25 @@ Buffer::Buffer(const Vulkan::Instance& instance_, Vulkan::Scheduler& scheduler_,
     is_coherent = property_flags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 }
 
+void Buffer::AddBarrier(Barriers& barriers, vk::AccessFlags2 dst_acess_mask,
+                        vk::PipelineStageFlagBits2 dst_stage, u32 offset) {
+    if (dst_acess_mask == access_mask && stage == dst_stage) {
+        return;
+    }
+
+    barriers.emplace_back(vk::BufferMemoryBarrier2{
+        .srcStageMask = stage,
+        .srcAccessMask = access_mask,
+        .dstStageMask = dst_stage,
+        .dstAccessMask = dst_acess_mask,
+        .buffer = buffer.buffer,
+        .offset = offset,
+        .size = size_bytes - offset,
+    });
+    access_mask = dst_acess_mask;
+    stage = dst_stage;
+}
+
 void Buffer::Fill(u64 offset, u32 num_bytes, u32 value) const {
     scheduler->EndRendering();
     ASSERT_MSG(offset % 4 == 0 && num_bytes % 4 == 0,
@@ -190,6 +209,63 @@ void Buffer::InlineData(u64 offset, u32 value) const {
         .dependencyFlags = vk::DependencyFlagBits::eByRegion,
         .bufferMemoryBarrierCount = 1,
         .pBufferMemoryBarriers = &post_barrier,
+    });
+}
+
+void Buffer::CopyBuffer(Buffer& src_buffer, const Copies& copies) const {
+    scheduler->EndRendering();
+    const auto cmdbuf = scheduler->CommandBuffer();
+    const auto num_bytes = std::min(size_bytes, src_buffer.size_bytes);
+    const vk::BufferMemoryBarrier2 pre_barriers[2] = {
+        {
+            .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+            .srcAccessMask = vk::AccessFlagBits2::eMemoryRead,
+            .dstStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+            .dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
+            .buffer = buffer,
+            .offset = 0,
+            .size = num_bytes,
+        },
+        {
+            .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+            .srcAccessMask = vk::AccessFlagBits2::eMemoryWrite,
+            .dstStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+            .dstAccessMask = vk::AccessFlagBits2::eTransferRead,
+            .buffer = src_buffer.Handle(),
+            .offset = 0,
+            .size = num_bytes,
+        },
+    };
+    const vk::BufferMemoryBarrier2 post_barriers[2] = {
+        {
+            .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+            .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+            .dstStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+            .dstAccessMask = vk::AccessFlagBits2::eMemoryRead,
+            .buffer = buffer,
+            .offset = 0,
+            .size = num_bytes,
+        },
+        {
+            .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+            .srcAccessMask = vk::AccessFlagBits2::eTransferRead,
+            .dstStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+            .dstAccessMask = vk::AccessFlagBits2::eMemoryWrite,
+            .buffer = src_buffer.Handle(),
+            .offset = 0,
+            .size = num_bytes,
+        },
+    };
+    cmdbuf.pipelineBarrier2(vk::DependencyInfo{
+        .dependencyFlags = vk::DependencyFlagBits::eByRegion,
+        .bufferMemoryBarrierCount = 2,
+        .pBufferMemoryBarriers = pre_barriers,
+    });
+    cmdbuf.copyBuffer(src_buffer.Handle(), buffer, copies);
+    cmdbuf.pipelineBarrier2(vk::DependencyInfo{
+        .dependencyFlags = vk::DependencyFlagBits::eByRegion,
+        .bufferMemoryBarrierCount = 2,
+        .pBufferMemoryBarriers = post_barriers,
     });
 }
 

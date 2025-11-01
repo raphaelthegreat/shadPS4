@@ -11,6 +11,8 @@
 #include "video_core/amdgpu/resource.h"
 #include "video_core/renderer_vulkan/vk_common.h"
 
+#include <boost/container/small_vector.hpp>
+
 namespace Vulkan {
 class Instance;
 class Scheduler;
@@ -124,32 +126,16 @@ public:
         return buffer.bda_addr;
     }
 
-    std::optional<vk::BufferMemoryBarrier2> GetBarrier(vk::AccessFlags2 dst_acess_mask,
-                                                       vk::PipelineStageFlagBits2 dst_stage,
-                                                       u32 offset = 0) {
-        if (dst_acess_mask == access_mask && stage == dst_stage) {
-            return {};
-        }
-
-        DEBUG_ASSERT(offset < size_bytes);
-
-        const auto barrier = vk::BufferMemoryBarrier2{
-            .srcStageMask = stage,
-            .srcAccessMask = access_mask,
-            .dstStageMask = dst_stage,
-            .dstAccessMask = dst_acess_mask,
-            .buffer = buffer.buffer,
-            .offset = offset,
-            .size = size_bytes - offset,
-        };
-        access_mask = dst_acess_mask;
-        stage = dst_stage;
-        return barrier;
-    }
+    using Barriers = boost::container::small_vector<vk::BufferMemoryBarrier2, 2>;
+    void AddBarrier(Barriers& barriers, vk::AccessFlags2 dst_acess_mask,
+                    vk::PipelineStageFlagBits2 dst_stage, u32 offset = 0);
 
     void Fill(u64 offset, u32 num_bytes, u32 value) const;
 
     void InlineData(u64 offset, u32 value) const;
+
+    using Copies = boost::container::small_vector<vk::BufferCopy, 2>;
+    void CopyBuffer(Buffer& src_buffer, const Copies& copies) const;
 
 public:
     VAddr cpu_addr = 0;

@@ -135,7 +135,6 @@ private:
     boost::container::static_vector<VideoCore::ImageId, Shader::NUM_IMAGES> bound_images;
 
     Pipeline::DescriptorWrites set_writes;
-    Pipeline::BufferBarriers buffer_barriers;
     Shader::PushData push_data;
 
     using BufferBindingInfo = std::tuple<VideoCore::BufferId, AmdGpu::Buffer, u64>;
