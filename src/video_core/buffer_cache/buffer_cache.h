@@ -3,7 +3,6 @@
 
 #pragma once
 
-#include <shared_mutex>
 #include <boost/container/small_vector.hpp>
 #include "common/lru_cache.h"
 #include "common/slot_vector.h"
@@ -225,7 +224,6 @@ private:
     Buffer gds_buffer;
     Buffer bda_pagetable_buffer;
     Buffer fault_buffer;
-    std::shared_mutex slot_buffers_mutex;
     Common::SlotVector<Buffer> slot_buffers;
     u64 total_used_memory = 0;
     u64 trigger_gc_memory = 0;

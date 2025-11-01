@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
-#include <mutex>
 #include "common/alignment.h"
 #include "common/debug.h"
 #include "common/scope_exit.h"
@@ -656,14 +655,10 @@ BufferId BufferCache::CreateBuffer(VAddr device_addr, u32 wanted_size) {
     wanted_size = static_cast<u32>(device_addr_end - device_addr);
     const OverlapResult overlap = ResolveOverlaps(device_addr, wanted_size);
     const u32 size = static_cast<u32>(overlap.end - overlap.begin);
-    const BufferId new_buffer_id = [&] {
-        std::scoped_lock lk{slot_buffers_mutex};
-        return slot_buffers.insert(instance, scheduler, MemoryUsage::DeviceLocal, overlap.begin,
-                                   AllFlags | vk::BufferUsageFlagBits::eShaderDeviceAddress, size);
-    }();
+    const BufferId new_buffer_id =
+        slot_buffers.insert(instance, scheduler, MemoryUsage::DeviceLocal, overlap.begin,
+                            AllFlags | vk::BufferUsageFlagBits::eShaderDeviceAddress, size);
     auto& new_buffer = slot_buffers[new_buffer_id];
-    const size_t size_bytes = new_buffer.SizeBytes();
-    const auto cmdbuf = scheduler.CommandBuffer();
     for (const BufferId overlap_id : overlap.ids) {
         JoinOverlap(new_buffer_id, overlap_id, !overlap.has_stream_leap);
     }
