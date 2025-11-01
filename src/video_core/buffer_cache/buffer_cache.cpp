@@ -341,25 +341,25 @@ void BufferCache::BindIndexBuffer(u32 index_offset) {
     cmdbuf.bindIndexBuffer(vk_buffer->Handle(), offset, index_type);
 }
 
-void BufferCache::InlineData(VAddr address, const void* value, u32 num_bytes, bool is_gds) {
+void BufferCache::InlineData(VAddr address, u32 value, bool is_gds) {
     ASSERT_MSG(address % 4 == 0, "GDS offset must be dword aligned");
     if (!is_gds) {
-        if (!memory->TryWriteBacking(std::bit_cast<void*>(address), value, num_bytes)) {
-            std::memcpy(std::bit_cast<void*>(address), value, num_bytes);
+        if (!memory->TryWriteBacking(std::bit_cast<void*>(address), &value, sizeof(u32))) {
+            std::memcpy(std::bit_cast<void*>(address), &value, sizeof(u32));
             return;
         }
-        if (!IsRegionRegistered(address, num_bytes)) {
+        if (!IsRegionRegistered(address, sizeof(u32))) {
             return;
         }
     }
-    Buffer* buffer = [&] {
+    auto& buffer = [&] -> const Buffer& {
         if (is_gds) {
-            return &gds_buffer;
+            return gds_buffer;
         }
-        const BufferId buffer_id = FindBuffer(address, num_bytes);
-        return &slot_buffers[buffer_id];
+        const BufferId buffer_id = FindBuffer(address, sizeof(u32));
+        return slot_buffers[buffer_id];
     }();
-    InlineDataBuffer(*buffer, address, value, num_bytes);
+    buffer.InlineData(buffer.Offset(address), value);
 }
 
 void BufferCache::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, bool src_gds) {
@@ -992,49 +992,6 @@ void BufferCache::MemoryBarrier() {
     cmdbuf.pipelineBarrier2(vk::DependencyInfo{
         .memoryBarrierCount = 1,
         .pMemoryBarriers = &barrier,
-    });
-}
-
-void BufferCache::InlineDataBuffer(Buffer& buffer, VAddr address, const void* value,
-                                   u32 num_bytes) {
-    scheduler.EndRendering();
-    const auto cmdbuf = scheduler.CommandBuffer();
-    const vk::BufferMemoryBarrier2 pre_barrier = {
-        .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
-        .srcAccessMask = vk::AccessFlagBits2::eMemoryRead,
-        .dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
-        .dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
-        .buffer = buffer.Handle(),
-        .offset = buffer.Offset(address),
-        .size = num_bytes,
-    };
-    const vk::BufferMemoryBarrier2 post_barrier = {
-        .srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
-        .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
-        .dstStageMask = vk::PipelineStageFlagBits2::eAllCommands,
-        .dstAccessMask = vk::AccessFlagBits2::eMemoryRead,
-        .buffer = buffer.Handle(),
-        .offset = buffer.Offset(address),
-        .size = num_bytes,
-    };
-    cmdbuf.pipelineBarrier2(vk::DependencyInfo{
-        .dependencyFlags = vk::DependencyFlagBits::eByRegion,
-        .bufferMemoryBarrierCount = 1,
-        .pBufferMemoryBarriers = &pre_barrier,
-    });
-    // vkCmdUpdateBuffer can only copy up to 65536 bytes at a time.
-    static constexpr u32 UpdateBufferMaxSize = 65536;
-    const auto dst_offset = buffer.Offset(address);
-    for (u32 offset = 0; offset < num_bytes; offset += UpdateBufferMaxSize) {
-        const auto* update_src = static_cast<const u8*>(value) + offset;
-        const auto update_dst = dst_offset + offset;
-        const auto update_size = std::min(num_bytes - offset, UpdateBufferMaxSize);
-        cmdbuf.updateBuffer(buffer.Handle(), update_dst, update_size, update_src);
-    }
-    cmdbuf.pipelineBarrier2(vk::DependencyInfo{
-        .dependencyFlags = vk::DependencyFlagBits::eByRegion,
-        .bufferMemoryBarrierCount = 1,
-        .pBufferMemoryBarriers = &post_barrier,
     });
 }
 

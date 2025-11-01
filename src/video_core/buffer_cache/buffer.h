@@ -147,7 +147,9 @@ public:
         return barrier;
     }
 
-    void Fill(u64 offset, u32 num_bytes, u32 value);
+    void Fill(u64 offset, u32 num_bytes, u32 value) const;
+
+    void InlineData(u64 offset, u32 value) const;
 
 public:
     VAddr cpu_addr = 0;
@@ -162,7 +164,7 @@ public:
     Vulkan::Scheduler* scheduler;
     MemoryUsage usage;
     UniqueBuffer buffer;
-    vk::Flags<vk::AccessFlagBits2> access_mask{
+    vk::AccessFlags2 access_mask{
         vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite |
         vk::AccessFlagBits2::eTransferRead | vk::AccessFlagBits2::eTransferWrite};
     vk::PipelineStageFlagBits2 stage{vk::PipelineStageFlagBits2::eAllCommands};
