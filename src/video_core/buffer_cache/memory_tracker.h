@@ -41,23 +41,16 @@ public:
             });
     }
 
-    /// Mark region as CPU modified, notifying the device_tracker about this change
-    void MarkRegionAsCpuModified(VAddr dirty_cpu_addr, u64 query_size) {
-        IteratePages<false>(dirty_cpu_addr, query_size,
-                            [](RegionManager* manager, u64 offset, size_t size) {
-                                std::scoped_lock lk{manager->lock};
-                                manager->template ChangeRegionState<Type::CPU, true>(
-                                    manager->GetCpuAddr() + offset, size);
-                            });
-    }
-
     /// Unmark region as modified from the host GPU
-    void UnmarkRegionAsGpuModified(VAddr dirty_cpu_addr, u64 query_size) noexcept {
+    void UnmarkRegionAsGpuModified(VAddr dirty_cpu_addr, u64 query_size, bool is_write) noexcept {
         IteratePages<false>(dirty_cpu_addr, query_size,
-                            [](RegionManager* manager, u64 offset, size_t size) {
+                            [is_write](RegionManager* manager, u64 offset, size_t size) {
                                 std::scoped_lock lk{manager->lock};
-                                manager->template ChangeRegionState<Type::GPU, false>(
-                                    manager->GetCpuAddr() + offset, size);
+                                manager->template ChangeRegionState<Type::GPU, false>(offset, size);
+                                if (is_write) {
+                                    manager->template ChangeRegionState<Type::CPU, true>(offset,
+                                                                                         size);
+                                }
                             });
     }
 
@@ -75,8 +68,7 @@ public:
                         manager->template IsRegionModified<Type::GPU>(offset, size)) {
                         return true;
                     }
-                    manager->template ChangeRegionState<Type::CPU, true>(
-                        manager->GetCpuAddr() + offset, size);
+                    manager->template ChangeRegionState<Type::CPU, true>(offset, size);
                     return false;
                 }();
                 if (should_flush) {
@@ -91,8 +83,8 @@ public:
         IteratePages<true>(query_cpu_range, query_size,
                            [&func, is_written](RegionManager* manager, u64 offset, size_t size) {
                                manager->lock.lock();
-                               manager->template ForEachModifiedRange<Type::CPU, true>(
-                                   manager->GetCpuAddr() + offset, size, func);
+                               manager->template ForEachModifiedRange<Type::CPU, true>(offset, size,
+                                                                                       func);
                                if (!is_written) {
                                    manager->lock.unlock();
                                }
@@ -103,8 +95,7 @@ public:
         }
         IteratePages<false>(query_cpu_range, query_size,
                             [&func, is_written](RegionManager* manager, u64 offset, size_t size) {
-                                manager->template ChangeRegionState<Type::GPU, true>(
-                                    manager->GetCpuAddr() + offset, size);
+                                manager->template ChangeRegionState<Type::GPU, true>(offset, size);
                                 manager->lock.unlock();
                             });
     }
@@ -112,12 +103,11 @@ public:
     /// Call 'func' for each GPU modified range and unmark those pages as GPU modified
     template <bool clear>
     void ForEachDownloadRange(VAddr query_cpu_range, u64 query_size, auto&& func) {
-        IteratePages<false>(query_cpu_range, query_size,
-                            [&func](RegionManager* manager, u64 offset, size_t size) {
-                                std::scoped_lock lk{manager->lock};
-                                manager->template ForEachModifiedRange<Type::GPU, clear>(
-                                    manager->GetCpuAddr() + offset, size, func);
-                            });
+        IteratePages<false>(
+            query_cpu_range, query_size, [&func](RegionManager* manager, u64 offset, size_t size) {
+                std::scoped_lock lk{manager->lock};
+                manager->template ForEachModifiedRange<Type::GPU, clear>(offset, size, func);
+            });
     }
 
 private:

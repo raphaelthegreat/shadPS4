@@ -4,18 +4,17 @@
 #pragma once
 
 #include "common/config.h"
+#include "common/debug.h"
 #include "common/div_ceil.h"
-#include "common/logging/log.h"
+#include "common/types.h"
+#include "video_core/buffer_cache/region_definitions.h"
+#include "video_core/page_manager.h"
 
 #ifdef __linux__
 #include "common/adaptive_mutex.h"
 #else
 #include "common/spin_lock.h"
 #endif
-#include "common/debug.h"
-#include "common/types.h"
-#include "video_core/buffer_cache/region_definitions.h"
-#include "video_core/page_manager.h"
 
 namespace VideoCore {
 
@@ -48,10 +47,6 @@ public:
         return cpu_addr;
     }
 
-    static constexpr size_t SanitizeAddress(size_t address) {
-        return static_cast<size_t>(std::max<s64>(static_cast<s64>(address), 0LL));
-    }
-
     template <Type type>
     RegionBits& GetRegionBits() noexcept {
         if constexpr (type == Type::CPU) {
@@ -77,15 +72,10 @@ public:
      * @param size          Size in bytes to mark or unmark as modified
      */
     template <Type type, bool enable>
-    void ChangeRegionState(u64 dirty_addr, u64 size) noexcept(type == Type::GPU) {
+    void ChangeRegionState(u64 offset, u64 size) noexcept(type == Type::GPU) {
         RENDERER_TRACE;
-        const size_t offset = dirty_addr - cpu_addr;
-        const size_t start_page = SanitizeAddress(offset) / TRACKER_BYTES_PER_PAGE;
-        const size_t end_page =
-            Common::DivCeil(SanitizeAddress(offset + size), TRACKER_BYTES_PER_PAGE);
-        if (start_page >= NUM_PAGES_PER_REGION || end_page <= start_page) {
-            return;
-        }
+        const size_t start_page = offset / TRACKER_BYTES_PER_PAGE;
+        const size_t end_page = Common::DivCeil(offset + size, TRACKER_BYTES_PER_PAGE);
 
         RegionBits& bits = GetRegionBits<type>();
         if constexpr (enable) {
@@ -109,15 +99,10 @@ public:
      * @param func            Function to call for each turned off region
      */
     template <Type type, bool clear>
-    void ForEachModifiedRange(VAddr query_cpu_range, s64 size, auto&& func) {
+    void ForEachModifiedRange(u64 offset, s64 size, auto&& func) {
         RENDERER_TRACE;
-        const size_t offset = query_cpu_range - cpu_addr;
-        const size_t start_page = SanitizeAddress(offset) / TRACKER_BYTES_PER_PAGE;
-        const size_t end_page =
-            Common::DivCeil(SanitizeAddress(offset + size), TRACKER_BYTES_PER_PAGE);
-        if (start_page >= NUM_PAGES_PER_REGION || end_page <= start_page) {
-            return;
-        }
+        const u64 start_page = offset / TRACKER_BYTES_PER_PAGE;
+        const u64 end_page = Common::DivCeil(offset + size, TRACKER_BYTES_PER_PAGE);
 
         RegionBits& bits = GetRegionBits<type>();
         RegionBits mask(bits, start_page, end_page);
@@ -145,13 +130,8 @@ public:
     template <Type type>
     [[nodiscard]] bool IsRegionModified(u64 offset, u64 size) noexcept {
         RENDERER_TRACE;
-        const size_t start_page = SanitizeAddress(offset) / TRACKER_BYTES_PER_PAGE;
-        const size_t end_page =
-            Common::DivCeil(SanitizeAddress(offset + size), TRACKER_BYTES_PER_PAGE);
-        if (start_page >= NUM_PAGES_PER_REGION || end_page <= start_page) {
-            return false;
-        }
-
+        const u64 start_page = offset / TRACKER_BYTES_PER_PAGE;
+        const u64 end_page = Common::DivCeil(offset + size, TRACKER_BYTES_PER_PAGE);
         const RegionBits& bits = GetRegionBits<type>();
         RegionBits test(bits, start_page, end_page);
         return test.Any();
