@@ -4,6 +4,7 @@
 #include <algorithm>
 #include "common/alignment.h"
 #include "common/debug.h"
+#include "common/div_ceil.h"
 #include "common/scope_exit.h"
 #include "core/memory.h"
 #include "video_core/amdgpu/liverpool.h"
@@ -356,10 +357,6 @@ std::pair<Buffer*, u32> BufferCache::ObtainBufferForImage(VAddr gpu_addr, u32 si
 bool BufferCache::IsRegionRegistered(VAddr addr, size_t size) {
     // Check if we are missing some edge case here
     return buffer_ranges.Intersects(addr, size);
-}
-
-bool BufferCache::IsRegionCpuModified(VAddr addr, size_t size) {
-    return memory_tracker->IsRegionCpuModified(addr, size);
 }
 
 bool BufferCache::IsRegionGpuModified(VAddr addr, size_t size) {
