@@ -11,6 +11,7 @@
 #include "video_core/buffer_cache/buffer_cache.h"
 #include "video_core/page_manager.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
+#include "video_core/renderer_vulkan/vk_runtime.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/texture_cache/host_compatibility.h"
 #include "video_core/texture_cache/texture_cache.h"
@@ -23,10 +24,11 @@ static constexpr u64 NumFramesBeforeRemoval = 32;
 
 TextureCache::TextureCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& scheduler_,
                            AmdGpu::Liverpool* liverpool_, BufferCache& buffer_cache_,
-                           PageManager& tracker_)
-    : instance{instance_}, scheduler{scheduler_}, liverpool{liverpool_},
-      buffer_cache{buffer_cache_}, tracker{tracker_}, blit_helper{instance, scheduler},
-      tile_manager{instance, scheduler, buffer_cache.GetUtilityBuffer(MemoryUsage::Stream)} {
+                           Vulkan::Runtime& runtime_, PageManager& tracker_)
+    : instance{instance_}, scheduler{scheduler_}, runtime{runtime_}, liverpool{liverpool_},
+      buffer_cache{buffer_cache_}, tracker{tracker_},
+      tile_manager{instance, scheduler, runtime,
+                   buffer_cache.GetUtilityBuffer(MemoryUsage::Stream)} {
     // Create basic null image at fixed image ID.
     const auto null_id = GetNullImage(vk::Format::eR8G8B8A8Unorm);
     ASSERT(null_id.index == NULL_IMAGE_ID.index);
@@ -72,8 +74,7 @@ ImageId TextureCache::GetNullImage(const vk::Format format) {
     info.num_bits = 32;
     info.UpdateSize();
 
-    const ImageId null_id =
-        slot_images.insert(instance, scheduler, blit_helper, slot_image_views, info);
+    const ImageId null_id = slot_images.insert(instance, runtime, slot_image_views, info);
     auto& image = slot_images[null_id];
     Vulkan::SetObjectName(instance.GetDevice(), image.GetImage(),
                           fmt::format("Null Image ({})", vk::to_string(format)));
@@ -119,12 +120,8 @@ void TextureCache::DownloadImageMemory(ImageId image_id) {
         .imageOffset = {0, 0, 0},
         .imageExtent = {image.info.size.width, image.info.size.height, 1},
     };
-    scheduler.EndRendering();
-    const auto cmdbuf = scheduler.CommandBuffer();
-    image.Transit(vk::ImageLayout::eTransferSrcOptimal, vk::AccessFlagBits2::eTransferRead, {});
-    cmdbuf.copyImageToBuffer(image.GetImage(), vk::ImageLayout::eTransferSrcOptimal,
-                             download_buffer.Handle(), image_download);
-
+    const std::array download_copies{image_download};
+    runtime.DownloadImage(image, download_buffer, download_size, download_copies);
     {
         std::unique_lock lock(downloaded_images_mutex);
         downloaded_images_queue.emplace(scheduler.CurrentTick(), image.info.guest_address, download,
@@ -267,8 +264,7 @@ ImageId TextureCache::ResolveDepthOverlap(const ImageInfo& requested_info, Bindi
     if (recreate) {
         auto new_info = requested_info;
         new_info.resources = std::max(requested_info.resources, cache_image.info.resources);
-        const auto new_image_id =
-            slot_images.insert(instance, scheduler, blit_helper, slot_image_views, new_info);
+        const auto new_image_id = slot_images.insert(instance, runtime, slot_image_views, new_info);
         RegisterImage(new_image_id);
 
         // Inherit image usage
@@ -278,28 +274,7 @@ ImageId TextureCache::ResolveDepthOverlap(const ImageInfo& requested_info, Bindi
         // When creating a depth buffer through overlap resolution don't clear it on first use.
         new_image.info.meta_info.htile_clear_mask = 0;
 
-        if (cache_image.info.num_samples == 1 && new_info.num_samples == 1) {
-            // Perform depth<->color copy using the intermediate copy buffer.
-            if (instance.IsMaintenance8Supported()) {
-                new_image.CopyImage(cache_image);
-            } else {
-                const auto& copy_buffer = buffer_cache.GetUtilityBuffer(MemoryUsage::DeviceLocal);
-                new_image.CopyImageWithBuffer(cache_image, copy_buffer.Handle(), 0);
-            }
-        } else if (cache_image.info.num_samples == 1 && new_info.props.is_depth &&
-                   new_info.num_samples > 1) {
-            // Perform a rendering pass to transfer the channels of source as samples in dest.
-            cache_image.Transit(vk::ImageLayout::eShaderReadOnlyOptimal,
-                                vk::AccessFlagBits2::eShaderRead, {});
-            new_image.Transit(vk::ImageLayout::eDepthAttachmentOptimal,
-                              vk::AccessFlagBits2::eDepthStencilAttachmentWrite, {});
-            blit_helper.ReinterpretColorAsMsDepth(
-                new_info.size.width, new_info.size.height, new_info.num_samples,
-                cache_image.info.pixel_format, new_info.pixel_format, cache_image.GetImage(),
-                new_image.GetImage());
-        } else {
-            LOG_WARNING(Render_Vulkan, "Unimplemented depth overlap copy");
-        }
+        runtime.CopyColorAndDepth(cache_image, new_image);
 
         // Free the cache image.
         FreeImage(cache_image_id);
@@ -407,7 +382,7 @@ std::tuple<ImageId, int, int> TextureCache::ResolveOverlap(const ImageInfo& imag
                 // We need to have a larger, already allocated image to copy this one into
                 if (merged_image_id) {
                     auto& merged_image = slot_images[merged_image_id];
-                    merged_image.CopyMip(cache_image, mip, slice);
+                    // merged_image.CopyMip(cache_image, mip, slice);
                     FreeImage(cache_image_id);
                 }
             }
@@ -418,24 +393,19 @@ std::tuple<ImageId, int, int> TextureCache::ResolveOverlap(const ImageInfo& imag
 }
 
 ImageId TextureCache::ExpandImage(const ImageInfo& info, ImageId image_id) {
-    const auto new_image_id =
-        slot_images.insert(instance, scheduler, blit_helper, slot_image_views, info);
+    const auto new_image_id = slot_images.insert(instance, runtime, slot_image_views, info);
     RegisterImage(new_image_id);
 
     auto& src_image = slot_images[image_id];
     auto& new_image = slot_images[new_image_id];
 
     RefreshImage(new_image);
-    new_image.CopyImage(src_image);
-
+    runtime.CopyImage(src_image, new_image);
     if (src_image.binding.is_bound || src_image.binding.is_target) {
         src_image.binding.needs_rebind = 1u;
     }
-
     FreeImage(image_id);
-
     TrackImage(new_image_id);
-    new_image.flags &= ~ImageFlagBits::Dirty;
     return new_image_id;
 }
 
@@ -476,8 +446,8 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
     }
 
     // Try to resolve overlaps (if any)
-    int view_mip{-1};
-    int view_slice{-1};
+    s32 view_mip{-1};
+    s32 view_slice{-1};
     if (!image_id) {
         for (const auto& cache_id : image_ids) {
             view_mip = -1;
@@ -508,7 +478,7 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
     }
     // Create and register a new image
     if (!image_id) {
-        image_id = slot_images.insert(instance, scheduler, blit_helper, slot_image_views, info);
+        image_id = slot_images.insert(instance, runtime, slot_image_views, info);
         RegisterImage(image_id);
     }
 
@@ -623,8 +593,7 @@ ImageView& TextureCache::FindDepthTarget(ImageId image_id, const ImageDesc& desc
             info.guest_address = desc.info.stencil_addr;
             info.guest_size = desc.info.stencil_size;
             info.size = desc.info.size;
-            stencil_id =
-                slot_images.insert(instance, scheduler, blit_helper, slot_image_views, info);
+            stencil_id = slot_images.insert(instance, runtime, slot_image_views, info);
             RegisterImage(stencil_id);
         }
         Image& image = slot_images[stencil_id];
@@ -705,26 +674,15 @@ void TextureCache::RefreshImage(Image& image) {
         return;
     }
 
-    scheduler.EndRendering();
-
     const auto [in_buffer, in_offset] =
         buffer_cache.ObtainBufferForImage(image.info.guest_address, image.info.guest_size);
-    if (auto barrier = in_buffer->GetBarrier(vk::AccessFlagBits2::eTransferRead,
-                                             vk::PipelineStageFlagBits2::eTransfer)) {
-        scheduler.CommandBuffer().pipelineBarrier2(vk::DependencyInfo{
-            .dependencyFlags = vk::DependencyFlagBits::eByRegion,
-            .bufferMemoryBarrierCount = 1,
-            .pBufferMemoryBarriers = &barrier.value(),
-        });
-    }
-
-    const auto [buffer, offset] =
-        tile_manager.DetileImage(in_buffer->Handle(), in_offset, image.info);
+    const auto [buffer, offset] = tile_manager.DetileImage(in_buffer, in_offset, image.info);
     for (auto& copy : image_copies) {
         copy.bufferOffset += offset;
     }
 
-    image.Upload(image_copies, buffer, offset);
+    runtime.UploadImage(image, *buffer, image.info.guest_size, image_copies);
+    image.flags &= ~VideoCore::ImageFlagBits::Dirty;
 }
 
 vk::Sampler TextureCache::GetSampler(const AmdGpu::Sampler& sampler,

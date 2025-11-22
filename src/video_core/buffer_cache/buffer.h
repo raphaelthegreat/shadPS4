@@ -7,8 +7,8 @@
 #include <optional>
 #include <utility>
 #include <vector>
+#include "common/assert.h"
 #include "common/types.h"
-#include "video_core/amdgpu/resource.h"
 #include "video_core/renderer_vulkan/vk_common.h"
 
 namespace Vulkan {
@@ -71,8 +71,7 @@ struct UniqueBuffer {
     vk::DeviceAddress bda_addr = 0;
 };
 
-class Buffer {
-public:
+struct Buffer {
     explicit Buffer(const Vulkan::Instance& instance, Vulkan::Scheduler& scheduler,
                     MemoryUsage usage, VAddr cpu_addr_, vk::BufferUsageFlags flags,
                     u64 size_bytes_);
@@ -124,31 +123,6 @@ public:
         return buffer.bda_addr;
     }
 
-    std::optional<vk::BufferMemoryBarrier2> GetBarrier(vk::AccessFlags2 dst_acess_mask,
-                                                       vk::PipelineStageFlagBits2 dst_stage,
-                                                       u32 offset = 0) {
-        if (dst_acess_mask == access_mask && stage == dst_stage) {
-            return {};
-        }
-
-        DEBUG_ASSERT(offset < size_bytes);
-
-        const auto barrier = vk::BufferMemoryBarrier2{
-            .srcStageMask = stage,
-            .srcAccessMask = access_mask,
-            .dstStageMask = dst_stage,
-            .dstAccessMask = dst_acess_mask,
-            .buffer = buffer.buffer,
-            .offset = offset,
-            .size = size_bytes - offset,
-        };
-        access_mask = dst_acess_mask;
-        stage = dst_stage;
-        return barrier;
-    }
-
-    void Fill(u64 offset, u32 num_bytes, u32 value);
-
 public:
     VAddr cpu_addr = 0;
     bool is_picked{};
@@ -162,10 +136,6 @@ public:
     Vulkan::Scheduler* scheduler;
     MemoryUsage usage;
     UniqueBuffer buffer;
-    vk::Flags<vk::AccessFlagBits2> access_mask{
-        vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite |
-        vk::AccessFlagBits2::eTransferRead | vk::AccessFlagBits2::eTransferWrite};
-    vk::PipelineStageFlagBits2 stage{vk::PipelineStageFlagBits2::eAllCommands};
 };
 
 class StreamBuffer : public Buffer {

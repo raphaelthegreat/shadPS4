@@ -21,7 +21,7 @@ class MemoryManager;
 }
 
 namespace Vulkan {
-class GraphicsPipeline;
+class Runtime;
 }
 
 namespace VideoCore {
@@ -69,7 +69,7 @@ public:
 public:
     explicit BufferCache(const Vulkan::Instance& instance, Vulkan::Scheduler& scheduler,
                          AmdGpu::Liverpool* liverpool, TextureCache& texture_cache,
-                         PageManager& tracker);
+                         Vulkan::Runtime& res_context, PageManager& tracker);
     ~BufferCache();
 
     /// Returns a pointer to GDS device local buffer.
@@ -98,8 +98,6 @@ public:
             return stream_buffer;
         } else if (usage == MemoryUsage::Download) {
             return download_buffer;
-        } else if (usage == MemoryUsage::DeviceLocal) {
-            return device_buffer;
         } else {
             return staging_buffer;
         }
@@ -110,12 +108,6 @@ public:
 
     /// Flushes any GPU modified buffer in the logical page range back to CPU memory.
     void ReadMemory(VAddr device_addr, u64 size, bool is_write = false);
-
-    /// Binds host vertex buffers for the current draw.
-    void BindVertexBuffers(const Vulkan::GraphicsPipeline& pipeline);
-
-    /// Bind host index buffer for the current draw.
-    void BindIndexBuffer(u32 index_offset);
 
     /// Writes a value to GPU buffer. (uses command buffer to temporarily store the data)
     void FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds);
@@ -188,12 +180,10 @@ private:
     bool SynchronizeBuffer(Buffer& buffer, VAddr device_addr, u32 size, bool is_written,
                            bool is_texel_buffer);
 
-    vk::Buffer UploadCopies(Buffer& buffer, std::span<vk::BufferCopy> copies,
-                            size_t total_size_bytes);
+    Buffer* UploadStaging(Buffer& buffer, std::span<vk::BufferCopy> copies,
+                          size_t total_size_bytes);
 
     bool SynchronizeBufferFromImage(Buffer& buffer, VAddr device_addr, u32 size);
-
-    void WriteDataBuffer(Buffer& buffer, VAddr address, const void* value, u32 num_bytes);
 
     void TouchBuffer(const Buffer& buffer);
 
@@ -201,6 +191,7 @@ private:
 
     const Vulkan::Instance& instance;
     Vulkan::Scheduler& scheduler;
+    Vulkan::Runtime& res_context;
     AmdGpu::Liverpool* liverpool;
     Core::MemoryManager* memory;
     TextureCache& texture_cache;
@@ -209,7 +200,6 @@ private:
     StreamBuffer staging_buffer;
     StreamBuffer stream_buffer;
     StreamBuffer download_buffer;
-    StreamBuffer device_buffer;
     Buffer gds_buffer;
     Buffer bda_pagetable_buffer;
     Common::SlotVector<Buffer> slot_buffers;

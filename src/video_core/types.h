@@ -3,13 +3,9 @@
 
 #pragma once
 
-#include "common/slot_vector.h"
 #include "common/types.h"
 
 namespace VideoCore {
-
-using ImageId = Common::SlotId;
-using ImageViewId = Common::SlotId;
 
 struct Offset2D {
     s32 x;

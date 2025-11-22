@@ -3,10 +3,11 @@
 
 #pragma once
 
+#include "common/slot_vector.h"
 #include "video_core/amdgpu/regs_depth.h"
 #include "video_core/amdgpu/resource.h"
 #include "video_core/renderer_vulkan/vk_common.h"
-#include "video_core/texture_cache/types.h"
+#include "video_core/types.h"
 
 namespace AmdGpu {
 struct ColorBuffer;
@@ -22,6 +23,8 @@ class Scheduler;
 } // namespace Vulkan
 
 namespace VideoCore {
+
+using ImageViewId = Common::SlotId;
 
 struct ImageViewInfo {
     ImageViewInfo() = default;

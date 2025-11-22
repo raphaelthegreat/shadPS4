@@ -972,6 +972,8 @@ set(VIDEO_CORE src/video_core/amdgpu/cb_db_extent.h
                src/video_core/buffer_cache/region_manager.h
                src/video_core/renderer_vulkan/liverpool_to_vk.cpp
                src/video_core/renderer_vulkan/liverpool_to_vk.h
+               src/video_core/renderer_vulkan/vk_barrier_tracker.cpp
+               src/video_core/renderer_vulkan/vk_barrier_tracker.h
                src/video_core/renderer_vulkan/vk_common.cpp
                src/video_core/renderer_vulkan/vk_common.h
                src/video_core/renderer_vulkan/vk_compute_pipeline.cpp
@@ -992,6 +994,8 @@ set(VIDEO_CORE src/video_core/amdgpu/cb_db_extent.h
                src/video_core/renderer_vulkan/vk_presenter.h
                src/video_core/renderer_vulkan/vk_rasterizer.cpp
                src/video_core/renderer_vulkan/vk_rasterizer.h
+               src/video_core/renderer_vulkan/vk_runtime.cpp
+               src/video_core/renderer_vulkan/vk_runtime.h
                src/video_core/renderer_vulkan/vk_resource_pool.cpp
                src/video_core/renderer_vulkan/vk_resource_pool.h
                src/video_core/renderer_vulkan/vk_scheduler.cpp
@@ -1022,12 +1026,12 @@ set(VIDEO_CORE src/video_core/amdgpu/cb_db_extent.h
                src/video_core/texture_cache/texture_cache.h
                src/video_core/texture_cache/tile_manager.cpp
                src/video_core/texture_cache/tile_manager.h
-               src/video_core/texture_cache/types.h
                src/video_core/page_manager.cpp
                src/video_core/page_manager.h
                src/video_core/multi_level_page_table.h
                src/video_core/renderdoc.cpp
                src/video_core/renderdoc.h
+               src/video_core/types.h
 )
 
 set(IMGUI src/imgui/imgui_config.h

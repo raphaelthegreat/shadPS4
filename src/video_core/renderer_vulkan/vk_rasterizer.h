@@ -8,6 +8,7 @@
 #include "video_core/buffer_cache/buffer_cache.h"
 #include "video_core/page_manager.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
+#include "video_core/renderer_vulkan/vk_runtime.h"
 #include "video_core/texture_cache/texture_cache.h"
 
 namespace AmdGpu {
@@ -32,6 +33,10 @@ public:
 
     [[nodiscard]] Scheduler& GetScheduler() noexcept {
         return scheduler;
+    }
+
+    [[nodiscard]] Runtime& GetRuntime() noexcept {
+        return runtime;
     }
 
     [[nodiscard]] VideoCore::BufferCache& GetBufferCache() noexcept {
@@ -64,7 +69,6 @@ public:
     void MapMemory(VAddr addr, u64 size);
     void UnmapMemory(VAddr addr, u64 size);
 
-    void CpSync();
     u64 Flush();
     void Finish();
     void OnSubmit();
@@ -103,6 +107,9 @@ private:
     void BindTextures(const Shader::Info& stage, Shader::Backend::Bindings& binding);
     bool BindResources(const Pipeline* pipeline);
 
+    void BindVertexBuffers(const GraphicsPipeline* pipeline);
+    void BindIndexBuffer(u32 index_offset);
+
     void ResetBindings() {
         for (auto& image_id : bound_images) {
             texture_cache.GetImage(image_id).binding = {};
@@ -119,6 +126,7 @@ private:
 
     const Instance& instance;
     Scheduler& scheduler;
+    Runtime runtime;
     VideoCore::PageManager page_manager;
     VideoCore::BufferCache buffer_cache;
     VideoCore::TextureCache texture_cache;
@@ -136,7 +144,6 @@ private:
     boost::container::static_vector<VideoCore::ImageId, Shader::NUM_IMAGES> bound_images;
 
     Pipeline::DescriptorWrites set_writes;
-    Pipeline::BufferBarriers buffer_barriers;
     Shader::PushData push_data;
 
     using BufferBindingInfo = std::tuple<VideoCore::BufferId, AmdGpu::Buffer, u64>;
@@ -145,6 +152,7 @@ private:
     boost::container::static_vector<ImageBindingInfo, Shader::NUM_IMAGES> image_bindings;
     bool fault_process_pending{};
     bool attachment_feedback_loop{};
+    bool needs_barrier{};
 };
 
 } // namespace Vulkan

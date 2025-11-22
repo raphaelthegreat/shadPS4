@@ -10,19 +10,20 @@
 #include "video_core/texture_cache/image_view.h"
 
 #include <deque>
-#include <optional>
 #include <boost/container/small_vector.hpp>
 #include <boost/container/static_vector.hpp>
 
 namespace Vulkan {
 class Instance;
-class Scheduler;
+class Runtime;
 } // namespace Vulkan
 
 VK_DEFINE_HANDLE(VmaAllocation)
 VK_DEFINE_HANDLE(VmaAllocator)
 
 namespace VideoCore {
+
+using ImageId = Common::SlotId;
 
 enum ImageFlagBits : u32 {
     Empty = 0,
@@ -75,12 +76,24 @@ public:
     vk::ImageCreateInfo image_ci{};
 };
 
-constexpr Common::SlotId NULL_IMAGE_ID{0};
+constexpr ImageId NULL_IMAGE_ID{0};
 
-class BlitHelper;
+struct ImageState {
+    vk::PipelineStageFlags2 pl_stage = vk::PipelineStageFlagBits2::eAllCommands;
+    vk::AccessFlags2 access_mask = vk::AccessFlagBits2::eNone;
+    vk::ImageLayout layout = vk::ImageLayout::eUndefined;
+};
+struct BackingImage {
+    UniqueImage image;
+    ImageState state;
+    std::vector<ImageState> subresource_states;
+    boost::container::small_vector<ImageViewInfo, 4> image_view_infos;
+    boost::container::small_vector<ImageViewId, 4> image_view_ids;
+    u32 num_samples;
+};
 
 struct Image {
-    Image(const Vulkan::Instance& instance, Vulkan::Scheduler& scheduler, BlitHelper& blit_helper,
+    Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime,
           Common::SlotVector<ImageView>& slot_image_views, const ImageInfo& info);
     ~Image();
 
@@ -115,30 +128,9 @@ struct Image {
 
     ImageView& FindView(const ImageViewInfo& view_info, bool ensure_guest_samples = true);
 
-    using Barriers = boost::container::small_vector<vk::ImageMemoryBarrier2, 32>;
-    Barriers GetBarriers(vk::ImageLayout dst_layout, vk::AccessFlags2 dst_mask,
-                         vk::PipelineStageFlags2 dst_stage,
-                         std::optional<SubresourceRange> subres_range);
-    void Transit(vk::ImageLayout dst_layout, vk::AccessFlags2 dst_mask,
-                 std::optional<SubresourceRange> range, vk::CommandBuffer cmdbuf = {});
-    void Upload(std::span<const vk::BufferImageCopy> upload_copies, vk::Buffer buffer, u64 offset);
-    void Download(std::span<const vk::BufferImageCopy> download_copies, vk::Buffer buffer,
-                  u64 offset, u64 download_size);
-
-    void CopyImage(Image& src_image);
-    void CopyImageWithBuffer(Image& src_image, vk::Buffer buffer, u64 offset);
-    void CopyMip(Image& src_image, u32 mip, u32 slice);
-
-    void Resolve(Image& src_image, const VideoCore::SubresourceRange& mrt0_range,
-                 const VideoCore::SubresourceRange& mrt1_range);
-    void Clear(const vk::ClearValue& clear_value, const VideoCore::SubresourceRange& range);
-
-    void SetBackingSamples(u32 num_samples, bool copy_backing = true);
-
 public:
     const Vulkan::Instance* instance;
-    Vulkan::Scheduler* scheduler;
-    BlitHelper* blit_helper;
+    Vulkan::Runtime* runtime;
     Common::SlotVector<ImageView>* slot_image_views;
     ImageInfo info;
     vk::ImageAspectFlags aspect_mask = vk::ImageAspectFlagBits::eColor;
@@ -151,19 +143,6 @@ public:
     // Resource state tracking
     vk::ImageUsageFlags usage_flags;
     vk::FormatFeatureFlags2 format_features;
-    struct State {
-        vk::PipelineStageFlags2 pl_stage = vk::PipelineStageFlagBits2::eAllCommands;
-        vk::AccessFlags2 access_mask = vk::AccessFlagBits2::eNone;
-        vk::ImageLayout layout = vk::ImageLayout::eUndefined;
-    };
-    struct BackingImage {
-        UniqueImage image;
-        State state;
-        std::vector<State> subresource_states;
-        boost::container::small_vector<ImageViewInfo, 4> image_view_infos;
-        boost::container::small_vector<ImageViewId, 4> image_view_ids;
-        u32 num_samples;
-    };
     std::deque<BackingImage> backing_images;
     BackingImage* backing{};
     boost::container::static_vector<u64, 16> mip_hashes{};

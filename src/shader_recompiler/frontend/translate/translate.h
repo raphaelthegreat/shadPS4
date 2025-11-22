@@ -30,6 +30,7 @@ enum class ConditionOp : u32 {
 };
 
 enum class AtomicOp : u32 {
+    None,
     Swap,
     CmpSwap,
     Add,

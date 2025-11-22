@@ -7,7 +7,7 @@
 #include "video_core/amdgpu/cb_db_extent.h"
 #include "video_core/amdgpu/tiling.h"
 #include "video_core/renderer_vulkan/vk_common.h"
-#include "video_core/texture_cache/types.h"
+#include "video_core/types.h"
 
 namespace AmdGpu {
 struct ColorBuffer;

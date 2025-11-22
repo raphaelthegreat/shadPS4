@@ -331,7 +331,12 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
 
     auto& image = texture_cache.GetImage(image_id);
     auto image_view = *image.FindView(view_info).image_view;
-    image.Transit(vk::ImageLayout::eShaderReadOnlyOptimal, vk::AccessFlagBits2::eShaderRead, {});
+
+    auto& runtime = rasterizer->GetRuntime();
+    runtime.TransitionImageLayout(image, vk::ImageLayout::eShaderReadOnlyOptimal,
+                                  vk::PipelineStageFlagBits2::eFragmentShader,
+                                  vk::AccessFlagBits2::eShaderRead, {});
+    runtime.FlushBarriers();
 
     const vk::Extent2D image_size = {image.info.size.width, image.info.size.height};
     expected_ratio = static_cast<float>(image_size.width) / static_cast<float>(image_size.height);
