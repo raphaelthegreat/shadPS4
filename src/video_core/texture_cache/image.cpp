@@ -152,7 +152,7 @@ Image::Image(const Vulkan::Instance& instance_, Vulkan::Scheduler& scheduler_,
                             ? image_format_properties.value.imageFormatProperties.sampleCounts
                             : vk::SampleCountFlagBits::e1;
 
-    const vk::ImageCreateInfo image_ci = {
+    vk::ImageCreateInfo image_ci = {
         .flags = flags,
         .imageType = ConvertImageType(info.type),
         .format = supported_format,

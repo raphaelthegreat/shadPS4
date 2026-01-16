@@ -461,6 +461,9 @@ bool PipelineCache::RefreshGraphicsStages() {
     infos.fill(nullptr);
     modules.fill(nullptr);
     bind_stage(Stage::Fragment, LogicalStage::Fragment);
+    if (infos[u32(LogicalStage::Fragment)] && infos[u32(LogicalStage::Fragment)]->pgm_hash == 0xfe502793) { // image gather on 3d image
+        return false;
+    }
 
     const auto* fs_info = infos[static_cast<u32>(LogicalStage::Fragment)];
     key.mrt_mask = fs_info ? fs_info->mrt_mask : 0u;
@@ -524,7 +527,9 @@ bool PipelineCache::RefreshComputeKey() {
     Shader::Backend::Bindings binding{};
     const auto& cs_pgm = liverpool->GetCsRegs();
     const auto cs_params = AmdGpu::GetParams(cs_pgm);
-    if (cs_params.hash == 0xeb36a143) {
+    if (cs_params.hash == 0x34267ace || // gather on 3d image
+        cs_params.hash == 0x5bf35f2a || // gather on 3d image
+        cs_params.hash == 0xeb36a143) { // DS_ORDERED_COUNT
         return false;
     }
     std::tie(infos[0], modules[0], fetch_shader, compute_key.value) =

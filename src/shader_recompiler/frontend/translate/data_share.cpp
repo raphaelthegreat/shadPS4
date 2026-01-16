@@ -28,6 +28,10 @@ void Translator::EmitDataShare(const GcnInst& inst) {
         return DS_OP(inst, AtomicOp::Umin, false);
     case Opcode::DS_MAX_U32:
         return DS_OP(inst, AtomicOp::Umax, false);
+    case Opcode::DS_MIN_F32:
+        return DS_OP<IR::F32>(inst, AtomicOp::Fmin, false);
+    case Opcode::DS_MAX_F32:
+        return DS_OP<IR::F32>(inst, AtomicOp::Fmax, false);
     case Opcode::DS_AND_B32:
         return DS_OP(inst, AtomicOp::And, false);
     case Opcode::DS_OR_B32:
@@ -126,8 +130,8 @@ void Translator::DS_OP(const GcnInst& inst, AtomicOp op, bool rtn) {
         if (op == AtomicOp::Inc || op == AtomicOp::Dec) {
             return T{};
         }
-        if constexpr (std::is_same_v<T, IR::U32>) {
-            return GetSrc(inst.src[1]);
+        if constexpr (!std::is_same_v<T, IR::U64>) {
+            return GetSrc<T>(inst.src[1]);
         } else {
             return GetSrc64(inst.src[1]);
         }
@@ -136,35 +140,46 @@ void Translator::DS_OP(const GcnInst& inst, AtomicOp op, bool rtn) {
         ir.Imm32((u32(inst.control.ds.offset1) << 8u) + u32(inst.control.ds.offset0));
     const IR::U32 addr_offset = ir.IAdd(addr, offset);
     const T original_val = [&] -> T {
-        switch (op) {
-        case AtomicOp::Add:
-            return ir.SharedAtomicIAdd(addr_offset, data, is_gds);
-        case AtomicOp::Umin:
-            return ir.SharedAtomicIMin(addr_offset, data, false, is_gds);
-        case AtomicOp::Smin:
-            return ir.SharedAtomicIMin(addr_offset, data, true, is_gds);
-        case AtomicOp::Umax:
-            return ir.SharedAtomicIMax(addr_offset, data, false, is_gds);
-        case AtomicOp::Smax:
-            return ir.SharedAtomicIMax(addr_offset, data, true, is_gds);
-        case AtomicOp::And:
-            return ir.SharedAtomicAnd(addr_offset, data, is_gds);
-        case AtomicOp::Or:
-            return ir.SharedAtomicOr(addr_offset, data, is_gds);
-        case AtomicOp::Xor:
-            return ir.SharedAtomicXor(addr_offset, data, is_gds);
-        case AtomicOp::Sub:
-            return ir.SharedAtomicISub(addr_offset, data, is_gds);
-        case AtomicOp::Inc:
-            return ir.SharedAtomicInc<T>(addr_offset, is_gds);
-        case AtomicOp::Dec:
-            return ir.SharedAtomicDec<T>(addr_offset, is_gds);
-        default:
-            UNREACHABLE();
+        if constexpr (std::is_same_v<T, IR::F32>) {
+            switch (op) {
+            case AtomicOp::Fmin:
+                return ir.SharedAtomicFMin(addr_offset, GetSrc<IR::F32>(inst.src[1]), is_gds);
+            case AtomicOp::Fmax:
+                return ir.SharedAtomicFMax(addr_offset, GetSrc<IR::F32>(inst.src[1]), is_gds);
+            default:
+                UNREACHABLE();
+            }
+        } else {
+            switch (op) {
+            case AtomicOp::Add:
+                return ir.SharedAtomicIAdd(addr_offset, data, is_gds);
+            case AtomicOp::Umin:
+                return ir.SharedAtomicIMin(addr_offset, data, false, is_gds);
+            case AtomicOp::Smin:
+                return ir.SharedAtomicIMin(addr_offset, data, true, is_gds);
+            case AtomicOp::Umax:
+                return ir.SharedAtomicIMax(addr_offset, data, false, is_gds);
+            case AtomicOp::Smax:
+                return ir.SharedAtomicIMax(addr_offset, data, true, is_gds);
+            case AtomicOp::And:
+                return ir.SharedAtomicAnd(addr_offset, data, is_gds);
+            case AtomicOp::Or:
+                return ir.SharedAtomicOr(addr_offset, data, is_gds);
+            case AtomicOp::Xor:
+                return ir.SharedAtomicXor(addr_offset, data, is_gds);
+            case AtomicOp::Sub:
+                return ir.SharedAtomicISub(addr_offset, data, is_gds);
+            case AtomicOp::Inc:
+                return ir.SharedAtomicInc<T>(addr_offset, is_gds);
+            case AtomicOp::Dec:
+                return ir.SharedAtomicDec<T>(addr_offset, is_gds);
+            default:
+                UNREACHABLE();
+            }
         }
     }();
     if (rtn) {
-        if constexpr (std::is_same_v<T, IR::U32>) {
+        if constexpr (!std::is_same_v<T, IR::U64>) {
             SetDst(inst.dst[0], original_val);
         } else {
             SetDst64(inst.dst[0], original_val);

@@ -105,6 +105,8 @@ public:
                                           bool is_gds);
     [[nodiscard]] U32U64 SharedAtomicIMax(const U32& address, const U32U64& data, bool is_signed,
                                           bool is_gds);
+    [[nodiscard]] F32 SharedAtomicFMin(const U32& address, const F32& data, bool is_gds);
+    [[nodiscard]] F32 SharedAtomicFMax(const U32& address, const F32& data, bool is_gds);
     [[nodiscard]] U32U64 SharedAtomicAnd(const U32& address, const U32U64& data, bool is_gds);
     [[nodiscard]] U32U64 SharedAtomicOr(const U32& address, const U32U64& data, bool is_gds);
     [[nodiscard]] U32U64 SharedAtomicXor(const U32& address, const U32U64& data, bool is_gds);
@@ -277,8 +279,8 @@ public:
     [[nodiscard]] U32U64 BitwiseAnd(const U32U64& a, const U32U64& b);
     [[nodiscard]] U32U64 BitwiseOr(const U32U64& a, const U32U64& b);
     [[nodiscard]] U32 BitwiseXor(const U32& a, const U32& b);
-    [[nodiscard]] U32 BitFieldInsert(const U32& base, const U32& insert, const U32& offset,
-                                     const U32& count);
+    [[nodiscard]] U32U64 BitFieldInsert(const U32U64& base, const U32U64& insert, const U32& offset,
+                                        const U32& count);
     [[nodiscard]] U32 BitFieldExtract(const U32& base, const U32& offset, const U32& count,
                                       bool is_signed = false);
     [[nodiscard]] U32 BitReverse(const U32& value);

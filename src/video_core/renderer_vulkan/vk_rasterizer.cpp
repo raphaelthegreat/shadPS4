@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
-
+#pragma clang optimize off
 #include "common/config.h"
 #include "common/debug.h"
 #include "core/memory.h"
@@ -693,7 +693,10 @@ void Rasterizer::BindTextures(const Shader::Info& stage, Shader::Backend::Bindin
     }
 
     // Second pass to re-bind images that were updated after binding
+    u32 i = 0;
     for (auto& [image_id, desc] : image_bindings) {
+        const auto tsharp = stage.images[i++].GetSharp(stage);
+        printf("%ld\n", tsharp.base_address);
         bool is_storage = desc.type == VideoCore::TextureCache::BindingType::Storage;
         if (!image_id) {
             if (instance.IsNullDescriptorSupported()) {

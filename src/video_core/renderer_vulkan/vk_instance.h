@@ -498,6 +498,7 @@ private:
     bool workgroup_memory_explicit_layout{};
     bool portability_subset{};
     bool maintenance_8{};
+    bool maintenance_9{};
     bool attachment_feedback_loop{};
     bool supports_memory_budget{};
     u64 total_memory_budget{};

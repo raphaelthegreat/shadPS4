@@ -234,7 +234,7 @@ struct Image {
         if (pow2pad) {
             slices = std::bit_ceil(slices);
         }
-        return slices;
+        return std::min(slices, 1024u);
     }
 
     u32 NumLevels() const {
@@ -332,7 +332,7 @@ struct Image {
             return 1;
         default:
             // Constrain to actual number of available levels.
-            const auto max_level = std::min<u32>(last_level + 1, NumLevels());
+            const auto max_level = std::max<u32>(last_level + 1, NumLevels());
             return max_level > base_level ? max_level - base_level : 1;
         }
     }
@@ -346,7 +346,7 @@ struct Image {
             return 1;
         default:
             // Constrain to actual number of available layers.
-            const auto max_array = std::min<u32>(last_array + 1, NumLayers());
+            const auto max_array = std::max<u32>(last_array + 1, NumLayers());
             return max_array > base_array ? max_array - base_array : 1;
         }
     }

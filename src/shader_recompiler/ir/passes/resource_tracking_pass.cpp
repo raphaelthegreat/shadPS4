@@ -691,6 +691,12 @@ void PatchGlobalDataShareAccess(IR::Block& block, IR::Inst& inst, Info& info,
                 ir.BufferAtomicIMax(handle, address_dwords, inst.Arg(1), is_signed, {}));
             break;
         }
+        case IR::Opcode::SharedAtomicFMin32:
+            inst.ReplaceUsesWith(ir.BufferAtomicFMin(handle, address_dwords, inst.Arg(1), {}));
+            break;
+        case IR::Opcode::SharedAtomicFMax32:
+            inst.ReplaceUsesWith(ir.BufferAtomicFMax(handle, address_dwords, inst.Arg(1), {}));
+            break;
         case IR::Opcode::SharedAtomicInc32:
             inst.ReplaceUsesWith(ir.BufferAtomicInc(handle, address_dwords, {}));
             break;
@@ -846,13 +852,19 @@ IR::Value FixCubeCoords(IR::IREmitter& ir, const AmdGpu::Image& image, const IR:
 
 void PatchImageSampleArgs(IR::Block& block, IR::Inst& inst, Info& info,
                           const ImageResource& image_res, const AmdGpu::Image& image) {
-    const auto handle = inst.Arg(0);
+    auto handle = inst.Arg(0);
     const auto& sampler_res = info.samplers[(handle.U32() >> 16) & 0xFFFF];
     const auto sampler = sampler_res.GetSharp(info);
 
     IR::IREmitter ir{block, IR::Block::InstructionList::s_iterator_to(inst)};
     const auto inst_info = inst.Flags<IR::TextureInstInfo>();
     const auto view_type = image.GetViewType(image_res.is_array);
+
+    if (image_res.is_written) {
+        handle = ir.Imm32(static_cast<u32>(info.images.size()));
+        auto& sampled_image_res = info.images.emplace_back(image_res);
+        sampled_image_res.is_written = false;
+    }
 
     IR::Inst* body1 = inst.Arg(2).InstRecursive();
     IR::Inst* body2 = inst.Arg(3).InstRecursive();

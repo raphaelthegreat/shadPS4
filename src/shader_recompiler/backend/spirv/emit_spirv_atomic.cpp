@@ -166,6 +166,10 @@ Id EmitSharedAtomicSMax64(EmitContext& ctx, Id offset, Id value) {
     return SharedAtomicU64(ctx, offset, value, &Sirit::Module::OpAtomicSMax);
 }
 
+Id EmitSharedAtomicFMax32(EmitContext& ctx, Id offset, Id value) {
+    UNREACHABLE();
+}
+
 Id EmitSharedAtomicUMin32(EmitContext& ctx, Id offset, Id value) {
     return SharedAtomicU32(ctx, offset, value, &Sirit::Module::OpAtomicUMin);
 }
@@ -180,6 +184,10 @@ Id EmitSharedAtomicSMin32(EmitContext& ctx, Id offset, Id value) {
 
 Id EmitSharedAtomicSMin64(EmitContext& ctx, Id offset, Id value) {
     return SharedAtomicU64(ctx, offset, value, &Sirit::Module::OpAtomicSMin);
+}
+
+Id EmitSharedAtomicFMin32(EmitContext& ctx, Id offset, Id value) {
+    UNREACHABLE();
 }
 
 Id EmitSharedAtomicAnd32(EmitContext& ctx, Id offset, Id value) {

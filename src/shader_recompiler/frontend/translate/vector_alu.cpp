@@ -394,6 +394,8 @@ void Translator::EmitVectorAlu(const GcnInst& inst) {
         return V_CVT_PK_U8_F32(inst);
     case Opcode::V_LSHL_B64:
         return V_LSHL_B64(inst);
+    case Opcode::V_LSHR_B64:
+        return V_LSHR_B64(inst);
     case Opcode::V_ADD_F64:
         return V_ADD_F64(inst);
     case Opcode::V_ALIGNBIT_B32:
@@ -1353,8 +1355,20 @@ void Translator::V_CVT_PK_U8_F32(const GcnInst& inst) {
 
 void Translator::V_LSHL_B64(const GcnInst& inst) {
     const IR::U64 src0{GetSrc64(inst.src[0])};
-    const IR::U64 src1{GetSrc64(inst.src[1])};
-    SetDst64(inst.dst[0], ir.ShiftLeftLogical(src0, ir.BitwiseAnd(src1, ir.Imm64(u64(0x3F)))));
+    const IR::U32 src1{GetSrc(inst.src[1])};
+    SetDst64(inst.dst[0], ir.ShiftLeftLogical(src0, ir.BitwiseAnd(src1, ir.Imm32(0x3F))));
+}
+
+void Translator::V_LSHR_B64(const GcnInst& inst) {
+    ASSERT(inst.src[0].field == OperandField::VccLo && inst.src[1].field == OperandField::VectorGPR);
+    const IR::U1 src0{ir.GetVcc()};
+    const IR::U32 src1{GetSrc(inst.src[1])};
+    const IR::Value bits{ir.Ballot(src0)};
+    const IR::U64 lo{ir.UConvert(64, IR::U32{ir.CompositeExtract(bits, 0)})};
+    const IR::U64 hi{ir.UConvert(64, IR::U32{ir.CompositeExtract(bits, 1)})};
+    const IR::U64 mask{ir.BitFieldInsert(lo, hi, ir.Imm32(32), ir.Imm32(32))};
+    const IR::U64 result{ir.ShiftRightLogical(mask, ir.BitwiseAnd(src1, ir.Imm32(0x3F)))};
+    SetDst64(inst.dst[0], result);
 }
 
 void Translator::V_ALIGNBIT_B32(const GcnInst& inst) {

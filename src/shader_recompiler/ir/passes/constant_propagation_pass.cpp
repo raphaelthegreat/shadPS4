@@ -532,11 +532,11 @@ void ConstantPropagation(IR::Block& block, IR::Inst& inst) {
             return static_cast<u32>((base << left_shift) >> right_shift);
         });
         return;
-    case IR::Opcode::BitFieldInsert:
+    case IR::Opcode::BitFieldInsert32:
         FoldWhenAllImmediates(inst, [](u32 base, u32 insert, u32 offset, u32 bits) {
             if (bits >= 32 || offset >= 32) {
                 UNREACHABLE_MSG("Undefined result in {}({}, {}, {}, {})",
-                                IR::Opcode::BitFieldInsert, base, insert, offset, bits);
+                                IR::Opcode::BitFieldInsert32, base, insert, offset, bits);
             }
             return (base & ~(~(~0u << bits) << offset)) | (insert << offset);
         });
