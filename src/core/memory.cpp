@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
-
+#pragma GCC push_options
+#pragma GCC optimize ("O0")
 #include "common/alignment.h"
 #include "common/assert.h"
 #include "common/config.h"
@@ -113,7 +114,7 @@ void MemoryManager::SetPrtArea(u32 id, VAddr address, u64 size) {
 
     // Pretend the entire PRT area is mapped to avoid GPU tracking errors.
     // The caches will use CopySparseMemory to fetch data which avoids unmapped areas.
-    rasterizer->MapMemory(address, size);
+    rasterizer->MapMemory(address, size, false);
 }
 
 void MemoryManager::CopySparseMemory(VAddr virtual_addr, u8* dest, u64 size) {
@@ -400,7 +401,7 @@ s32 MemoryManager::PoolCommit(VAddr virtual_addr, u64 size, MemoryProt prot, s32
 
     mutex.unlock();
     if (IsValidGpuMapping(mapped_addr, size)) {
-        rasterizer->MapMemory(mapped_addr, size);
+        rasterizer->MapMemory(mapped_addr, size, mtype != 0);
     }
 
     return ORBIS_OK;
@@ -554,33 +555,16 @@ s32 MemoryManager::MapMemory(void** out_addr, VAddr virtual_addr, u64 size, Memo
     } else if (type == VMAType::Direct) {
         // Map the physical memory for this direct memory mapping.
         auto phys_addr_to_search = phys_addr;
-        u64 remaining_size = size;
         dmem_area = FindDmemArea(phys_addr);
-        while (dmem_area != dmem_map.end() && remaining_size > 0) {
-            // Carve a new dmem area in place of this one with the appropriate type.
-            // Ensure the carved area only covers the current dmem area.
-            const auto start_phys_addr = std::max<PAddr>(phys_addr, dmem_area->second.base);
-            const auto offset_in_dma = start_phys_addr - dmem_area->second.base;
-            const auto size_in_dma =
-                std::min<u64>(dmem_area->second.size - offset_in_dma, remaining_size);
-            const auto dmem_handle = CarvePhysArea(dmem_map, start_phys_addr, size_in_dma);
-            auto& new_dmem_area = dmem_handle->second;
-            new_dmem_area.dma_type = PhysicalMemoryType::Mapped;
-
-            // Add the dmem area to this vma, merge it with any similar tracked areas.
-            new_vma.phys_areas[phys_addr_to_search - phys_addr] = dmem_handle->second;
-            MergeAdjacent(new_vma.phys_areas,
-                          new_vma.phys_areas.find(phys_addr_to_search - phys_addr));
-
-            // Merge the new dmem_area with dmem_map
-            MergeAdjacent(dmem_map, dmem_handle);
-
-            // Get the next relevant dmem area.
-            phys_addr_to_search = phys_addr + size_in_dma;
-            remaining_size -= size_in_dma;
-            dmem_area = FindDmemArea(phys_addr_to_search);
+        // Add the dmem area to this vma, merge it with any similar tracked areas.
+        new_vma.phys_areas[phys_addr_to_search - phys_addr] = dmem_area->second;
+        MergeAdjacent(new_vma.phys_areas,
+                      new_vma.phys_areas.find(phys_addr_to_search - phys_addr));
+        //ASSERT(dmem_area->second.size == size);
+        // Only map for onion memory, garlic is mapped from GPU memory
+        if (dmem_area->second.memory_type == 0) {
+            impl.Map(mapped_addr, size, phys_addr, is_exec);
         }
-        ASSERT_MSG(remaining_size == 0, "Failed to map physical memory");
     }
 
     if (new_vma.type != VMAType::Direct || sdk_version >= Common::ElfInfo::FW_20) {
@@ -592,7 +576,7 @@ s32 MemoryManager::MapMemory(void** out_addr, VAddr virtual_addr, u64 size, Memo
     *out_addr = std::bit_cast<void*>(mapped_addr);
     if (type != VMAType::Reserved && type != VMAType::PoolReserved) {
         // Flexible address space mappings were performed while finding direct memory areas.
-        if (type != VMAType::Flexible) {
+        if (type != VMAType::Flexible && type != VMAType::Direct) {
             impl.Map(mapped_addr, size, phys_addr, is_exec);
         }
         TRACK_ALLOC(*out_addr, size, "VMEM");
@@ -600,8 +584,8 @@ s32 MemoryManager::MapMemory(void** out_addr, VAddr virtual_addr, u64 size, Memo
         mutex.unlock();
 
         // If this is not a reservation, then map to GPU and address space
-        if (IsValidGpuMapping(mapped_addr, size)) {
-            rasterizer->MapMemory(mapped_addr, size);
+        if (type == VMAType::Direct && IsValidGpuMapping(mapped_addr, size)) {
+            rasterizer->MapMemory(mapped_addr, size, dmem_area->second.memory_type != 0);
         }
     } else {
         mutex.unlock();

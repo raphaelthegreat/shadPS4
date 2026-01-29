@@ -112,16 +112,17 @@ public:
     void ReadMemory(VAddr device_addr, u64 size, bool is_write = false);
 
     /// Binds host vertex buffers for the current draw.
-    void BindVertexBuffers(const Vulkan::GraphicsPipeline& pipeline);
+    void BindVertexBuffers(const Vulkan::GraphicsPipeline& pipeline,
+                           vk::Buffer gpu_as);
 
     /// Bind host index buffer for the current draw.
-    void BindIndexBuffer(u32 index_offset);
+    void BindIndexBuffer(u32 index_offset, vk::Buffer gpu_as);
 
     /// Writes a value to GPU buffer. (uses command buffer to temporarily store the data)
-    void FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds);
+    void FillBuffer(VAddr address, u32 num_bytes, u32 value, vk::Buffer gpu_as, bool is_gds);
 
     /// Performs buffer to buffer data copy on the GPU.
-    void CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, bool src_gds);
+    void CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, vk::Buffer gpu_as, bool dst_gds, bool src_gds);
 
     /// Obtains a buffer for the specified region.
     [[nodiscard]] std::pair<Buffer*, u32> ObtainBuffer(VAddr gpu_addr, u32 size, bool is_written,

@@ -144,7 +144,7 @@ void BufferCache::DownloadBufferMemory(Buffer& buffer, VAddr device_addr, u64 si
     }
 }
 
-void BufferCache::BindVertexBuffers(const Vulkan::GraphicsPipeline& pipeline) {
+void BufferCache::BindVertexBuffers(const Vulkan::GraphicsPipeline& pipeline, vk::Buffer gpu_as) {
     const auto& regs = liverpool->regs;
     Vulkan::VertexInputs<vk::VertexInputAttributeDescription2EXT> attributes;
     Vulkan::VertexInputs<vk::VertexInputBindingDescription2EXT> bindings;
@@ -202,10 +202,10 @@ void BufferCache::BindVertexBuffers(const Vulkan::GraphicsPipeline& pipeline) {
 
     // Map buffers for merged ranges
     for (auto& range : ranges_merged) {
-        const u64 size = memory->ClampRangeSize(range.base_address, range.GetSize());
-        const auto [buffer, offset] = ObtainBuffer(range.base_address, size, false);
-        range.vk_buffer = buffer->buffer;
-        range.offset = offset;
+        //const u64 size = memory->ClampRangeSize(range.base_address, range.GetSize());
+        //const auto [buffer, offset] = ObtainBuffer(range.base_address, size, false);
+        range.vk_buffer = gpu_as;
+        range.offset = range.base_address;
     }
 
     // Bind vertex buffers
@@ -217,15 +217,9 @@ void BufferCache::BindVertexBuffers(const Vulkan::GraphicsPipeline& pipeline) {
         instance.IsNullDescriptorSupported() ? VK_NULL_HANDLE : GetBuffer(NULL_BUFFER_ID).Handle();
     for (const auto& buffer : guest_buffers) {
         if (buffer.GetSize() > 0) {
-            const auto host_buffer_info =
-                std::ranges::find_if(ranges_merged, [&](const BufferRange& range) {
-                    return buffer.base_address >= range.base_address &&
-                           buffer.base_address < range.end_address;
-                });
-            ASSERT(host_buffer_info != ranges_merged.cend());
-            host_buffers.emplace_back(host_buffer_info->vk_buffer);
-            host_offsets.push_back(host_buffer_info->offset + buffer.base_address -
-                                   host_buffer_info->base_address);
+            host_buffers.emplace_back(/*host_buffer_info->vk_buffer*/gpu_as);
+            host_offsets.push_back(/*host_buffer_info->offset + buffer.base_address -
+                                   host_buffer_info->base_address*/buffer.base_address);
         } else {
             host_buffers.emplace_back(null_buffer);
             host_offsets.push_back(0);
@@ -236,7 +230,7 @@ void BufferCache::BindVertexBuffers(const Vulkan::GraphicsPipeline& pipeline) {
 
     const auto cmdbuf = scheduler.CommandBuffer();
     const auto num_buffers = guest_buffers.size();
-    if (instance.IsVertexInputDynamicState()) {
+    if (!instance.IsVertexInputDynamicState()) {
         cmdbuf.bindVertexBuffers(0, num_buffers, host_buffers.data(), host_offsets.data());
     } else {
         cmdbuf.bindVertexBuffers2(0, num_buffers, host_buffers.data(), host_offsets.data(),
@@ -244,7 +238,7 @@ void BufferCache::BindVertexBuffers(const Vulkan::GraphicsPipeline& pipeline) {
     }
 }
 
-void BufferCache::BindIndexBuffer(u32 index_offset) {
+void BufferCache::BindIndexBuffer(u32 index_offset, vk::Buffer gpu_as) {
     const auto& regs = liverpool->regs;
 
     // Figure out index type and size.
@@ -256,65 +250,93 @@ void BufferCache::BindIndexBuffer(u32 index_offset) {
 
     // Bind index buffer.
     const u32 index_buffer_size = regs.num_indices * index_size;
-    const auto [vk_buffer, offset] = ObtainBuffer(index_address, index_buffer_size, false);
+    //const auto [vk_buffer, offset] = ObtainBuffer(index_address, index_buffer_size, false);
     const auto cmdbuf = scheduler.CommandBuffer();
-    cmdbuf.bindIndexBuffer(vk_buffer->Handle(), offset, index_type);
+    cmdbuf.bindIndexBuffer(gpu_as, index_address, index_type);
 }
 
-void BufferCache::FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds) {
+void BufferCache::FillBuffer(VAddr address, u32 num_bytes, u32 value, vk::Buffer gpu_as, bool is_gds) {
     ASSERT_MSG(address % 4 == 0, "GDS offset must be dword aligned");
     if (!is_gds) {
         texture_cache.ClearMeta(address);
-        if (!IsRegionGpuModified(address, num_bytes)) {
+        /*if (!IsRegionGpuModified(address, num_bytes)) {
             u32* buffer = std::bit_cast<u32*>(address);
             std::fill(buffer, buffer + num_bytes / sizeof(u32), value);
             return;
-        }
+        }*/
     }
-    Buffer* buffer = [&] {
+    vk::Buffer buffer = [&] {
         if (is_gds) {
-            return &gds_buffer;
+            return gds_buffer.Handle();
         }
-        const auto [buffer, offset] = ObtainBuffer(address, num_bytes, true);
-        return buffer;
+        return gpu_as;
+        /*const auto [buffer, offset] = ObtainBuffer(address, num_bytes, true);
+        return buffer;*/
     }();
-    buffer->Fill(buffer->Offset(address), num_bytes, value);
+    scheduler.EndRendering();
+    const auto cmdbuf = scheduler.CommandBuffer();
+    const vk::BufferMemoryBarrier2 pre_barrier = {
+        .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+        .srcAccessMask = vk::AccessFlagBits2::eMemoryRead,
+        .dstStageMask = vk::PipelineStageFlagBits2::eTransfer,
+        .dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
+        .buffer = buffer,
+        .offset = address,
+        .size = num_bytes,
+    };
+    const vk::BufferMemoryBarrier2 post_barrier = {
+        .srcStageMask = vk::PipelineStageFlagBits2::eTransfer,
+        .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
+        .dstStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+        .dstAccessMask = vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite,
+        .buffer = buffer,
+        .offset = address,
+        .size = num_bytes,
+    };
+    cmdbuf.pipelineBarrier2(vk::DependencyInfo{
+        .dependencyFlags = vk::DependencyFlagBits::eByRegion,
+        .bufferMemoryBarrierCount = 1,
+        .pBufferMemoryBarriers = &pre_barrier,
+    });
+    cmdbuf.fillBuffer(buffer, address, num_bytes, value);
+    cmdbuf.pipelineBarrier2(vk::DependencyInfo{
+        .dependencyFlags = vk::DependencyFlagBits::eByRegion,
+        .bufferMemoryBarrierCount = 1,
+        .pBufferMemoryBarriers = &post_barrier,
+    });
+    //buffer->Fill(buffer->Offset(address), num_bytes, value);
 }
 
-void BufferCache::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, bool src_gds) {
-    if (!dst_gds && !IsRegionGpuModified(dst, num_bytes)) {
+void BufferCache::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, vk::Buffer gpu_as, bool dst_gds, bool src_gds) {
+    /*if (!dst_gds && !IsRegionGpuModified(dst, num_bytes)) {
         if (!src_gds && !IsRegionGpuModified(src, num_bytes) &&
             !texture_cache.FindImageFromRange(src, num_bytes)) {
             // Both buffers were not transferred to GPU yet. Can safely copy in host memory.
             memcpy(std::bit_cast<void*>(dst), std::bit_cast<void*>(src), num_bytes);
             return;
         }
-        // Without a readback there's nothing we can do with this
-        // Fallback to creating dst buffer on GPU to at least have this data there
-    }
+    }*/
     texture_cache.InvalidateMemoryFromGPU(dst, num_bytes);
-    auto& src_buffer = [&] -> const Buffer& {
+    auto src_buffer = [&] -> vk::Buffer {
         if (src_gds) {
-            return gds_buffer;
+            return gds_buffer.Handle();
         }
-        const auto buffer_id = FindBuffer(src, num_bytes);
-        auto& buffer = slot_buffers[buffer_id];
-        SynchronizeBuffer(buffer, src, num_bytes, false, true);
-        return buffer;
+        return gpu_as;
     }();
-    auto& dst_buffer = [&] -> const Buffer& {
+    auto dst_buffer = [&] -> vk::Buffer {
         if (dst_gds) {
-            return gds_buffer;
+            return gds_buffer.Handle();
         }
-        const auto buffer_id = FindBuffer(dst, num_bytes);
+        return gpu_as;
+        /*const auto buffer_id = FindBuffer(dst, num_bytes);
         auto& buffer = slot_buffers[buffer_id];
         SynchronizeBuffer(buffer, dst, num_bytes, true, true);
         gpu_modified_ranges.Add(dst, num_bytes);
-        return buffer;
+        return buffer;*/
     }();
     const vk::BufferCopy region = {
-        .srcOffset = src_buffer.Offset(src),
-        .dstOffset = dst_buffer.Offset(dst),
+        .srcOffset = src,
+        .dstOffset = dst,
         .size = num_bytes,
     };
     const vk::BufferMemoryBarrier2 buf_barriers_before[2] = {
@@ -323,8 +345,8 @@ void BufferCache::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, 
             .srcAccessMask = vk::AccessFlagBits2::eMemoryRead,
             .dstStageMask = vk::PipelineStageFlagBits2::eAllCommands,
             .dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
-            .buffer = dst_buffer.Handle(),
-            .offset = dst_buffer.Offset(dst),
+            .buffer = dst_buffer,
+            .offset = dst,
             .size = num_bytes,
         },
         {
@@ -332,8 +354,8 @@ void BufferCache::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, 
             .srcAccessMask = vk::AccessFlagBits2::eMemoryWrite,
             .dstStageMask = vk::PipelineStageFlagBits2::eAllCommands,
             .dstAccessMask = vk::AccessFlagBits2::eTransferRead,
-            .buffer = src_buffer.Handle(),
-            .offset = src_buffer.Offset(src),
+            .buffer = src_buffer,
+            .offset = src,
             .size = num_bytes,
         },
     };
@@ -344,15 +366,15 @@ void BufferCache::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, 
         .bufferMemoryBarrierCount = 2,
         .pBufferMemoryBarriers = buf_barriers_before,
     });
-    cmdbuf.copyBuffer(src_buffer.Handle(), dst_buffer.Handle(), region);
+    cmdbuf.copyBuffer(src_buffer, dst_buffer, region);
     const vk::BufferMemoryBarrier2 buf_barriers_after[2] = {
         {
             .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
             .srcAccessMask = vk::AccessFlagBits2::eTransferWrite,
             .dstStageMask = vk::PipelineStageFlagBits2::eAllCommands,
             .dstAccessMask = vk::AccessFlagBits2::eMemoryRead,
-            .buffer = dst_buffer.Handle(),
-            .offset = dst_buffer.Offset(dst),
+            .buffer = dst_buffer,
+            .offset = dst,
             .size = num_bytes,
         },
         {
@@ -360,8 +382,8 @@ void BufferCache::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, 
             .srcAccessMask = vk::AccessFlagBits2::eTransferRead,
             .dstStageMask = vk::PipelineStageFlagBits2::eAllCommands,
             .dstAccessMask = vk::AccessFlagBits2::eMemoryWrite,
-            .buffer = src_buffer.Handle(),
-            .offset = src_buffer.Offset(src),
+            .buffer = src_buffer,
+            .offset = src,
             .size = num_bytes,
         },
     };
@@ -400,9 +422,9 @@ std::pair<Buffer*, u32> BufferCache::ObtainBufferForImage(VAddr gpu_addr, u32 si
         }
     }
     // If some buffer within was GPU modified create a full buffer to avoid losing GPU data.
-    if (IsRegionGpuModified(gpu_addr, size)) {
-        return ObtainBuffer(gpu_addr, size, false, false);
-    }
+    //if (IsRegionGpuModified(gpu_addr, size)) {
+    //    return ObtainBuffer(gpu_addr, size, false, false);
+    //}
     // In all other cases, just do a CPU copy to the staging buffer.
     const auto [data, offset] = staging_buffer.Map(size, 16);
     memory->CopySparseMemory(gpu_addr, data, size);
@@ -424,6 +446,7 @@ bool BufferCache::IsRegionGpuModified(VAddr addr, size_t size) {
 }
 
 BufferId BufferCache::FindBuffer(VAddr device_addr, u32 size) {
+    UNREACHABLE();
     if (device_addr == 0) {
         return NULL_BUFFER_ID;
     }

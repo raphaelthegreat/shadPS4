@@ -51,6 +51,8 @@ static const char* acb_task_name[] = NAME_ARRAY(ACB_TASK, MAX_NAMES);
 
 std::array<u8, 48_KB> Liverpool::ConstantEngine::constants_heap;
 
+static std::unordered_map<VAddr, std::vector<u64>> label_writes;
+
 static std::span<const u32> NextPacket(std::span<const u32> span, size_t offset) {
     if (offset > span.size()) {
         LOG_ERROR(
@@ -129,6 +131,10 @@ void Liverpool::Process(std::stop_token stoken) {
 
                 std::scoped_lock lock{queue.m_access};
                 queue.submits.pop();
+
+                if (rasterizer) {
+                    rasterizer->Flush();
+                }
 
                 --num_submits;
                 std::scoped_lock lock2{submit_mutex};

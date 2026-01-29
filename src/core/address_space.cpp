@@ -677,6 +677,7 @@ struct AddressSpace::Impl {
     void* Map(VAddr virtual_addr, PAddr phys_addr, u64 size, PosixPageProtection prot,
               int fd = -1) {
         m_free_regions.subtract({virtual_addr, virtual_addr + size});
+        phys_addr = -1;
         const int handle = phys_addr != -1 ? (fd == -1 ? backing_fd : fd) : -1;
         const off_t host_offset = phys_addr != -1 ? phys_addr : 0;
         const int flag = phys_addr != -1 ? MAP_SHARED : (MAP_ANONYMOUS | MAP_PRIVATE);

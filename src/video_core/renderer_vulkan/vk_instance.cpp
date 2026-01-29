@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
-
+#pragma GCC push_options
+#pragma GCC optimize ("O0")
 #include <boost/container/static_vector.hpp>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
@@ -104,6 +105,7 @@ Instance::Instance(Frontend::WindowSDL& window, s32 physical_device_index,
     ASSERT_MSG(num_physical_devices > 0, "No physical devices found");
     LOG_INFO(Render_Vulkan, "Found {} physical devices", num_physical_devices);
 
+    physical_device_index = 1;
     if (physical_device_index < 0) {
         std::vector<
             std::tuple<size_t, vk::PhysicalDeviceProperties2, vk::PhysicalDeviceMemoryProperties>>
@@ -220,7 +222,8 @@ bool Instance::CreateDevice() {
 
     const vk::StructureChain properties_chain = physical_device.getProperties2<
         vk::PhysicalDeviceProperties2, vk::PhysicalDeviceVulkan11Properties,
-        vk::PhysicalDeviceVulkan12Properties, vk::PhysicalDevicePushDescriptorPropertiesKHR>();
+        vk::PhysicalDeviceVulkan12Properties, vk::PhysicalDevicePushDescriptorPropertiesKHR,
+        vk::PhysicalDeviceExternalMemoryHostPropertiesEXT>();
     vk11_props = properties_chain.get<vk::PhysicalDeviceVulkan11Properties>();
     vk12_props = properties_chain.get<vk::PhysicalDeviceVulkan12Properties>();
     push_descriptor_props = properties_chain.get<vk::PhysicalDevicePushDescriptorPropertiesKHR>();
@@ -253,6 +256,9 @@ bool Instance::CreateDevice() {
     ASSERT(add_extension(VK_EXT_VERTEX_ATTRIBUTE_DIVISOR_EXTENSION_NAME));
 
     // Optional
+    add_extension(VK_EXT_MAP_MEMORY_PLACED_EXTENSION_NAME);
+    add_extension(VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME);
+    add_extension(VK_EXT_DEVICE_ADDRESS_BINDING_REPORT_EXTENSION_NAME);
     maintenance_8 = add_extension(VK_KHR_MAINTENANCE_8_EXTENSION_NAME);
     attachment_feedback_loop = add_extension(VK_EXT_ATTACHMENT_FEEDBACK_LOOP_LAYOUT_EXTENSION_NAME);
     if (attachment_feedback_loop) {
@@ -343,11 +349,22 @@ bool Instance::CreateDevice() {
     }
 
     bool graphics_queue_found = false;
+    bool sparse_queue_found = false;
     for (std::size_t i = 0; i < family_properties.size(); i++) {
         const u32 index = static_cast<u32>(i);
-        if (family_properties[i].queueFlags & vk::QueueFlagBits::eGraphics) {
+        if (family_properties[i].queueFlags & vk::QueueFlagBits::eGraphics &&
+            family_properties[i].queueFlags & vk::QueueFlagBits::eSparseBinding) {
             queue_family_index = index;
             graphics_queue_found = true;
+        }
+    }
+
+    for (std::size_t i = 0; i < family_properties.size(); i++) {
+        const u32 index = static_cast<u32>(i);
+        if ((family_properties[i].queueFlags & (vk::QueueFlagBits::eGraphics | vk::QueueFlagBits::eSparseBinding)) ==
+                                                vk::QueueFlagBits::eSparseBinding) {
+            sparse_queue_family_index = index;
+            sparse_queue_found = true;
         }
     }
 
@@ -357,12 +374,18 @@ bool Instance::CreateDevice() {
     }
 
     static constexpr std::array queue_priorities = {1.0f};
-    const vk::DeviceQueueCreateInfo queue_info = {
-        .queueFamilyIndex = queue_family_index,
-        .queueCount = static_cast<u32>(queue_priorities.size()),
-        .pQueuePriorities = queue_priorities.data(),
+    const std::array queue_infos = {
+        vk::DeviceQueueCreateInfo{
+            .queueFamilyIndex = queue_family_index,
+            .queueCount = static_cast<u32>(queue_priorities.size()),
+            .pQueuePriorities = queue_priorities.data(),
+        },
+        vk::DeviceQueueCreateInfo{
+            .queueFamilyIndex = sparse_queue_family_index,
+            .queueCount = static_cast<u32>(queue_priorities.size()),
+            .pQueuePriorities = queue_priorities.data(),
+        }
     };
-
     const auto topology_list_restart_features =
         feature_chain.get<vk::PhysicalDevicePrimitiveTopologyListRestartFeaturesEXT>();
     const auto vk11_features = feature_chain.get<vk::PhysicalDeviceVulkan11Features>();
@@ -370,8 +393,8 @@ bool Instance::CreateDevice() {
     const auto vk13_features = feature_chain.get<vk::PhysicalDeviceVulkan13Features>();
     vk::StructureChain device_chain = {
         vk::DeviceCreateInfo{
-            .queueCreateInfoCount = 1u,
-            .pQueueCreateInfos = &queue_info,
+            .queueCreateInfoCount = static_cast<u32>(queue_infos.size()),
+            .pQueueCreateInfos = queue_infos.data(),
             .enabledExtensionCount = static_cast<u32>(enabled_extensions.size()),
             .ppEnabledExtensionNames = enabled_extensions.data(),
         },
@@ -402,6 +425,9 @@ bool Instance::CreateDevice() {
                 .shaderFloat64 = features.shaderFloat64,
                 .shaderInt64 = features.shaderInt64,
                 .shaderInt16 = features.shaderInt16,
+                .sparseBinding = features.sparseBinding,
+                .sparseResidencyBuffer = features.sparseResidencyBuffer,
+                .sparseResidencyAliased = features.sparseResidencyAliased,
             },
         },
         vk::PhysicalDeviceVulkan11Features{
@@ -445,6 +471,9 @@ bool Instance::CreateDevice() {
         vk::PhysicalDeviceDepthClipControlFeaturesEXT{
             .depthClipControl = true,
         },
+        vk::PhysicalDeviceAddressBindingReportFeaturesEXT{
+            .reportAddressBinding = true,
+        },
         vk::PhysicalDeviceDepthClipEnableFeaturesEXT{
             .depthClipEnable = true,
         },
@@ -481,6 +510,10 @@ bool Instance::CreateDevice() {
         },
         vk::PhysicalDeviceAttachmentFeedbackLoopDynamicStateFeaturesEXT{
             .attachmentFeedbackLoopDynamicState = true,
+        },
+        vk::PhysicalDeviceMapMemoryPlacedFeaturesEXT{
+            .memoryMapPlaced = true,
+            .memoryUnmapReserve = true,
         },
         vk::PhysicalDeviceShaderAtomicFloat2FeaturesEXT{
             .shaderBufferFloat32AtomicMinMax =
@@ -564,17 +597,13 @@ bool Instance::CreateDevice() {
         device_chain.unlink<vk::PhysicalDeviceWorkgroupMemoryExplicitLayoutFeaturesKHR>();
     }
 
-    auto [device_result, dev] = physical_device.createDeviceUnique(device_chain.get());
-    if (device_result != vk::Result::eSuccess) {
-        LOG_CRITICAL(Render_Vulkan, "Failed to create device: {}", vk::to_string(device_result));
-        return false;
-    }
-    device = std::move(dev);
+    device = Check(physical_device.createDeviceUnique(device_chain.get()));
 
     VULKAN_HPP_DEFAULT_DISPATCHER.init(*device);
 
     graphics_queue = device->getQueue(queue_family_index, 0);
     present_queue = device->getQueue(queue_family_index, 0);
+    sparse_queue = device->getQueue(sparse_queue_family_index, 0);
 
     if (calibrated_timestamps) {
         const auto [time_domains_result, time_domains] =

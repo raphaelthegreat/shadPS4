@@ -61,7 +61,7 @@ public:
     bool InvalidateMemory(VAddr addr, u64 size);
     bool ReadMemory(VAddr addr, u64 size);
     bool IsMapped(VAddr addr, u64 size);
-    void MapMemory(VAddr addr, u64 size);
+    void MapMemory(VAddr addr, u64 size, bool is_garlic);
     void UnmapMemory(VAddr addr, u64 size);
 
     void CpSync();
@@ -124,9 +124,20 @@ private:
     VideoCore::TextureCache texture_cache;
     AmdGpu::Liverpool* liverpool;
     Core::MemoryManager* memory;
-    boost::icl::interval_set<VAddr> mapped_ranges;
+    struct MappedRange {
+        PAddr offset;
+        vk::DeviceMemory mem;
+        bool is_gpu;
+
+        bool operator==(const MappedRange& other) const {
+            return offset == other.offset && mem == other.mem && is_gpu == other.is_gpu;
+        }
+    };
+    boost::icl::interval_map<VAddr, MappedRange> mapped_ranges;
     Common::SharedFirstMutex mapped_ranges_mutex;
     PipelineCache pipeline_cache;
+    vk::UniqueBuffer gpu_address_space;
+    vk::MemoryRequirements gpu_address_space_mem_req;
 
     using RenderTargetInfo = std::pair<VideoCore::ImageId, VideoCore::TextureCache::ImageDesc>;
     std::array<RenderTargetInfo, AmdGpu::NUM_COLOR_BUFFERS> cb_descs;

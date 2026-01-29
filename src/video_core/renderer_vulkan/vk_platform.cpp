@@ -52,9 +52,17 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL DebugUtilsCallback(
         level = Common::Log::Level::Info;
     }
 
-    LOG_GENERIC(Common::Log::Class::Render_Vulkan, level, "{}: {}",
-                callback_data->pMessageIdName ? callback_data->pMessageIdName : "<null>",
-                callback_data->pMessage ? callback_data->pMessage : "<null>");
+    auto* binding_data = (vk::DeviceAddressBindingCallbackDataEXT*)callback_data->pNext;
+    if (binding_data) {
+        UNREACHABLE();
+        LOG_GENERIC(Common::Log::Class::Render_Vulkan, Common::Log::Level::Info, "GPU virtual address info {}: base_address={:#x}, size={}, allowDup={}",
+                    vk::to_string(binding_data->bindingType), (u64)binding_data->baseAddress,
+                    binding_data->size, binding_data->allowDuplicate);
+    } else {
+        LOG_GENERIC(Common::Log::Class::Render_Vulkan, level, "{}: {}",
+                    callback_data->pMessageIdName ? callback_data->pMessageIdName : "<null>",
+                    callback_data->pMessage ? callback_data->pMessage : "<null>");
+    }
 
     return VK_FALSE;
 }
@@ -451,7 +459,8 @@ vk::UniqueDebugUtilsMessengerEXT CreateDebugCallback(vk::Instance instance) {
                            vk::DebugUtilsMessageSeverityFlagBitsEXT::eVerbose,
         .messageType = vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral |
                        vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation |
-                       vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance,
+                       vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance |
+                       vk::DebugUtilsMessageTypeFlagBitsEXT::eDeviceAddressBinding,
         .pfnUserCallback = DebugUtilsCallback,
     };
     auto [messenger_result, messenger] = instance.createDebugUtilsMessengerEXTUnique(msg_ci);

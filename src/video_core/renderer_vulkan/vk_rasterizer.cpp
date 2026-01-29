@@ -31,6 +31,17 @@ static Shader::PushData MakeUserData(const AmdGpu::Regs& regs) {
     return push_data;
 }
 
+uint32_t findMemoryType(vk::PhysicalDevice physicalDevice, uint32_t typeFilter, vk::MemoryPropertyFlags properties) {
+    auto memProperties = physicalDevice.getMemoryProperties();
+    for (uint32_t i = 0; i < memProperties.memoryTypeCount; i++) {
+        if (/*(typeFilter & (1 << i)) &&*/
+            (memProperties.memoryTypes[i].propertyFlags & properties) == properties) {
+            return i;
+        }
+    }
+    UNREACHABLE_MSG("Failed to find suitable memory type!");
+}
+
 Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_,
                        AmdGpu::Liverpool* liverpool_)
     : instance{instance_}, scheduler{scheduler_}, page_manager{this},
@@ -42,6 +53,29 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_,
         liverpool->BindRasterizer(this);
     }
     memory->SetRasterizer(this);
+
+    const auto device = instance.GetDevice();
+    {
+        const vk::ExternalMemoryBufferCreateInfoKHR ext_buf_info = {
+            .handleTypes = vk::ExternalMemoryHandleTypeFlagBits::eHostAllocationEXT,
+        };
+        const vk::BufferCreateInfo buffer_info = {
+            .pNext = &ext_buf_info,
+            .flags = vk::BufferCreateFlagBits::eSparseBinding | vk::BufferCreateFlagBits::eSparseResidency,
+            .size = 1ULL << 38,
+            .usage = VideoCore::AllFlags,
+            .sharingMode = vk::SharingMode::eConcurrent,
+        };
+        gpu_address_space = Check(device.createBufferUnique(buffer_info));
+        gpu_address_space_mem_req = device.getBufferMemoryRequirements(*gpu_address_space);
+
+        vk::BufferDeviceAddressInfo bda_info{
+            .buffer = *gpu_address_space,
+        };
+        auto bda_result = device.getBufferAddress(bda_info);
+        ASSERT_MSG(bda_result != 0, "Failed to get buffer device address");
+        LOG_ERROR(Render, "GPU virtual address base {:#x}", static_cast<VAddr>(bda_result));
+    }
 }
 
 Rasterizer::~Rasterizer() = default;
@@ -206,9 +240,9 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
     }
     const auto state = BeginRendering(pipeline);
 
-    buffer_cache.BindVertexBuffers(*pipeline);
+    buffer_cache.BindVertexBuffers(*pipeline, *gpu_address_space);
     if (is_indexed) {
-        buffer_cache.BindIndexBuffer(index_offset);
+        buffer_cache.BindIndexBuffer(index_offset, *gpu_address_space);
     }
 
     pipeline->BindResources(set_writes, buffer_barriers, push_data);
@@ -254,18 +288,20 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
     }
     const auto state = BeginRendering(pipeline);
 
-    buffer_cache.BindVertexBuffers(*pipeline);
+    buffer_cache.BindVertexBuffers(*pipeline, *gpu_address_space);
     if (is_indexed) {
-        buffer_cache.BindIndexBuffer(0);
+        buffer_cache.BindIndexBuffer(0, *gpu_address_space);
     }
 
     const auto& [buffer, base] =
         buffer_cache.ObtainBuffer(arg_address + offset, stride * max_count, false);
 
-    VideoCore::Buffer* count_buffer{};
+    vk::Buffer count_buffer{};
     u32 count_base{};
     if (count_address != 0) {
-        std::tie(count_buffer, count_base) = buffer_cache.ObtainBuffer(count_address, 4, false);
+        //std::tie(count_buffer, count_base) = buffer_cache.ObtainBuffer(count_address, 4, false);
+        count_buffer = *gpu_address_space;
+        count_base = count_address;
     }
 
     pipeline->BindResources(set_writes, buffer_barriers, push_data);
@@ -282,7 +318,7 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
         ASSERT(sizeof(VkDrawIndexedIndirectCommand) == stride);
 
         if (count_address != 0) {
-            cmdbuf.drawIndexedIndirectCount(buffer->Handle(), base, count_buffer->Handle(),
+            cmdbuf.drawIndexedIndirectCount(buffer->Handle(), base, count_buffer,
                                             count_base, max_count, stride);
         } else {
             cmdbuf.drawIndexedIndirect(buffer->Handle(), base, max_count, stride);
@@ -291,7 +327,7 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
         ASSERT(sizeof(VkDrawIndirectCommand) == stride);
 
         if (count_address != 0) {
-            cmdbuf.drawIndirectCount(buffer->Handle(), base, count_buffer->Handle(), count_base,
+            cmdbuf.drawIndirectCount(buffer->Handle(), base, count_buffer, count_base,
                                      max_count, stride);
         } else {
             cmdbuf.drawIndirect(buffer->Handle(), base, max_count, stride);
@@ -346,14 +382,16 @@ void Rasterizer::DispatchIndirect(VAddr address, u32 offset, u32 size) {
         return;
     }
 
-    const auto [buffer, base] = buffer_cache.ObtainBuffer(address + offset, size, false);
+    //const auto [buffer, base] = buffer_cache.ObtainBuffer(address + offset, size, false);
+    auto buffer = *gpu_address_space;
+    auto base = address + offset;
 
     scheduler.EndRendering();
     pipeline->BindResources(set_writes, buffer_barriers, push_data);
 
     const auto cmdbuf = scheduler.CommandBuffer();
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline->Handle());
-    cmdbuf.dispatchIndirect(buffer->Handle(), base);
+    cmdbuf.dispatchIndirect(buffer, base);
 
     ResetBindings();
 }
@@ -372,11 +410,11 @@ void Rasterizer::Finish() {
 void Rasterizer::OnSubmit() {
     if (fault_process_pending) {
         fault_process_pending = false;
-        buffer_cache.ProcessFaultBuffer();
+        //buffer_cache.ProcessFaultBuffer();
     }
     texture_cache.ProcessDownloadImages();
     texture_cache.RunGarbageCollector();
-    buffer_cache.RunGarbageCollector();
+    //buffer_cache.RunGarbageCollector();
 }
 
 bool Rasterizer::BindResources(const Pipeline* pipeline) {
@@ -405,14 +443,14 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
         uses_dma |= stage->uses_dma;
     }
 
-    if (uses_dma) {
+    /*if (uses_dma) {
         // We only use fault buffer for DMA right now.
         Common::RecursiveSharedLock lock{mapped_ranges_mutex};
-        for (auto& range : mapped_ranges) {
+        for (auto& [range, backing] : mapped_ranges) {
             buffer_cache.SynchronizeBuffersInRange(range.lower(), range.upper() - range.lower());
         }
         fault_process_pending = true;
-    }
+    }*/
 
     return true;
 }
@@ -583,9 +621,12 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, Shader::Backend::Binding
     for (const auto& desc : stage.buffers) {
         const auto vsharp = desc.GetSharp(stage);
         if (!desc.IsSpecial() && vsharp.base_address != 0 && vsharp.GetSize() > 0) {
-            const u64 size = memory->ClampRangeSize(vsharp.base_address, vsharp.GetSize());
-            const auto buffer_id = buffer_cache.FindBuffer(vsharp.base_address, size);
-            buffer_bindings.emplace_back(buffer_id, vsharp, size);
+            //const u64 size = memory->ClampRangeSize(vsharp.base_address, vsharp.GetSize());
+            //const auto buffer_id = buffer_cache.FindBuffer(vsharp.base_address, size);
+            const auto it = mapped_ranges.find(vsharp.base_address);
+            ASSERT(it != mapped_ranges.end());
+            //LOG_WARNING(Render, "Binding buffer addr={:#x}, size={}, is_write={}", vsharp.base_address, vsharp.GetSize(), desc.is_written);
+            buffer_bindings.emplace_back(VideoCore::BufferId{1}, vsharp, /*size*/vsharp.GetSize());
         } else {
             buffer_bindings.emplace_back(VideoCore::BufferId{}, vsharp, 0);
         }
@@ -596,7 +637,7 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, Shader::Backend::Binding
         const auto& [buffer_id, vsharp, size] = buffer_bindings[i];
         const auto& desc = stage.buffers[i];
         const bool is_storage = desc.IsStorage(vsharp);
-        const u32 alignment =
+        const u64 alignment =
             is_storage ? instance.StorageMinAlignment() : instance.UniformMinAlignment();
         // Buffer is not from the cache, either a special buffer or unbound.
         if (!buffer_id) {
@@ -629,19 +670,21 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, Shader::Backend::Binding
                 buffer_infos.emplace_back(null_buffer.Handle(), 0, VK_WHOLE_SIZE);
             }
         } else {
-            const auto [vk_buffer, offset] = buffer_cache.ObtainBuffer(
-                vsharp.base_address, size, desc.is_written, desc.is_formatted, buffer_id);
-            const u32 offset_aligned = Common::AlignDown(offset, alignment);
+            const auto vk_buffer = *gpu_address_space;
+            const u64 offset = vsharp.base_address;
+            //const auto [vk_buffer, offset] = buffer_cache.ObtainBuffer(
+            //    vsharp.base_address, size, desc.is_written, desc.is_formatted, buffer_id);
+            const u64 offset_aligned = offset & ~(alignment - 1);
             const u32 adjust = offset - offset_aligned;
             ASSERT(adjust % 4 == 0);
             push_data.AddOffset(binding.buffer, adjust);
-            buffer_infos.emplace_back(vk_buffer->Handle(), offset_aligned, size + adjust);
-            if (auto barrier =
+            buffer_infos.emplace_back(vk_buffer, offset_aligned, size + adjust);
+            /*if (auto barrier =
                     vk_buffer->GetBarrier(desc.is_written ? vk::AccessFlagBits2::eShaderWrite
                                                           : vk::AccessFlagBits2::eShaderRead,
                                           vk::PipelineStageFlagBits2::eAllCommands)) {
                 buffer_barriers.emplace_back(*barrier);
-            }
+            }*/
             if (desc.is_written && desc.is_formatted) {
                 texture_cache.InvalidateMemoryFromGPU(vsharp.base_address, size);
             }
@@ -977,11 +1020,11 @@ void Rasterizer::DepthStencilCopy(bool is_depth, bool is_stencil) {
 }
 
 void Rasterizer::FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds) {
-    buffer_cache.FillBuffer(address, num_bytes, value, is_gds);
+    buffer_cache.FillBuffer(address, num_bytes, value, *gpu_address_space, is_gds);
 }
 
 void Rasterizer::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, bool src_gds) {
-    buffer_cache.CopyBuffer(dst, src, num_bytes, dst_gds, src_gds);
+    buffer_cache.CopyBuffer(dst, src, num_bytes, *gpu_address_space, dst_gds, src_gds);
 }
 
 u32 Rasterizer::ReadDataFromGds(u32 gds_offset) {
@@ -996,7 +1039,7 @@ bool Rasterizer::InvalidateMemory(VAddr addr, u64 size) {
         // Not GPU mapped memory, can skip invalidation logic entirely.
         return false;
     }
-    buffer_cache.InvalidateMemory(addr, size);
+    //buffer_cache.InvalidateMemory(addr, size);
     texture_cache.InvalidateMemory(addr, size);
     return true;
 }
@@ -1021,16 +1064,113 @@ bool Rasterizer::IsMapped(VAddr addr, u64 size) {
     return boost::icl::contains(mapped_ranges, range);
 }
 
-void Rasterizer::MapMemory(VAddr addr, u64 size) {
+void Rasterizer::MapMemory(VAddr addr, u64 size, bool is_garlic) {
+    const auto mapped_range = [&] {
+        const auto device = instance.GetDevice();
+        if (is_garlic) {
+            const auto properties = vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent |
+                                (is_garlic ? vk::MemoryPropertyFlagBits::eDeviceLocal : vk::MemoryPropertyFlagBits::eHostCached);
+            vk::MemoryAllocateFlagsInfoKHR flags_info{.flags = vk::MemoryAllocateFlagBits::eDeviceAddress};
+            const vk::MemoryAllocateInfo alloc_info = {
+                .pNext = &flags_info,
+                .allocationSize = size,
+                .memoryTypeIndex = findMemoryType(instance.GetPhysicalDevice(), gpu_address_space_mem_req.memoryTypeBits, properties)
+            };
+            const auto backing_mem = Check(device.allocateMemory(alloc_info));
+            const vk::MemoryMapPlacedInfoEXT placed_info = {
+                .pPlacedAddress = reinterpret_cast<void*>(addr),
+            };
+            const vk::MemoryMapInfo map_info = {
+                .pNext = &placed_info,
+                .flags = vk::MemoryMapFlagBits::ePlacedEXT,
+                .memory = backing_mem,
+                .offset = 0,
+                .size = size,
+            };
+            ASSERT(placed_info.pPlacedAddress == Check(device.mapMemory2(map_info)));
+            return MappedRange{0, backing_mem, true};
+        } else {
+            const auto memory_props = instance.GetPhysicalDevice().getMemoryProperties();
+            void* host_pointer = reinterpret_cast<void*>(addr);
+            const auto host_mem_props = Check(device.getMemoryHostPointerPropertiesEXT(
+                vk::ExternalMemoryHandleTypeFlagBits::eHostAllocationEXT, host_pointer));
+            ASSERT(host_mem_props.memoryTypeBits != 0);
+
+            int mapped_memory_type = -1;
+            auto find_mem_type_with_flag = [&](const vk::MemoryPropertyFlags flags) {
+                u32 host_mem_types = host_mem_props.memoryTypeBits;
+                while (host_mem_types != 0) {
+                    // Try to find a cached memory type
+                    mapped_memory_type = std::countr_zero(host_mem_types);
+                    host_mem_types -= (1 << mapped_memory_type);
+
+                    if ((memory_props.memoryTypes[mapped_memory_type].propertyFlags & flags) == flags) {
+                        return;
+                    }
+                }
+
+                mapped_memory_type = -1;
+            };
+
+            // First try to find a memory that is both coherent and cached
+            find_mem_type_with_flag(vk::MemoryPropertyFlagBits::eHostCoherent |
+                                    vk::MemoryPropertyFlagBits::eHostCached);
+            ASSERT(mapped_memory_type != -1);
+
+            if (mapped_memory_type == -1) {
+                LOG_CRITICAL(Render_Vulkan, "No coherent memory available for memory mapping");
+                mapped_memory_type = std::countr_zero(host_mem_props.memoryTypeBits);
+            }
+
+            const vk::StructureChain alloc_info = {
+                vk::MemoryAllocateInfo{
+                    .allocationSize = size,
+                    .memoryTypeIndex = static_cast<uint32_t>(mapped_memory_type),
+                },
+                vk::ImportMemoryHostPointerInfoEXT{
+                    .handleType = vk::ExternalMemoryHandleTypeFlagBits::eHostAllocationEXT,
+                    .pHostPointer = host_pointer,
+                },
+            };
+
+            const auto backing_mem = Check(device.allocateMemory(alloc_info.get()));
+            return MappedRange{0, backing_mem, false};
+        }
+    }();
+    liverpool->SendCommand<true>([&] {
+        // Bind it to gpu address space
+        ASSERT(size <= gpu_address_space_mem_req.size);
+        const vk::SparseMemoryBind sparse_bind = {
+            .resourceOffset = addr,
+            .size = size,
+            .memory = mapped_range.mem,
+            .memoryOffset = mapped_range.offset,
+        };
+        const vk::SparseBufferMemoryBindInfo buffer_bind_info = {
+            .buffer = *gpu_address_space,
+            .bindCount = 1u,
+            .pBinds = &sparse_bind,
+        };
+        const vk::BindSparseInfo bind_info = {
+            .bufferBindCount = 1u,
+            .pBufferBinds = &buffer_bind_info,
+        };
+        const auto sparse_queue = instance.GetGraphicsQueue();
+        const auto fence = Check(instance.GetDevice().createFence({}));
+        Check(sparse_queue.bindSparse(bind_info, fence));
+        Check(instance.GetDevice().waitForFences(fence, VK_TRUE, UINT64_MAX));
+        LOG_ERROR(Render, "Sparse bind buffer_offset={:#x}, size={}", sparse_bind.resourceOffset, size);
+    });
     {
         std::scoped_lock lock{mapped_ranges_mutex};
-        mapped_ranges += decltype(mapped_ranges)::interval_type::right_open(addr, addr + size);
+        const auto range = decltype(mapped_ranges)::interval_type::right_open(addr, addr + size);
+        mapped_ranges.insert({range, mapped_range});
     }
     page_manager.OnGpuMap(addr, size);
 }
 
 void Rasterizer::UnmapMemory(VAddr addr, u64 size) {
-    buffer_cache.InvalidateMemory(addr, size);
+    //buffer_cache.InvalidateMemory(addr, size);
     texture_cache.UnmapMemory(addr, size);
     page_manager.OnGpuUnmap(addr, size);
     {
