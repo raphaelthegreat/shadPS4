@@ -39,29 +39,30 @@
 
 namespace D = Core::Devices;
 namespace fs = std::filesystem;
-using FactoryDevice = std::function<std::shared_ptr<D::BaseDevice>(u32, const char*, int, u16)>;
+using FactoryDevice = std::unique_ptr<D::BaseDevice>&(*)(u32, const char*, int, u16);
 
-#define GET_DEVICE_FD(fd)                                                                          \
-    [](u32, const char*, int, u16) {                                                               \
-        return Common::Singleton<Core::FileSys::HandleTable>::Instance()->GetFile(fd)->device;     \
-    }
+template <s32 fd>
+std::unique_ptr<D::BaseDevice>& GetDeviceFd(u32, const char*, s32, u16) {
+    auto* h = Common::Singleton<Core::FileSys::HandleTable>::Instance();
+    return h->GetFile(fd)->device;
+}
 
 // prefix path, only dev devices
-static std::map<std::string, FactoryDevice> available_device = {
+static std::array<std::pair<std::string_view, FactoryDevice>, 16> available_device = {{
     // clang-format off
-    {"/dev/stdin", GET_DEVICE_FD(0)},
-    {"/dev/stdout", GET_DEVICE_FD(1)},
-    {"/dev/stderr", GET_DEVICE_FD(2)},
+    {"/dev/stdin", &GetDeviceFd<0>},
+    {"/dev/stdout", &GetDeviceFd<1>},
+    {"/dev/stderr", &GetDeviceFd<2>},
 
-    {"/dev/fd/0", GET_DEVICE_FD(0)},
-    {"/dev/fd/1", GET_DEVICE_FD(1)},
-    {"/dev/fd/2", GET_DEVICE_FD(2)},
+    {"/dev/fd/0", &GetDeviceFd<0>},
+    {"/dev/fd/1", &GetDeviceFd<1>},
+    {"/dev/fd/2", &GetDeviceFd<2>},
 
-    {"/dev/deci_stdin", GET_DEVICE_FD(0)},
-    {"/dev/deci_stdout", GET_DEVICE_FD(1)},
-    {"/dev/deci_stderr", GET_DEVICE_FD(2)},
+    {"/dev/deci_stdin", &GetDeviceFd<0>},
+    {"/dev/deci_stdout", &GetDeviceFd<1>},
+    {"/dev/deci_stderr", &GetDeviceFd<2>},
 
-    {"/dev/null", GET_DEVICE_FD(0)}, // fd0 (stdin) is a nop device
+    {"/dev/null", &GetDeviceFd<0>}, // fd0 (stdin) is a nop device
 
     {"/dev/urandom",  &D::URandomDevice::Create },
     {"/dev/random",   &D::RandomDevice::Create },
@@ -70,7 +71,7 @@ static std::map<std::string, FactoryDevice> available_device = {
     {"/dev/deci_tty6",&D::DeciTty6Device::Create },
     {"/dev/rng",      &D::RngDevice::Create },
     // clang-format on
-};
+}};
 
 namespace Libraries::Kernel {
 

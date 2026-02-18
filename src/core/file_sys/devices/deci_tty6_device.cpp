@@ -6,8 +6,8 @@
 
 namespace Core::Devices {
 
-std::shared_ptr<BaseDevice> DeciTty6Device::Create(u32 handle, const char*, s32, u16) {
-    return std::static_pointer_cast<BaseDevice>(std::make_shared<DeciTty6Device>(handle));
+std::unique_ptr<BaseDevice> DeciTty6Device::Create(u32 handle, const char*, s32, u16) {
+    return std::make_unique<DeciTty6Device>(handle);
 }
 
 s32 DeciTty6Device::ioctl(u64 cmd, Common::VaCtx* args) {

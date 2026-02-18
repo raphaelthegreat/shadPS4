@@ -91,6 +91,8 @@ Pthread* ThreadState::Alloc(Pthread* curthread) {
         if (thread == nullptr) {
             total_threads.fetch_sub(1);
             return nullptr;
+        } else {
+            ASSERT((VAddr(thread) & 0xf) == 0);
         }
     }
     Core::Tcb* tcb = nullptr;

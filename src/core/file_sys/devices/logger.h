@@ -11,7 +11,7 @@
 
 namespace Core::Devices {
 
-class Logger final : BaseDevice {
+class Logger final : public BaseDevice {
     std::string prefix;
     bool is_err;
 

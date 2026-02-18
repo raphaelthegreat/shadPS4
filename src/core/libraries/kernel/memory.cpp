@@ -7,8 +7,9 @@
 #include "common/assert.h"
 #include "common/elf_info.h"
 #include "common/logging/log.h"
-#include "common/scope_exit.h"
 #include "common/singleton.h"
+#include "core/file_sys/devices/blockpool_device.h"
+#include "core/file_sys/fs.h"
 #include "core/libraries/kernel/kernel.h"
 #include "core/libraries/kernel/memory.h"
 #include "core/libraries/kernel/orbis_error.h"
@@ -21,6 +22,7 @@ namespace Libraries::Kernel {
 
 static s32 g_sdk_version = -1;
 static bool g_alias_dmem = false;
+static s32 g_blockpool_fd = -1;
 
 u64 PS4_SYSV_ABI sceKernelGetDirectMemorySize() {
     LOG_TRACE(Kernel_Vmm, "called");
@@ -486,9 +488,9 @@ s32 PS4_SYSV_ABI sceKernelSetVirtualRangeName(const void* addr, u64 len, const c
     return ORBIS_OK;
 }
 
-s32 PS4_SYSV_ABI sceKernelMemoryPoolExpand(u64 searchStart, u64 searchEnd, u64 len, u64 alignment,
-                                           u64* physAddrOut) {
-    if (searchStart < 0 || searchEnd <= searchStart) {
+s32 PS4_SYSV_ABI sceKernelMemoryPoolExpand(u64 search_start, u64 search_end, u64 len, u64 alignment,
+                                           u64* phys_addr_out) {
+    if (search_start < 0 || search_end <= search_start) {
         LOG_ERROR(Kernel_Vmm, "Provided address range is invalid!");
         return ORBIS_KERNEL_ERROR_EINVAL;
     }
@@ -500,33 +502,26 @@ s32 PS4_SYSV_ABI sceKernelMemoryPoolExpand(u64 searchStart, u64 searchEnd, u64 l
         LOG_ERROR(Kernel_Vmm, "Alignment {:#x} is invalid!", alignment);
         return ORBIS_KERNEL_ERROR_EINVAL;
     }
-    if (physAddrOut == nullptr) {
-        LOG_ERROR(Kernel_Vmm, "Result physical address pointer is null!");
-        return ORBIS_KERNEL_ERROR_EINVAL;
-    }
-
-    const bool is_in_range = searchEnd - searchStart >= len;
-    if (searchEnd <= searchStart || searchEnd < len || !is_in_range) {
-        LOG_ERROR(Kernel_Vmm,
-                  "Provided address range is too small!"
-                  " searchStart = {:#x}, searchEnd = {:#x}, length = {:#x}",
-                  searchStart, searchEnd, len);
-        return ORBIS_KERNEL_ERROR_ENOMEM;
-    }
 
     auto* memory = Core::Memory::Instance();
-    PAddr phys_addr = memory->PoolExpand(searchStart, searchEnd, len, alignment);
-    if (phys_addr == -1) {
-        return ORBIS_KERNEL_ERROR_ENOMEM;
+    auto* h = Common::Singleton<Core::FileSys::HandleTable>::Instance();
+
+    auto expand_args = Core::Devices::BlockpoolDevice::PoolExpandArgs{
+        .size = len,
+        .start = search_start,
+        .end = search_end,
+    };
+    auto* blockpool_file = h->GetFile(g_blockpool_fd);
+    const s32 ret = blockpool_file->device->ioctl(Core::Devices::BlockpoolDevice::PoolExpand, &expand_args);
+
+    if (phys_addr_out && ret == ORBIS_OK) {
+        *phys_addr_out = expand_args.start;
+        LOG_INFO(Kernel_Vmm,
+                 "searchStart = {:#x}, searchEnd = {:#x}, len = {:#x}, alignment = {:#x}, physAddrOut "
+                 "= {:#x}",
+                 search_start, search_end, len, alignment, *phys_addr_out);
     }
-
-    *physAddrOut = static_cast<s64>(phys_addr);
-
-    LOG_INFO(Kernel_Vmm,
-             "searchStart = {:#x}, searchEnd = {:#x}, len = {:#x}, alignment = {:#x}, physAddrOut "
-             "= {:#x}",
-             searchStart, searchEnd, len, alignment, phys_addr);
-    return ORBIS_OK;
+    return ret;
 }
 
 s32 PS4_SYSV_ABI sceKernelMemoryPoolReserve(void* addr_in, u64 len, u64 alignment, s32 flags,
@@ -551,7 +546,7 @@ s32 PS4_SYSV_ABI sceKernelMemoryPoolReserve(void* addr_in, u64 len, u64 alignmen
     u64 map_alignment = alignment == 0 ? 2_MB : alignment;
 
     return memory->MapMemory(addr_out, std::bit_cast<VAddr>(addr_in), len,
-                             Core::MemoryProt::NoAccess, map_flags, Core::VMAType::PoolReserved,
+                             Core::MemoryProt::NoAccess, map_flags, Core::VMAType::Pooled,
                              "anon", false, -1, map_alignment);
 }
 
@@ -653,17 +648,16 @@ s32 PS4_SYSV_ABI sceKernelMemoryPoolBatch(const OrbisKernelMemoryPoolBatchEntry*
 s32 PS4_SYSV_ABI sceKernelMemoryPoolGetBlockStats(OrbisKernelMemoryPoolBlockStats* stats,
                                                   u64 size) {
     LOG_WARNING(Kernel_Vmm, "called");
-    auto* memory = Core::Memory::Instance();
-    OrbisKernelMemoryPoolBlockStats local_stats;
-    memory->GetMemoryPoolStats(&local_stats);
 
-    u64 size_to_copy = size < sizeof(OrbisKernelMemoryPoolBlockStats)
-                           ? size
-                           : sizeof(OrbisKernelMemoryPoolBlockStats);
     // As of firmware 12.02, the kernel does not check if stats is null,
     // this can cause crashes on real hardware, so have an assert for this case.
+    const u64 size_to_copy = std::min(size, sizeof(OrbisKernelMemoryPoolBlockStats));
     ASSERT_MSG(stats != nullptr || size == 0, "Block stats cannot be null");
+
+    auto& blockpool = Core::Memory::Instance()->GetBlockpool();
+    const auto local_stats = blockpool.GetBlockStats();
     std::memcpy(stats, &local_stats, size_to_copy);
+
     return ORBIS_OK;
 }
 
@@ -810,6 +804,13 @@ s32 PS4_SYSV_ABI sceKernelGetPrtAperture(s32 id, VAddr* address, u64* size) {
 void RegisterMemory(Core::Loader::SymbolsResolver* sym) {
     ASSERT_MSG(sceKernelGetCompiledSdkVersion(&g_sdk_version) == ORBIS_OK,
                "Failed to get compiled SDK verision.");
+
+    auto* h = Common::Singleton<Core::FileSys::HandleTable>::Instance();
+    g_blockpool_fd = h->CreateHandle();
+    auto* file = h->GetFile(g_blockpool_fd);
+    file->is_opened = true;
+    file->type = Core::FileSys::FileType::Device;
+    file->device = Core::Devices::BlockpoolDevice::Create(g_blockpool_fd, nullptr, 0, 0);
 
     LIB_FUNCTION("usHTMoFoBTM", "libkernel_dmem_aliasing2", 1, "libkernel",
                  sceKernelEnableDmemAliasing);

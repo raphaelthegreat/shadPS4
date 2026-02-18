@@ -8,9 +8,9 @@
 
 namespace Core::Devices {
 
-std::shared_ptr<BaseDevice> RngDevice::Create(u32 handle, const char*, s32, u16) {
+std::unique_ptr<BaseDevice> RngDevice::Create(u32 handle, const char*, s32, u16) {
     std::srand(std::time(nullptr));
-    return std::static_pointer_cast<BaseDevice>(std::make_shared<RngDevice>(handle));
+    return std::make_unique<RngDevice>(handle);
 }
 
 s32 RngDevice::ioctl(u64 cmd, Common::VaCtx* args) {

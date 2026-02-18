@@ -11,7 +11,7 @@ class DeciTty6Device final : public BaseDevice {
     u32 handle;
 
 public:
-    static std::shared_ptr<BaseDevice> Create(u32 handle, const char*, s32, u16);
+    static std::unique_ptr<BaseDevice> Create(u32 handle, const char*, s32, u16);
     explicit DeciTty6Device(u32 handle) : handle(handle) {}
 
     ~DeciTty6Device() override = default;

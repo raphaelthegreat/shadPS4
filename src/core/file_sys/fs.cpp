@@ -2,10 +2,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <algorithm>
-#include "common/config.h"
 #include "common/string_util.h"
 #include "core/file_sys/devices/logger.h"
-#include "core/file_sys/devices/nop_device.h"
 #include "core/file_sys/fs.h"
 
 namespace Core::FileSys {
@@ -196,7 +194,7 @@ void MntPoints::IterateDirectory(std::string_view guest_directory,
 int HandleTable::CreateHandle() {
     std::scoped_lock lock{m_mutex};
 
-    auto* file = new File{};
+    auto* file = new File;
     file->is_opened = false;
 
     int existingFilesNum = m_files.size();
@@ -275,19 +273,18 @@ File* HandleTable::GetFile(const std::filesystem::path& host_name) {
 }
 
 void HandleTable::CreateStdHandles() {
-    auto setup = [this](const char* path, auto* device) {
+    const auto setup = [this](const char* path, const std::string& prefix, bool is_err) {
         int fd = CreateHandle();
         auto* file = GetFile(fd);
         file->is_opened = true;
         file->type = FileType::Device;
         file->m_guest_name = path;
-        file->device =
-            std::shared_ptr<Devices::BaseDevice>{reinterpret_cast<Devices::BaseDevice*>(device)};
+        file->device = std::make_unique<Devices::Logger>(prefix, is_err);
     };
     // order matters
-    setup("/dev/stdin", new Devices::Logger("stdin", false));   // stdin
-    setup("/dev/stdout", new Devices::Logger("stdout", false)); // stdout
-    setup("/dev/stderr", new Devices::Logger("stderr", true));  // stderr
+    setup("/dev/stdin", "stdin", false);   // stdin
+    setup("/dev/stdout", "stdout", false); // stdout
+    setup("/dev/stderr", "stderr", true);  // stderr
 }
 
 int HandleTable::GetFileDescriptor(File* file) {

@@ -8,9 +8,9 @@
 
 namespace Core::Devices {
 
-std::shared_ptr<BaseDevice> URandomDevice::Create(u32 handle, const char*, s32, u16) {
+std::unique_ptr<BaseDevice> URandomDevice::Create(u32 handle, const char*, s32, u16) {
     std::srand(std::time(nullptr));
-    return std::static_pointer_cast<BaseDevice>(std::make_shared<URandomDevice>(handle));
+    return std::make_unique<URandomDevice>(handle);
 }
 
 s32 URandomDevice::ioctl(u64 cmd, Common::VaCtx* args) {

@@ -2,17 +2,14 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "common/alignment.h"
-#include "common/assert.h"
-#include "common/logging/log.h"
 #include "common/singleton.h"
 #include "core/file_sys/directories/normal_directory.h"
 #include "core/file_sys/fs.h"
 
 namespace Core::Directories {
 
-std::shared_ptr<BaseDirectory> NormalDirectory::Create(std::string_view guest_directory) {
-    return std::static_pointer_cast<BaseDirectory>(
-        std::make_shared<NormalDirectory>(guest_directory));
+std::unique_ptr<BaseDirectory> NormalDirectory::Create(std::string_view guest_directory) {
+    return std::make_unique<NormalDirectory>(guest_directory);
 }
 
 NormalDirectory::NormalDirectory(std::string_view guest_directory)

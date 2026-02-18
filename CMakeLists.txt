@@ -719,6 +719,7 @@ set(COMMON src/common/logging/backend.cpp
            src/common/func_traits.h
            src/common/native_clock.cpp
            src/common/native_clock.h
+           src/common/parent_of_member.h
            src/common/path_util.cpp
            src/common/path_util.h
            src/common/object_pool.h
@@ -772,8 +773,12 @@ set(CORE src/core/aerolib/stubs.cpp
          src/core/aerolib/aerolib.h
          src/core/address_space.cpp
          src/core/address_space.h
+         src/core/blockpool.cpp
+         src/core/blockpool.h
          src/core/file_sys/devices/base_device.cpp
          src/core/file_sys/devices/base_device.h
+         src/core/file_sys/devices/blockpool_device.cpp
+         src/core/file_sys/devices/blockpool_device.h
          src/core/file_sys/devices/ioccom.h
          src/core/file_sys/devices/logger.cpp
          src/core/file_sys/devices/logger.h
@@ -847,6 +852,65 @@ set(CORE src/core/aerolib/stubs.cpp
          src/core/debug_state.h
          src/core/debugger.cpp
          src/core/debugger.h
+         src/core/kernel/amd64/param.h
+         src/core/kernel/amd64/support.S
+         src/core/kernel/vm/default_pager.c
+         src/core/kernel/vm/device_pager.c
+         src/core/kernel/vm/phys_pager.c
+         src/core/kernel/vm/pmap.h
+         src/core/kernel/vm/uma.h
+         src/core/kernel/vm/uma_core.c
+         src/core/kernel/vm/uma_int.h
+         src/core/kernel/vm/vm.h
+         src/core/kernel/vm/vm_contig.c
+         src/core/kernel/vm/vm_extern.h
+         src/core/kernel/vm/vm_fault.c
+         src/core/kernel/vm/vm_init.c
+         src/core/kernel/vm/vm_kern.c
+         src/core/kernel/vm/vm_kern.h
+         src/core/kernel/vm/vm_map.c
+         src/core/kernel/vm/vm_map.h
+         src/core/kernel/vm/vm_mmap.c
+         src/core/kernel/vm/vm_object.c
+         src/core/kernel/vm/vm_object.h
+         src/core/kernel/vm/vm_page.c
+         src/core/kernel/vm/vm_page.h
+         src/core/kernel/vm/vm_pager.c
+         src/core/kernel/vm/vm_pager.h
+         src/core/kernel/vm/vm_param.h
+         src/core/kernel/vm/vm_phys.c
+         src/core/kernel/vm/vm_phys.h
+         src/core/kernel/vm/vnode_pager.c
+         src/core/kernel/vm/vnode_pager.h
+         src/core/kernel/vm/vmparam.h
+         src/core/kernel/atomic.h
+         src/core/kernel/types.h
+         src/core/kernel/condvar.c
+         src/core/kernel/condvar.h
+         src/core/kernel/errno.h
+         src/core/kernel/imgact_self.c
+         src/core/kernel/imgact_self.h
+         src/core/kernel/lock.c
+         src/core/kernel/lock.h
+         src/core/kernel/malloc.h
+         src/core/kernel/mman.h
+         src/core/kernel/mutex.c
+         src/core/kernel/mutex.h
+         src/core/kernel/queue.h
+         src/core/kernel/proc.h
+         src/core/kernel/sema.c
+         src/core/kernel/sema.h
+         src/core/kernel/sleepq.c
+         src/core/kernel/sleepq.h
+         src/core/kernel/systm.h
+         src/core/kernel/sx.c
+         src/core/kernel/sx.h
+         src/core/kernel/time.h
+         src/core/kernel/rtprio.h
+         src/core/kernel/rwlock.c
+         src/core/kernel/rwlock.h
+         src/core/kernel/umtx.c
+         src/core/kernel/umtx.h
          src/core/linker.cpp
          src/core/linker.h
          src/core/memory.cpp
@@ -860,6 +924,8 @@ set(CORE src/core/aerolib/stubs.cpp
          src/core/thread.h
          src/core/tls.cpp
          src/core/tls.h
+         src/core/vm_map.cpp
+         src/core/vm_map.h
          src/core/emulator_state.cpp
          src/core/emulator_state.h
 )
