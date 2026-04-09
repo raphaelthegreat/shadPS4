@@ -427,8 +427,8 @@ U32 IREmitter::ReadConst(const Value& base, const U32& offset) {
     return Inst<U32>(Opcode::ReadConst, base, offset);
 }
 
-U32 IREmitter::ReadConstBuffer(const Value& handle, const U32& index) {
-    return Inst<U32>(Opcode::ReadConstBuffer, handle, index);
+U32 IREmitter::ReadConstBuffer(const Value& handle, const U32& index, BufferInstInfo info) {
+    return Inst<U32>(Opcode::ReadConstBuffer, Flags{info}, handle, index);
 }
 
 U8 IREmitter::LoadBufferU8(const Value& handle, const Value& address, BufferInstInfo info) {
@@ -1811,6 +1811,10 @@ U1 IREmitter::LogicalAnd(const U1& a, const U1& b) {
 
 U1 IREmitter::LogicalXor(const U1& a, const U1& b) {
     return Inst<U1>(Opcode::LogicalXor, a, b);
+}
+
+U1 IREmitter::LogicalXNor(const U1& a, const U1& b) {
+    return Inst<U1>(Opcode::LogicalXNor, a, b);
 }
 
 U1 IREmitter::LogicalNot(const U1& value) {

@@ -444,20 +444,12 @@ Id EmitImageAtomicCmpSwap32(EmitContext& ctx, IR::Inst* inst, u32 handle, Id coo
                                  &Sirit::Module::OpAtomicCompareExchange);
 }
 
-Id EmitDataAppend(EmitContext& ctx, u32 gds_addr, u32 binding) {
-    const auto& buffer = ctx.buffers[binding];
-    const auto [id, pointer_type] = buffer.Alias(PointerType::U32);
-    const Id ptr = ctx.OpAccessChain(pointer_type, id, ctx.u32_zero_value, ctx.ConstU32(gds_addr));
-    const auto [scope, semantics]{AtomicArgs(ctx)};
-    return ctx.OpAtomicIIncrement(ctx.U32[1], ptr, scope, semantics);
+Id EmitDataAppend(EmitContext& ctx, u32 gds_addr, u32 handle) {
+    UNREACHABLE_MSG("SPIR-V Instruction");
 }
 
-Id EmitDataConsume(EmitContext& ctx, u32 gds_addr, u32 binding) {
-    const auto& buffer = ctx.buffers[binding];
-    const auto [id, pointer_type] = buffer.Alias(PointerType::U32);
-    const Id ptr = ctx.OpAccessChain(pointer_type, id, ctx.u32_zero_value, ctx.ConstU32(gds_addr));
-    const auto [scope, semantics]{AtomicArgs(ctx)};
-    return ctx.OpAtomicIDecrement(ctx.U32[1], ptr, scope, semantics);
+Id EmitDataConsume(EmitContext& ctx, u32 gds_addr, u32 handle) {
+    UNREACHABLE_MSG("SPIR-V Instruction");
 }
 
 } // namespace Shader::Backend::SPIRV

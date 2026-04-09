@@ -115,7 +115,7 @@ public:
     void S_MULK_I32(const GcnInst& inst);
 
     // SOP1
-    void S_MOV(const GcnInst& inst);
+    void S_MOV_B32(const GcnInst& inst);
     void S_MOV_B64(const GcnInst& inst);
     void S_NOT_B64(const GcnInst& inst);
     void S_BREV_B32(const GcnInst& inst);
@@ -185,7 +185,7 @@ public:
     void V_CVT_PKRTZ_F16_F32(const GcnInst& inst);
 
     // VOP1
-    void V_MOV(const GcnInst& inst);
+    void V_MOV_B32(const GcnInst& inst);
     void V_READFIRSTLANE_B32(const GcnInst& inst);
     void V_CVT_I32_F64(const GcnInst& inst);
     void V_CVT_F64_I32(const GcnInst& inst);
@@ -307,10 +307,12 @@ public:
     void IMAGE_GET_LOD(const GcnInst& inst);
 
 private:
+    IR::U1 GetSrc1(const InstOperand& operand);
     template <typename T = IR::U32>
     [[nodiscard]] T GetSrc(const InstOperand& operand);
     template <typename T = IR::U64>
     [[nodiscard]] T GetSrc64(const InstOperand& operand);
+    void SetDst1(const InstOperand& operand, const IR::U1& value);
     void SetDst(const InstOperand& operand, const IR::U32F32& value);
     void SetDst64(const InstOperand& operand, const IR::U64F64& value_raw);
 
@@ -329,6 +331,14 @@ private:
 
     IR::VectorReg GetScratchVgpr(u32 offset);
 
+    enum class RegType : u8 {
+        Scalar,
+        ThreadBitLo,
+        ThreadBitHi,
+        Undefined,
+    };
+    RegType GetRegType(const InstOperand& operand) const;
+
 private:
     IR::IREmitter ir;
     Info& info;
@@ -339,6 +349,12 @@ private:
     std::array<IR::Attribute, MaxInterpVgpr> vgpr_to_interp{};
     bool opcode_missing = false;
     u32 pc{};
+    struct RegsType {
+        std::array<RegType, IR::NumScalarRegs> scalar{};
+        RegType vcc{};
+    };
+    std::unordered_map<const Gcn::Block*, RegsType> block_types;
+    RegsType* type{};
 };
 
 } // namespace Shader::Gcn

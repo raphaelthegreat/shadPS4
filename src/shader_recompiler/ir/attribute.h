@@ -91,6 +91,8 @@ enum class Attribute : u64 {
     StencilRef = 94,
     SampleMask = 95,
     PackedAncillary = 96,
+    SubgroupEqMask = 97,
+    SubgroupLtMask = 98,
     Max,
 };
 

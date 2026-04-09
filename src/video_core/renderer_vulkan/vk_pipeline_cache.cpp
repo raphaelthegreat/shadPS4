@@ -465,7 +465,7 @@ bool PipelineCache::RefreshGraphicsStages() {
 
     infos.fill(nullptr);
     modules.fill(nullptr);
-    const auto result = bind_stage(Stage::Fragment, LogicalStage::Fragment);
+    const bool result = bind_stage(Stage::Fragment, LogicalStage::Fragment);
     if (!result && regs.vs_output_control.clip_distance_enable &&
         profile.needs_clip_distance_emulation) {
         // TODO: need to implement a discard only fallback shader
@@ -474,6 +474,9 @@ bool PipelineCache::RefreshGraphicsStages() {
     }
 
     const auto* fs_info = infos[static_cast<u32>(LogicalStage::Fragment)];
+    if (fs_info && fs_info->pgm_hash == 0x16e25382) {
+        return false;
+    }
     key.mrt_mask = fs_info ? fs_info->mrt_mask : 0u;
     key.num_color_attachments = std::bit_width(key.mrt_mask);
 

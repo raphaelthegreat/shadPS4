@@ -10,23 +10,23 @@
 namespace Libraries::HmdSetupDialog {
 
 s32 PS4_SYSV_ABI sceHmdSetupDialogInitialize() {
-    LOG_ERROR(Lib_HmdSetupDialog, "(STUBBED) called");
+    //LOG_ERROR(Lib_HmdSetupDialog, "(STUBBED) called");
     return ORBIS_OK;
 }
 
 s32 PS4_SYSV_ABI sceHmdSetupDialogClose() {
-    LOG_ERROR(Lib_HmdSetupDialog, "(STUBBED) called");
+    //LOG_ERROR(Lib_HmdSetupDialog, "(STUBBED) called");
     return ORBIS_OK;
 }
 
 s32 PS4_SYSV_ABI sceHmdSetupDialogOpen(const OrbisHmdSetupDialogParam* param) {
-    LOG_ERROR(Lib_HmdSetupDialog, "(STUBBED) called");
+    //LOG_ERROR(Lib_HmdSetupDialog, "(STUBBED) called");
     // On real hardware, a dialog would show up telling the user to connect a PSVR headset.
     return ORBIS_OK;
 }
 
 s32 PS4_SYSV_ABI sceHmdSetupDialogGetResult(OrbisHmdSetupDialogResult* result) {
-    LOG_ERROR(Lib_HmdSetupDialog, "(STUBBED) called");
+    //LOG_ERROR(Lib_HmdSetupDialog, "(STUBBED) called");
     // Simulates behavior of user pressing circle to cancel the dialog.
     // Result::OK would mean a headset was connected.
     result->result = Libraries::CommonDialog::Result::USER_CANCELED;
@@ -34,18 +34,22 @@ s32 PS4_SYSV_ABI sceHmdSetupDialogGetResult(OrbisHmdSetupDialogResult* result) {
 }
 
 Libraries::CommonDialog::Status PS4_SYSV_ABI sceHmdSetupDialogUpdateStatus() {
-    LOG_ERROR(Lib_HmdSetupDialog, "(STUBBED) called");
+    //LOG_ERROR(Lib_HmdSetupDialog, "(STUBBED) called");
     return Libraries::CommonDialog::Status::FINISHED;
 }
 
 Libraries::CommonDialog::Status PS4_SYSV_ABI sceHmdSetupDialogGetStatus() {
-    LOG_ERROR(Lib_HmdSetupDialog, "(STUBBED) called");
+    //LOG_ERROR(Lib_HmdSetupDialog, "(STUBBED) called");
     return Libraries::CommonDialog::Status::FINISHED;
 }
 
 s32 PS4_SYSV_ABI sceHmdSetupDialogTerminate() {
-    LOG_ERROR(Lib_HmdSetupDialog, "(STUBBED) called");
+    //LOG_ERROR(Lib_HmdSetupDialog, "(STUBBED) called");
     return ORBIS_OK;
+}
+
+s32 sceVrServiceDialogUpdateStatus() {
+    return 0;
 }
 
 void RegisterLib(Core::Loader::SymbolsResolver* sym) {
@@ -63,6 +67,9 @@ void RegisterLib(Core::Loader::SymbolsResolver* sym) {
                  sceHmdSetupDialogTerminate);
     LIB_FUNCTION("Ud7j3+RDIBg", "libSceHmdSetupDialog", 1, "libSceHmdSetupDialog",
                  sceHmdSetupDialogUpdateStatus);
+
+    LIB_FUNCTION("RmRtBJpoHlA", "libSceVrServiceDialog", 1, "libSceVrServiceDialog",
+                 sceVrServiceDialogUpdateStatus);
 };
 
 } // namespace Libraries::HmdSetupDialog

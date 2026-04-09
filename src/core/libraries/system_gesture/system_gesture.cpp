@@ -109,7 +109,7 @@ int PS4_SYSV_ABI sceSystemGestureUpdateAllTouchRecognizer() {
 }
 
 int PS4_SYSV_ABI sceSystemGestureUpdatePrimitiveTouchRecognizer() {
-    LOG_ERROR(Lib_SystemGesture, "(STUBBED) called");
+    //LOG_ERROR(Lib_SystemGesture, "(STUBBED) called");
     return ORBIS_OK;
 }
 
