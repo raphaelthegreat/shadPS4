@@ -14,6 +14,7 @@
 #include "core/libraries/kernel/orbis_error.h"
 #include "core/libraries/libc_internal/libc_internal.h"
 #include "core/libraries/libpng/pngenc.h"
+#include "core/libraries/fiber/fiber.h"
 #include "core/libraries/libs.h"
 #include "core/libraries/ngs2/ngs2.h"
 #include "core/libraries/rtc/rtc.h"
