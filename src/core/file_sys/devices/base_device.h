@@ -4,7 +4,6 @@
 #pragma once
 
 #include "common/types.h"
-#include "common/va_ctx.h"
 #include "core/libraries/kernel/orbis_error.h"
 
 namespace Libraries::Kernel {
@@ -20,7 +19,7 @@ public:
 
     virtual ~BaseDevice() = 0;
 
-    virtual s32 ioctl(u64 cmd, Common::VaCtx* args) {
+    virtual s32 ioctl(u32 cmd, void* args) {
         return ORBIS_KERNEL_ERROR_ENOTTY;
     }
 

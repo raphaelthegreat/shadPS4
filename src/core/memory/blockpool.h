@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
+// SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #pragma once
@@ -8,6 +8,10 @@
 #include <mutex>
 #include "common/assert.h"
 #include "common/types.h"
+
+namespace Vulkan {
+class Rasterizer;
+}
 
 namespace Libraries::Kernel {
 struct OrbisVirtualQueryInfo;
@@ -39,14 +43,23 @@ struct BlockStats {
     u32 allocated_cached_blocks;
 };
 
+struct VmMapEntry;
+enum class MemoryProt : u32;
+
+class AddressSpace;
+
 class Blockpool {
 public:
     static constexpr u32 BLOCK_SHIFT = 16;
     static constexpr u32 BLOCK_SIZE = 1U << BLOCK_SHIFT;
 
 public:
-    explicit Blockpool() = default;
+    explicit Blockpool(AddressSpace& impl_) : impl{impl_} {}
     ~Blockpool() = default;
+
+    void SetRasterizer(Vulkan::Rasterizer* rasterizer_) {
+        rasterizer = rasterizer_;
+    }
 
     constexpr static u64 ToBlocks(VAddr addr) {
         return addr >> BLOCK_SHIFT;
@@ -71,6 +84,10 @@ public:
         flushed.Insert(dmem_addr >> BLOCK_SHIFT, size >> BLOCK_SHIFT);
     }
 
+    bool Map(VmMapEntry& entry, VAddr addr, u64 size, MemoryProt prot, s32 mtype);
+
+    void Unmap(VmMapEntry& entry, VAddr addr, u64 size);
+
     bool Commit(u32 count, bool onion, bool writeback, u32* out_blocks);
 
     void Decommit(DmemBlock* blocks, u32 count);
@@ -79,6 +96,10 @@ public:
 
     void Query(VAddr addr, VAddr base, u64 size, const DmemBlock* blocks,
                ::Libraries::Kernel::OrbisVirtualQueryInfo* info);
+
+    void SetName(VAddr start, VAddr end, const char* name);
+
+    void NameSplit(VAddr start, VAddr end);
 
 private:
     struct Bitmap {
@@ -143,6 +164,8 @@ private:
         u64 bits_l2;
     };
 
+    AddressSpace& impl;
+    Vulkan::Rasterizer* rasterizer;
     std::mutex mutex;
     Bitmap cached{};
     Bitmap flushed{};
@@ -152,7 +175,7 @@ private:
         VAddr end;
         char name[32];
     };
-    std::map<VAddr, NameEntry> name_tree;
+    std::map<VAddr, NameEntry> blockpool_names;
 };
 
 } // namespace Core

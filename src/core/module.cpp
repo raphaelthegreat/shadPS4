@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
-
+#pragma GCC push_options
+#pragma GCC optimize("O0")
 #include "common/alignment.h"
 #include "common/arch.h"
 #include "common/assert.h"
@@ -12,15 +13,13 @@
 #include "core/cpu_patches.h"
 #include "core/libraries/error_codes.h"
 #include "core/loader/dwarf.h"
-#include "core/memory.h"
+#include "core/memory/kernel.h"
 #include "core/module.h"
 #include "core/tls.h"
 
 namespace Core {
 
 using EntryFunc = PS4_SYSV_ABI int (*)(size_t args, const void* argp, void* param);
-
-static constexpr u64 ModuleLoadBase = 0x800000000;
 
 static u64 GetAlignedSize(const elf_program_header& phdr) {
     return (phdr.p_align != 0 ? (phdr.p_memsz + (phdr.p_align - 1)) & ~(phdr.p_align - 1)
@@ -83,6 +82,34 @@ static std::string StringToNid(std::string_view symbol) {
     return dst;
 }
 
+struct ModuleBudgetInfo {
+    BudgetPtype budget_ptype;
+    VmContainer vm_container;
+    bool wire;
+    bool use_2mb;
+    bool skip_2mb_precheck;
+};
+
+ModuleBudgetInfo ClassifyModule(std::filesystem::path path, BudgetPtype process_budget) {
+    ModuleBudgetInfo info{};
+
+    const auto filename = path.filename().string();
+    const bool is_libc_or_fios = (filename == "libc.sprx" || filename == "libSceFios2.sprx");
+    const bool is_system = path.string().contains("/sce_module/");
+    if (is_system && !is_libc_or_fios) {
+        // System library.
+        info.budget_ptype = BudgetPtype::System;
+        info.vm_container = VmContainer::System;
+        info.wire = false;
+    } else {
+        info.budget_ptype = process_budget;
+        info.vm_container = VmContainer::Game;
+        info.wire = process_budget == BudgetPtype::BigApp;
+        info.skip_2mb_precheck = is_libc_or_fios;
+    }
+    return info;
+}
+
 Module::Module(Core::MemoryManager* memory_, const std::filesystem::path& file_, u32& max_tls_index)
     : memory{memory_}, file{file_}, name{file.filename().string()} {
     elf.Open(file);
@@ -112,22 +139,22 @@ void Module::LoadModuleToMemory(u32& max_tls_index) {
     aligned_base_size = Common::AlignUp(base_size, BlockAlign);
 
     // Reserve memory area for module
-    void** out_addr = reinterpret_cast<void**>(&base_virtual_addr);
-    s32 result =
-        memory->MapMemory(out_addr, ModuleLoadBase, aligned_base_size + TrampolineSize,
-                          MemoryProt::NoAccess, MemoryMapFlags::NoFlags, VMAType::Reserved, name);
+    const auto mod_info = ClassifyModule(file, BudgetPtype::BigApp);
+    base_virtual_addr =
+        mod_info.budget_ptype == BudgetPtype::System ? 0x800000000ULL : 0x80000000ULL;
+    s32 result = memory->MapMemory(&base_virtual_addr, aligned_base_size + TrampolineSize,
+                                   MemoryProt::NoAccess, MemoryMapFlags::Void, -1, 0, name);
     ASSERT_MSG(result == ORBIS_OK, "Failed to reserve memory for module {}", name);
-    LOG_INFO(Core_Linker, "Loading module {} to {}", name, fmt::ptr(*out_addr));
+    LOG_INFO(Core_Linker, "Loading module {} to {}", name, base_virtual_addr);
 
 #ifdef ARCH_X86_64
     // Initialize trampoline generator.
-    VAddr trampoline_vaddr = base_virtual_addr + aligned_base_size;
-    void* trampoline_addr = std::bit_cast<void*>(trampoline_vaddr);
-    result = memory->MapMemory(&trampoline_addr, trampoline_vaddr, TrampolineSize,
-                               MemoryProt::CpuReadWrite | MemoryProt::CpuExec,
-                               MemoryMapFlags::Fixed, VMAType::Code, name);
+    VAddr trampoline_addr = base_virtual_addr + aligned_base_size;
+    result = memory->MapMemory(&trampoline_addr, TrampolineSize, MemoryProt::CpuAll,
+                               MemoryMapFlags::Fixed | MemoryMapFlags::Anon, -1, 0, name);
     ASSERT_MSG(result == ORBIS_OK, "Failed to map trampoline area for module {}", name);
-    RegisterPatchModule(*out_addr, aligned_base_size, trampoline_addr, TrampolineSize);
+    RegisterPatchModule(reinterpret_cast<void*>(base_virtual_addr), aligned_base_size,
+                        reinterpret_cast<void*>(trampoline_addr), TrampolineSize);
 #endif
 
     LOG_INFO(Core_Linker, "======== Load Module to Memory ========");
@@ -136,12 +163,11 @@ void Module::LoadModuleToMemory(u32& max_tls_index) {
     LOG_INFO(Core_Linker, "aligned_base_size ......: {:#018x}", aligned_base_size);
 
     const auto add_segment = [this](const elf_program_header& phdr, bool do_map = true) {
-        const VAddr segment_vaddr = base_virtual_addr + phdr.p_vaddr;
-        void* segment_addr = std::bit_cast<void*>(segment_vaddr);
+        VAddr segment_vaddr = base_virtual_addr + phdr.p_vaddr;
         const u64 segment_size = GetAlignedSize(phdr);
         if (do_map) {
             // Convert ELF flags to memory prot.
-            auto segment_prot = MemoryProt::NoAccess;
+            auto segment_prot = MemoryProt::CpuWrite;
             if ((phdr.p_flags & PF_READ) != 0) {
                 segment_prot |= MemoryProt::CpuRead;
             }
@@ -153,9 +179,10 @@ void Module::LoadModuleToMemory(u32& max_tls_index) {
             }
 
             // Map module segments
-            const auto memory_type = IsSystemLib() ? VMAType::Code : VMAType::Flexible;
-            s32 result = memory->MapMemory(&segment_addr, segment_vaddr, segment_size, segment_prot,
-                                           MemoryMapFlags::Fixed, memory_type, name);
+            // const auto memory_type = IsSystemLib() ? VMAType::Code : VMAType::Flexible;
+            s32 result =
+                memory->MapMemory(&segment_vaddr, segment_size, segment_prot,
+                                  MemoryMapFlags::Fixed | MemoryMapFlags::Anon, -1, 0, name);
             ASSERT_MSG(result == ORBIS_OK, "Failed to map segment at {:#x} for module {}",
                        segment_vaddr, name);
             elf.LoadSegment(segment_vaddr, phdr.p_offset, phdr.p_filesz);
