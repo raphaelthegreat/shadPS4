@@ -12,8 +12,6 @@
 #include "common/singleton.h"
 #include "core/file_sys/devices/console_device.h"
 #include "core/file_sys/devices/deci_tty6_device.h"
-#include "core/file_sys/devices/logger.h"
-#include "core/file_sys/devices/nop_device.h"
 #include "core/file_sys/devices/random_device.h"
 #include "core/file_sys/devices/rng_device.h"
 #include "core/file_sys/devices/srandom_device.h"
@@ -26,7 +24,7 @@
 #include "core/libraries/kernel/posix_error.h"
 #include "core/libraries/libs.h"
 #include "core/libraries/network/sockets.h"
-#include "core/memory.h"
+#include "core/memory/kernel.h"
 #include "kernel.h"
 
 #ifdef _WIN32

@@ -1,0 +1,571 @@
+// SPDX-FileCopyrightText: Copyright 2026 shadPS4 Emulator Project
+// SPDX-License-Identifier: GPL-2.0-or-later
+
+#pragma once
+
+#include "common/alignment.h"
+#include "common/types.h"
+
+namespace Core {
+
+struct SplayTreeNode {
+    SplayTreeNode* left{};
+    SplayTreeNode* right{};
+    SplayTreeNode* prev{};
+    SplayTreeNode* next{};
+    SplayTreeNode* temp{};
+    u64 adj_free{};
+    u64 max_free{};
+};
+
+template <typename Traits>
+class SplayTree {
+public:
+    using Entry = typename Traits::EntryType;
+
+private:
+    using N = SplayTreeNode;
+
+    static N* GetNode(Entry* entry) {
+        return Traits::GetNode(entry);
+    }
+    static Entry* GetEntry(N* node) {
+        return Traits::FromNode(node);
+    }
+    static u64 Start(Entry* entry) {
+        return Traits::GetStart(entry);
+    }
+    static u64 End(Entry* entry) {
+        return Traits::GetEnd(entry);
+    }
+    static u64 Start(N* node) {
+        return Start(GetEntry(node));
+    }
+    static u64 End(N* node) {
+        return End(GetEntry(node));
+    }
+
+    class Iterator {
+    public:
+        Iterator(N* node) : m_node{node} {}
+
+        Entry& operator*() const {
+            return *GetEntry(m_node);
+        }
+        Entry* operator->() const {
+            return GetEntry(m_node);
+        }
+        Iterator& operator++() {
+            m_node = m_node->next;
+            return *this;
+        }
+        Iterator& operator--() {
+            m_node = m_node->prev;
+            return *this;
+        }
+
+        bool operator==(const Iterator& other) const {
+            return m_node == other.m_node;
+        }
+        bool operator!=(const Iterator& other) const {
+            return m_node != other.m_node;
+        }
+
+    private:
+        N* m_node;
+    };
+
+    static void SetMaxFree(N* entry) {
+        entry->max_free = entry->adj_free;
+        if (entry->left != nullptr && entry->left->max_free > entry->max_free) {
+            entry->max_free = entry->left->max_free;
+        }
+        if (entry->right != nullptr && entry->right->max_free > entry->max_free) {
+            entry->max_free = entry->right->max_free;
+        }
+    }
+
+    /// Sleator-Tarjan top-down splay with max_free recomputation.
+    static N* Splay(u64 addr, N* root) {
+        N* llist;
+        N* rlist;
+        N* ltree;
+        N* rtree;
+        N* y;
+
+        if (root == nullptr) {
+            return root;
+        }
+
+        // Pass One: splay down. llist linked by right, rlist linked by left.
+        llist = nullptr;
+        rlist = nullptr;
+        for (;;) {
+            if (addr < Start(root)) {
+                y = root->left;
+                if (y == nullptr) {
+                    break;
+                }
+                if (addr < Start(y) && y->left != nullptr) {
+                    // Rotate right and put y on rlist.
+                    root->left = y->right;
+                    y->right = root;
+                    SetMaxFree(root);
+                    root = y->left;
+                    y->left = rlist;
+                    rlist = y;
+                } else {
+                    // Put root on rlist.
+                    root->left = rlist;
+                    rlist = root;
+                    root = y;
+                }
+            } else if (addr >= End(root)) {
+                y = root->right;
+                if (y == nullptr) {
+                    break;
+                }
+                if (addr >= End(y) && y->right != nullptr) {
+                    // Rotate left and put y on llist.
+                    root->right = y->left;
+                    y->left = root;
+                    SetMaxFree(root);
+                    root = y->right;
+                    y->right = llist;
+                    llist = y;
+                } else {
+                    // Put root on llist.
+                    root->right = llist;
+                    llist = root;
+                    root = y;
+                }
+            } else {
+                break;
+            }
+        }
+
+        // Pass Two: walk back up, flip pointers, set max_free.
+        ltree = root->left;
+        while (llist != nullptr) {
+            y = llist->right;
+            llist->right = ltree;
+            SetMaxFree(llist);
+            ltree = llist;
+            llist = y;
+        }
+        rtree = root->right;
+        while (rlist != nullptr) {
+            y = rlist->left;
+            rlist->left = rtree;
+            SetMaxFree(rlist);
+            rtree = rlist;
+            rlist = y;
+        }
+
+        // Final assembly.
+        root->left = ltree;
+        root->right = rtree;
+        SetMaxFree(root);
+
+        return root;
+    }
+
+    /// Splay the entry with the largest adj_free to the subtree root.
+    static N* SplayMaxFree(N* root) {
+        if (!root) {
+            return root;
+        }
+        u64 target = root->max_free;
+        if (root->adj_free == target) {
+            return root;
+        }
+
+        N* llist = nullptr;
+        N* rlist = nullptr;
+
+        for (;;) {
+            N* left = root->left;
+            if (left && left->max_free == target) {
+                if (left->adj_free != target && left->left &&
+                    left->left->max_free == target) {
+                    // Zig-zig right.
+                    root->left = left->right;
+                    left->right = root;
+                    SetMaxFree(root);
+                    root = left->left;
+                    left->left = llist;
+                    llist = left;
+                } else {
+                    root->left = llist;
+                    llist = root;
+                    root = left;
+                }
+            } else {
+                N* right = root->right;
+                if (right->adj_free != target && right->right &&
+                    right->right->max_free == target) {
+                    // Zig-zig left.
+                    root->right = right->left;
+                    right->left = root;
+                    SetMaxFree(root);
+                    root = right->right;
+                    right->right = rlist;
+                    rlist = right;
+                } else {
+                    root->right = rlist;
+                    rlist = root;
+                    root = right;
+                }
+            }
+            if (root->adj_free == target) {
+                break;
+            }
+        }
+
+        // Reassembly — identical structure to Splay().
+        N* ltree = root->left;
+        while (llist) {
+            N* y = llist->right;
+            llist->right = ltree;
+            SetMaxFree(llist);
+            ltree = llist;
+            llist = y;
+        }
+        N* rtree = root->right;
+        while (rlist) {
+            N* y = rlist->left;
+            rlist->left = rtree;
+            SetMaxFree(rlist);
+            rtree = rlist;
+            rlist = y;
+        }
+        root->left = ltree;
+        root->right = rtree;
+        SetMaxFree(root);
+        return root;
+    }
+
+public:
+    explicit SplayTree() = default;
+
+    void Init(Entry* headerentry, u64 min_offset, u64 max_offset) {
+        m_header = GetNode(headerentry);
+        m_header->prev = m_header;
+        m_header->next = m_header;
+    }
+
+    Iterator begin() const {
+        return Iterator(m_header->next);
+    }
+    Iterator end() const {
+        return Iterator(m_header);
+    }
+
+    /// Insert entry into tree and linked list, after after_where.
+    void Link(Entry* after_where_entry, Entry* entry) {
+        N* after_where = GetNode(after_where_entry);
+        N* node = GetNode(entry);
+
+        m_num_entries++;
+        node->prev = after_where;
+        node->next = after_where->next;
+        node->next->prev = node;
+        after_where->next = node;
+
+        if (after_where != m_header) {
+            if (after_where != m_root) {
+                m_root = Splay(Start(after_where), m_root);
+            }
+            node->right = after_where->right;
+            node->left = after_where;
+            after_where->right = nullptr;
+            after_where->adj_free = Start(node) - End(after_where);
+            SetMaxFree(after_where);
+        } else {
+            node->right = m_root;
+            node->left = nullptr;
+        }
+        node->adj_free = Start(node->next) - End(node);
+        SetMaxFree(node);
+        m_root = node;
+    }
+
+    /// Remove entry from tree and linked list.
+    void Unlink(Entry* entry) {
+        N* node = GetNode(entry);
+        N* root;
+
+        if (node != m_root) {
+            m_root = Splay(Start(node), m_root);
+        }
+
+        if (node->left == nullptr) {
+            root = node->right;
+        } else {
+            root = Splay(Start(node), node->left);
+            root->right = node->right;
+            root->adj_free = Start(node->next) - End(root);
+            SetMaxFree(root);
+        }
+        m_root = root;
+
+        N* prev = node->prev;
+        N* next = node->next;
+        next->prev = prev;
+        prev->next = next;
+        m_num_entries--;
+
+        node->left = nullptr;
+        node->right = nullptr;
+        node->prev = nullptr;
+        node->next = nullptr;
+    }
+
+    /// Recompute adj_free/max_free after an in-place resize of entry.
+    void ResizeFree(Entry* entry) {
+        N* node = GetNode(entry);
+        if (node != m_root) {
+            m_root = Splay(Start(node), m_root);
+        }
+        node->adj_free = Start(node->next) - End(node);
+        SetMaxFree(node);
+    }
+
+    /// Find the entry containing addr, or the entry immediately before it.
+    bool LookupEntry(u64 addr, Entry** out) {
+        if (addr >= Start(m_root) && addr < End(m_root)) {
+            *out = GetEntry(m_root);
+            return true;
+        }
+
+        m_root = Splay(addr, m_root);
+        N* cur = m_root;
+
+        if (addr >= Start(cur)) {
+            *out = GetEntry(cur);
+            if (addr < End(cur)) {
+                return true;
+            }
+        } else {
+            *out = GetEntry(cur->prev);
+        }
+        return false;
+    }
+
+    /// Find first fit for `length` free bytes at address >= start.
+    Entry* FindSpace(u64 start, u64 length, u64* addr) {
+        m_root = Splay(start, m_root);
+        if (start + length <= Start(m_root)) {
+            *addr = start;
+            return m_root->prev;
+        }
+        const u64 search_begin = std::max(start, End(m_root));
+        if (length <= End(m_root) + m_root->adj_free - search_begin) {
+            *addr = search_begin;
+            return m_root;
+        }
+        N* node = m_root->right;
+        if (!node || length > node->max_free) {
+            return nullptr;
+        }
+        while (node) {
+            if (node->left && node->left->max_free >= length) {
+                node = node->left;
+            } else if (node->adj_free >= length) {
+                *addr = End(node);
+                return GetEntry(node);
+            } else {
+                node = node->right;
+            }
+        }
+        return nullptr;
+    }
+
+    /// Find first aligned fit for `length` free bytes at address >= start.
+    Entry* FindSpaceAligned(PAddr start, PAddr end, u64 length, u64 alignment, u64* out_addr) {
+        const PAddr upper_addr = Common::AlignDownPow2(end - length, alignment) + 1;
+
+        for (;;) {
+            const PAddr start_aligned = Common::AlignUpPow2(start, alignment);
+            if (start > start_aligned || start_aligned >= upper_addr) {
+               return nullptr;
+            }
+
+            m_root = Splay(start_aligned, m_root);
+            if (start_aligned + length <= Start(m_root)) {
+                *out_addr = start_aligned;
+                return Prev(m_root);
+            }
+
+            const PAddr search_begin = std::max(start_aligned, End(m_root));
+            const PAddr search_begin_aligned = Common::AlignUpPow2(search_begin, alignment);
+            if (search_begin > search_begin_aligned || search_begin_aligned >= upper_addr) {
+                return nullptr;
+            }
+
+            if (length <= End(m_root) + m_root->adj_free - search_begin_aligned) {
+                *out_addr = search_begin_aligned;
+                return m_root;
+            }
+
+            N* node = m_root->right;
+            if (!node || length > node->max_free) {
+                return nullptr;
+            }
+
+            while (node) {
+                if (node->left && node->left->max_free >= length) {
+                    node = node->left;
+                } else if (node->adj_free >= length) {
+                    break;
+                } else {
+                    node = node->right;
+                }
+            }
+            if (!node) {
+                return nullptr;
+            }
+
+            const PAddr addr = std::max(End(node), search_begin_aligned);
+            const PAddr addr_aligned = Common::AlignUpPow2(addr, alignment);
+            if (addr > addr_aligned || addr_aligned >= upper_addr) {
+                return nullptr;
+            }
+
+            start = End(node) + node->adj_free;
+            if (addr_aligned + length > start) {
+                continue;
+            }
+
+            *out_addr = addr_aligned;
+            return GetEntry(node);
+        }
+    }
+
+    Entry* SubtreeSplay(Entry* subtree_root, u64 addr) {
+        return GetEntry(Splay(addr, GetNode(subtree_root)));
+    }
+
+    Entry* SubtreeSplayMaxFree(Entry* subtree_root) {
+        return GetEntry(SplayMaxFree(GetNode(subtree_root)));
+    }
+
+    void ForEachFrom(Entry* start_entry, auto&& func) {
+        N* node = GetNode(start_entry);
+        while (node != m_header) {
+            if (!func(GetEntry(node))) {
+                break;
+            }
+            N* next = node->next;
+            if (next != m_header && Start(next) > End(node)) {
+                break;
+            }
+            node = next;
+        }
+    }
+
+    Entry* First() const {
+        return m_header->next == m_header ? nullptr : GetEntry(m_header->next);
+    }
+    Entry* Last() const {
+        return m_header->prev == m_header ? nullptr : GetEntry(m_header->prev);
+    }
+    Entry* Next(Entry* e) const {
+        N* node = GetNode(e)->next;
+        return node == m_header ? nullptr : GetEntry(node);
+    }
+    Entry* Prev(Entry* e) const {
+        N* node = GetNode(e)->prev;
+        return node == m_header ? nullptr : GetEntry(node);
+    }
+    static Entry* Left(Entry* e) {
+        N* left = GetN(e)->left;
+        return left ? GetEntry(left) : nullptr;
+    }
+    static Entry* Right(Entry* e) {
+        N* right = GetN(e)->right;
+        return right ? GetEntry(right) : nullptr;
+    }
+    static Entry* Temp(Entry* e) {
+        N* temp = GetNode(e)->temp;
+        return temp ? GetEntry(temp) : nullptr;
+    }
+
+    static void SetLeft(Entry* parent, Entry* child) {
+        GetNode(parent)->left = child ? GetNode(child) : nullptr;
+    }
+    static void SetRight(Entry* parent, Entry* child) {
+        GetNode(parent)->right = child ? GetNode(child) : nullptr;
+    }
+    static void SetTemp(Entry* entry, Entry* val) {
+        GetNode(entry)->temp = val ? GetNode(val) : nullptr;
+    }
+
+    static u64 AdjFree(Entry* entry) {
+        return GetNode(entry)->adj_free;
+    }
+    static u64 MaxFree(Entry* entry) {
+        return GetNode(entry)->max_free;
+    }
+
+    bool IsEmpty() const {
+        return m_num_entries == 0;
+    }
+    u32 Count() const {
+        return m_num_entries;
+    }
+    Entry* Root() const {
+        return m_root ? GetEntry(m_root) : nullptr;
+    }
+
+    Entry* HeaderEntry() const {
+        return GetEntry(m_header);
+    }
+
+private:
+    N* m_header{};
+    N* m_root{};
+    u32 m_num_entries{};
+};
+
+template <typename T>
+struct InheritSplayTraits {
+    using EntryType = T;
+    static SplayTreeNode* GetNode(T* entry) {
+        return static_cast<SplayTreeNode*>(entry);
+    }
+    static T* FromNode(SplayTreeNode* node) {
+        return static_cast<T*>(node);
+    }
+    static u64 GetStart(const T* entry) {
+        return entry->start;
+    }
+    static u64 GetEnd(const T* entry) {
+        return entry->end;
+    }
+};
+
+template <typename T, SplayTreeNode T::*Member>
+struct MemberSplayTraits {
+    using EntryType = T;
+
+    static SplayTreeNode* GetNode(T* entry) {
+        return &(entry->*Member);
+    }
+
+    static T* FromNode(SplayTreeNode* node) {
+        // container_of: recover T* from pointer to its SplayTreeNode member.
+        static constexpr auto Offset =
+            reinterpret_cast<uintptr_t>(&(static_cast<T*>(nullptr)->*Member));
+        return reinterpret_cast<T*>(reinterpret_cast<uintptr_t>(node) - Offset);
+    }
+
+    static u64 GetStart(const T* entry) {
+        return entry->start;
+    }
+    static u64 GetEnd(const T* entry) {
+        return entry->end;
+    }
+};
+
+} // namespace Core

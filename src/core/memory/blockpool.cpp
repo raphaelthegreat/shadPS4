@@ -2,11 +2,93 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <utility>
-#include "common/assert.h"
-#include "core/blockpool.h"
+#include "core/memory/address_space.h"
+#include "core/memory/blockpool.h"
+#include "core/memory/vm_map.h"
 #include "core/libraries/kernel/memory.h"
+#include "video_core/renderer_vulkan/vk_rasterizer.h"
 
 namespace Core {
+
+bool Blockpool::Map(VmMapEntry& entry, VAddr addr, u64 size, MemoryProt prot, s32 mtype) {
+    const bool onion = mtype == 0;
+    const bool writeback = mtype != 3;
+    const u32 block_start = ToBlocks(addr - entry.start);
+    const u32 num_blocks = ToBlocks(size);
+    const u32 block_end = block_start + num_blocks;
+
+    DmemBlock* vm_blocks = entry.object->blockpool.blocks.data() + block_start;
+    std::array<u32, 32> dmem_blocks;
+    dmem_blocks.fill(std::numeric_limits<u32>::max());
+
+    for (u32 chunk = 0; chunk < num_blocks; chunk += 32) {
+        const u32 count = std::min(num_blocks - chunk, 32u);
+
+        if (!Commit(count, onion, writeback, dmem_blocks.data())) {
+            // We run out of physical memory, revert our changes and error out
+            Decommit(vm_blocks, chunk);
+            return false;
+        }
+
+        // Assign physical blocks to virtual memory
+        for (u32 i = 0; i < count; ++i) {
+            ASSERT_MSG(dmem_blocks[i] != std::numeric_limits<u32>::max());
+            vm_blocks[chunk + i] = DmemBlock{
+                .block = dmem_blocks[i],
+                .onion = onion,
+                .writeback = writeback,
+                .prot_cpu = u32(prot & MemoryProt::CpuReadWrite),
+                .prot_gpu = u32(prot & MemoryProt::GpuReadWrite) >> 4,
+                .valid = true,
+            };
+        }
+    }
+
+    u32 block{};
+    u32 pending_blocks{};
+
+    const auto map_memory = [&] {
+        const u32 start_block = block - pending_blocks + 1;
+        impl.Map(addr + ToBytes(start_block), ToBytes(pending_blocks), ToBytes(vm_blocks[start_block].block));
+        pending_blocks = 0;
+    };
+
+    // Defer mapping of physical pages to make failure case simpler
+    for (; block < num_blocks; ++block) {
+        ++pending_blocks;
+        if (block != num_blocks - 1 && (vm_blocks[block + 1].block - vm_blocks[block].block) != 1) {
+            map_memory();
+        }
+    }
+    if (pending_blocks) {
+        --block;
+        map_memory();
+    }
+
+    if (entry.IsGpuMapping()) {
+        rasterizer->MapMemory(addr, size);
+    }
+
+    return true;
+}
+
+void Blockpool::Unmap(VmMapEntry& entry, VAddr addr, u64 size) {
+    const u32 block_start = ToBlocks(addr - entry.start);
+    const u32 num_blocks = ToBlocks(size);
+    const u32 block_end = block_start + num_blocks;
+    DmemBlock* vm_blocks = entry.object->blockpool.blocks.data() + block_start;
+
+    for (u32 chunk = 0; chunk < num_blocks; chunk += 2048) {
+        const u32 count = std::min(num_blocks - chunk, 2048u);
+        Decommit(vm_blocks + chunk, count);
+    }
+
+    if (entry.IsGpuMapping()) {
+        rasterizer->UnmapMemory(addr, size);
+    }
+
+    impl.Unmap(addr, size);
+}
 
 bool Blockpool::Commit(u32 count, bool onion, bool writeback, u32* out_blocks) {
     std::scoped_lock lk{mutex};
@@ -137,6 +219,65 @@ void Blockpool::Query(VAddr addr, VAddr base, u64 size, const DmemBlock* blocks,
     info->is_committed = vm_block.valid;
     info->is_pooled = 1;
     info->offset = info->start - base;
+}
+
+void Blockpool::SetName(VAddr start, VAddr end, const char* name) {
+    NameSplit(start, end);
+    if (name[0] == '\0') {
+        return;
+    }
+    NameEntry entry{start, end, {}};
+    strlcpy(entry.name, name, 32);
+    auto [it, _] = blockpool_names.emplace(start, entry);
+
+    // Try merge with prev.
+    if (it != blockpool_names.begin()) {
+        auto prev = std::prev(it);
+        if (prev->second.end == start && std::strcmp(prev->second.name, name) == 0) {
+            prev->second.end = end;
+            blockpool_names.erase(it);
+            it = prev;
+        }
+    }
+    // Try merge with next.
+    auto next = std::next(it);
+    if (next != blockpool_names.end() &&
+        next->second.start == it->second.end &&
+        std::strcmp(next->second.name, it->second.name) == 0) {
+        it->second.end = next->second.end;
+        blockpool_names.erase(next);
+    }
+}
+
+void Blockpool::NameSplit(VAddr start, VAddr end) {
+    auto it = blockpool_names.lower_bound(start);
+    if (it != blockpool_names.begin()) {
+        --it;
+    }
+    while (it != blockpool_names.end() && it->second.start < end) {
+        auto& entry = it->second;
+        if (entry.end <= start) {
+            ++it;
+            continue;
+        }
+        if (entry.start < start && entry.end > end) {
+            NameEntry right{end, entry.end, {}};
+            std::memcpy(right.name, entry.name, sizeof(entry.name));
+            entry.end = start;
+            blockpool_names.emplace(end, right);
+            return;
+        }
+        if (entry.start < start) {
+            entry.end = start;
+            ++it;
+            continue;
+        }
+        if (entry.end > end) {
+            entry.start = end;
+            return;
+        }
+        it = blockpool_names.erase(it);
+    }
 }
 
 } // namespace Core

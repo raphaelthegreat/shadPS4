@@ -7,11 +7,10 @@
 #include "common/assert.h"
 #include "common/elf_info.h"
 #include "common/error.h"
-#include "core/address_space.h"
+#include "core/memory/address_space.h"
 #include "core/emulator_settings.h"
 #include "core/libraries/kernel/memory.h"
-#include "core/memory.h"
-#include "libraries/error_codes.h"
+#include "core/memory/vm_map.h"
 
 #ifdef _WIN32
 #include <windows.h>

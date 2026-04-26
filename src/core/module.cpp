@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
-
+#pragma GCC push_options
+#pragma GCC optimize ("O0")
 #include "common/alignment.h"
 #include "common/arch.h"
 #include "common/assert.h"
@@ -12,7 +13,7 @@
 #include "core/cpu_patches.h"
 #include "core/libraries/error_codes.h"
 #include "core/loader/dwarf.h"
-#include "core/memory.h"
+#include "core/memory/kernel.h"
 #include "core/module.h"
 #include "core/tls.h"
 
@@ -112,22 +113,21 @@ void Module::LoadModuleToMemory(u32& max_tls_index) {
     aligned_base_size = Common::AlignUp(base_size, BlockAlign);
 
     // Reserve memory area for module
-    void** out_addr = reinterpret_cast<void**>(&base_virtual_addr);
+    base_virtual_addr = ModuleLoadBase;
     s32 result =
-        memory->MapMemory(out_addr, ModuleLoadBase, aligned_base_size + TrampolineSize,
-                          MemoryProt::NoAccess, MemoryMapFlags::NoFlags, VMAType::Reserved, name);
+        memory->MapMemory(&base_virtual_addr, aligned_base_size + TrampolineSize,
+                          MemoryProt::NoAccess, MemoryMapFlags::Void, -1, 0, name);
     ASSERT_MSG(result == ORBIS_OK, "Failed to reserve memory for module {}", name);
-    LOG_INFO(Core_Linker, "Loading module {} to {}", name, fmt::ptr(*out_addr));
+    LOG_INFO(Core_Linker, "Loading module {} to {}", name, base_virtual_addr);
 
 #ifdef ARCH_X86_64
     // Initialize trampoline generator.
-    VAddr trampoline_vaddr = base_virtual_addr + aligned_base_size;
-    void* trampoline_addr = std::bit_cast<void*>(trampoline_vaddr);
-    result = memory->MapMemory(&trampoline_addr, trampoline_vaddr, TrampolineSize,
-                               MemoryProt::CpuReadWrite | MemoryProt::CpuExec,
-                               MemoryMapFlags::Fixed, VMAType::Code, name);
+    VAddr trampoline_addr = base_virtual_addr + aligned_base_size;
+    result = memory->MapMemory(&trampoline_addr, TrampolineSize, MemoryProt::CpuAll,
+                               MemoryMapFlags::Fixed | MemoryMapFlags::Anon, -1, 0, name);
     ASSERT_MSG(result == ORBIS_OK, "Failed to map trampoline area for module {}", name);
-    RegisterPatchModule(*out_addr, aligned_base_size, trampoline_addr, TrampolineSize);
+    RegisterPatchModule(reinterpret_cast<void*>(base_virtual_addr), aligned_base_size,
+                        reinterpret_cast<void*>(trampoline_addr), TrampolineSize);
 #endif
 
     LOG_INFO(Core_Linker, "======== Load Module to Memory ========");
@@ -136,12 +136,11 @@ void Module::LoadModuleToMemory(u32& max_tls_index) {
     LOG_INFO(Core_Linker, "aligned_base_size ......: {:#018x}", aligned_base_size);
 
     const auto add_segment = [this](const elf_program_header& phdr, bool do_map = true) {
-        const VAddr segment_vaddr = base_virtual_addr + phdr.p_vaddr;
-        void* segment_addr = std::bit_cast<void*>(segment_vaddr);
+        VAddr segment_vaddr = base_virtual_addr + phdr.p_vaddr;
         const u64 segment_size = GetAlignedSize(phdr);
         if (do_map) {
             // Convert ELF flags to memory prot.
-            auto segment_prot = MemoryProt::NoAccess;
+            auto segment_prot = MemoryProt::CpuWrite;
             if ((phdr.p_flags & PF_READ) != 0) {
                 segment_prot |= MemoryProt::CpuRead;
             }
@@ -153,9 +152,9 @@ void Module::LoadModuleToMemory(u32& max_tls_index) {
             }
 
             // Map module segments
-            const auto memory_type = IsSystemLib() ? VMAType::Code : VMAType::Flexible;
-            s32 result = memory->MapMemory(&segment_addr, segment_vaddr, segment_size, segment_prot,
-                                           MemoryMapFlags::Fixed, memory_type, name);
+            //const auto memory_type = IsSystemLib() ? VMAType::Code : VMAType::Flexible;
+            s32 result = memory->MapMemory(&segment_vaddr, segment_size, segment_prot,
+                                           MemoryMapFlags::Fixed | MemoryMapFlags::Anon, -1, 0, name);
             ASSERT_MSG(result == ORBIS_OK, "Failed to map segment at {:#x} for module {}",
                        segment_vaddr, name);
             elf.LoadSegment(segment_vaddr, phdr.p_offset, phdr.p_filesz);
