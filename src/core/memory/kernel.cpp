@@ -26,6 +26,7 @@ MemoryManager::MemoryManager()
     const VAddr max_offset = regions.rbegin()->upper();
     vm_map.Init(min_offset, max_offset, sdk_version);
     flex_pool.Init(ORBIS_KERNEL_TOTAL_MEM, ORBIS_KERNEL_FLEXIBLE_MEMORY_SIZE);
+    budget.mlock_limit.fill(ORBIS_KERNEL_FLEXIBLE_MEMORY_SIZE);
 }
 
 MemoryManager::~MemoryManager() = default;
@@ -220,12 +221,12 @@ s32 MemoryManager::MapMemory(VAddr* out_addr, u64 size, MemoryProt prot, MemoryM
         ASSERT(fd != -1);
         auto* table = Common::Singleton<Core::FileSys::HandleTable>::Instance();
         auto* file = table->GetFile(fd);
-        object = std::make_shared<VmObject>();
         switch (file->type) {
         case Core::FileSys::FileType::Device:
             max_prot = MemoryProt::All;
-            object->type = VmObjectType::Device;
-            object->flags = VmObjectFlags::Dmem;
+            if (s32 ret = file->device->mmap(offset, size, prot, &max_prot, flags, &object)) {
+                return ret;
+            }
             break;
         case Core::FileSys::FileType::Regular:
             max_prot = MemoryProt::CpuReadWrite;
@@ -236,11 +237,13 @@ s32 MemoryManager::MapMemory(VAddr* out_addr, u64 size, MemoryProt prot, MemoryM
                 // written to.
                 max_prot &= ~MemoryProt::CpuWrite;
             }
+            object = std::make_shared<VmObject>();
             object->type = VmObjectType::Vnode;
             object->vnode.host_fd = file->f.GetFileMapping();
             break;
         case Core::FileSys::FileType::Blockpool:
             max_prot = MemoryProt::All;
+            object = std::make_shared<VmObject>();
             object->type = VmObjectType::Blockpool;
             object->blockpool.blocks.resize(Blockpool::ToBlocks(size));
             break;
@@ -250,11 +253,19 @@ s32 MemoryManager::MapMemory(VAddr* out_addr, u64 size, MemoryProt prot, MemoryM
         }
     }
 
-    const s32 ret = vm_map.MapMemory(&addr, size, prot, max_prot, flags, object, offset, name);
-    if (ret == ORBIS_OK) {
-        *out_addr = addr;
+    if (s32 ret = vm_map.MapMemory(&addr, size, prot, max_prot, flags, object, offset, name)) {
+        return ret;
     }
-    return ret;
+
+    if (/*m_wire_on_map &&*/ False(flags & (MemoryMapFlags::Void | MemoryMapFlags::Sanitizer))) {
+        if (s32 ret = vm_map.Wire(addr, addr + size, VmMapWireFlags::User | VmMapWireFlags::HolesOk)) {
+            UnmapMemory(addr, size);
+            return ret;
+        }
+    }
+
+    *out_addr = addr;
+    return ORBIS_OK;
 }
 
 s32 MemoryManager::UnmapMemory(VAddr virtual_addr, u64 size) {

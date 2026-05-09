@@ -138,31 +138,38 @@ void Module::LoadModuleToMemory(u32& max_tls_index) {
     const u64 base_size = CalculateBaseSize(elf_header, elf_pheader);
     aligned_base_size = Common::AlignUp(base_size, BlockAlign);
 
+    auto& vm_map = memory->GetVmMap();
+    auto& address_space = memory->GetAddressSpace();
+
     // Reserve memory area for module
     const auto mod_info = ClassifyModule(file, BudgetPtype::BigApp);
     base_virtual_addr =
         mod_info.budget_ptype == BudgetPtype::System ? 0x800000000ULL : 0x80000000ULL;
-    s32 result = memory->MapMemory(&base_virtual_addr, aligned_base_size + TrampolineSize,
-                                   MemoryProt::NoAccess, MemoryMapFlags::Void, -1, 0, name);
+    s32 result = vm_map.MapMemory(&base_virtual_addr, aligned_base_size + TrampolineSize,
+                                  MemoryProt::NoAccess, MemoryProt::NoAccess, MemoryMapFlags::Void,
+                                  nullptr, 0, name);
     ASSERT_MSG(result == ORBIS_OK, "Failed to reserve memory for module {}", name);
     LOG_INFO(Core_Linker, "Loading module {} to {}", name, base_virtual_addr);
 
 #ifdef ARCH_X86_64
     // Initialize trampoline generator.
     VAddr trampoline_addr = base_virtual_addr + aligned_base_size;
-    result = memory->MapMemory(&trampoline_addr, TrampolineSize, MemoryProt::CpuAll,
-                               MemoryMapFlags::Fixed | MemoryMapFlags::Anon, -1, 0, name);
-    ASSERT_MSG(result == ORBIS_OK, "Failed to map trampoline area for module {}", name);
+    ASSERT(address_space.Map(trampoline_addr, TrampolineSize, -1, true) == reinterpret_cast<void*>(trampoline_addr));
     RegisterPatchModule(reinterpret_cast<void*>(base_virtual_addr), aligned_base_size,
                         reinterpret_cast<void*>(trampoline_addr), TrampolineSize);
 #endif
+
+    // Create SELF vm object
+    auto object = std::make_shared<VmObject>();
+    object->type = VmObjectType::Self;
 
     LOG_INFO(Core_Linker, "======== Load Module to Memory ========");
     LOG_INFO(Core_Linker, "base_virtual_addr ......: {:#018x}", base_virtual_addr);
     LOG_INFO(Core_Linker, "base_size ..............: {:#018x}", base_size);
     LOG_INFO(Core_Linker, "aligned_base_size ......: {:#018x}", aligned_base_size);
 
-    const auto add_segment = [this](const elf_program_header& phdr, bool do_map = true) {
+    const auto add_segment = [&](u16 i, bool do_map = true) {
+        const elf_program_header& phdr = elf_pheader[i];
         VAddr segment_vaddr = base_virtual_addr + phdr.p_vaddr;
         const u64 segment_size = GetAlignedSize(phdr);
         if (do_map) {
@@ -181,11 +188,15 @@ void Module::LoadModuleToMemory(u32& max_tls_index) {
             // Map module segments
             // const auto memory_type = IsSystemLib() ? VMAType::Code : VMAType::Flexible;
             s32 result =
-                memory->MapMemory(&segment_vaddr, segment_size, segment_prot,
-                                  MemoryMapFlags::Fixed | MemoryMapFlags::Anon, -1, 0, name);
+                vm_map.MapMemory(&segment_vaddr, segment_size, segment_prot, MemoryProt::All,
+                                  MemoryMapFlags::Fixed, object, i, name);
             ASSERT_MSG(result == ORBIS_OK, "Failed to map segment at {:#x} for module {}",
                        segment_vaddr, name);
             elf.LoadSegment(segment_vaddr, phdr.p_offset, phdr.p_filesz);
+
+            if (mod_info.wire) {
+                vm_map.Wire(segment_vaddr, segment_vaddr + segment_size, VmMapWireFlags::User);
+            }
         }
         if (info.num_segments < 4) {
             auto& segment = info.segments[info.num_segments++];
@@ -217,7 +228,7 @@ void Module::LoadModuleToMemory(u32& max_tls_index) {
             LOG_INFO(Core_Linker, "segment_memory_size ...: {:#018x}", segment_memory_size);
             LOG_INFO(Core_Linker, "segment_mode ..........: {}", segment_mode);
 
-            add_segment(elf_pheader[i]);
+            add_segment(i);
 #ifdef ARCH_X86_64
             if (elf_pheader[i].p_flags & PF_EXEC) {
                 PrePatchInstructions(segment_addr, segment_file_size);
@@ -226,7 +237,7 @@ void Module::LoadModuleToMemory(u32& max_tls_index) {
             break;
         }
         case PT_DYNAMIC:
-            add_segment(elf_pheader[i], false);
+            add_segment(i, false);
             if (elf_pheader[i].p_filesz != 0) {
                 m_dynamic.resize(elf_pheader[i].p_filesz);
                 const VAddr segment_addr = std::bit_cast<VAddr>(m_dynamic.data());

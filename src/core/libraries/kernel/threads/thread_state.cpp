@@ -24,9 +24,10 @@ ThreadState::ThreadState() {
     auto& impl = memory->GetAddressSpace();
     static constexpr u32 ThrHeapSize = Common::AlignUp(sizeof(Pthread) * MaxThreads, 16_KB);
     VAddr heap_addr = impl.SystemReservedVirtualBase();
-    const int ret = memory->MapMemory(&heap_addr, ThrHeapSize, Core::MemoryProt::CpuReadWrite,
-                                      Core::MemoryMapFlags::Anon, -1, 0, "ThrHeap");
-    ASSERT_MSG(ret == 0, "Unable to allocate thread heap memory {}", ret);
+    const s32 ret = memory->MapMemory(&heap_addr, ThrHeapSize, Core::MemoryProt::NoAccess,
+                                      Core::MemoryMapFlags::Void, -1, 0, "ThrHeap");
+    ASSERT_MSG(ret == 0, "Unable to reserve thread heap memory {}", ret);
+    impl.Map(heap_addr, ThrHeapSize);
     thread_heap.Initialize(reinterpret_cast<void*>(heap_addr), ThrHeapSize);
 }
 

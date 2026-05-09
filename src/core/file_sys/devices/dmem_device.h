@@ -66,6 +66,9 @@ public:
 
     s32 ioctl(u32 cmd, void* args) override;
 
+    s32 mmap(u64 offset, u64 size, Core::MemoryProt prot, Core::MemoryProt* max_prot,
+             Core::MemoryMapFlags flags, std::shared_ptr<VmObject>* out_object) override;
+
     s64 read(void* buf, u64 nbytes) override {
         return ORBIS_KERNEL_ERROR_ENODEV;
     }

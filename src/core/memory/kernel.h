@@ -56,6 +56,10 @@ public:
         return dmem;
     }
 
+    VmMap& GetVmMap() {
+        return vm_map;
+    }
+
     u64 GetTotalDirectSize() const {
         return total_direct_size;
     }

@@ -21,6 +21,10 @@ void DmemManager::Init(u64 dmem_size) {
     m_tree.Init(&m_header, 0, dmem_size);
     m_tree.Link(m_tree.end(), &m_sentinel);
     m_entry_count = 1;
+
+    m_dmem_object = std::make_shared<VmObject>();
+    m_dmem_object->type = VmObjectType::Device;
+    m_dmem_object->flags |= VmObjectFlags::Dmem;
 }
 
 s32 DmemManager::Allocate(PAddr search_start, PAddr search_end, u64 size, u64 alignment, s32 mtype,
@@ -77,8 +81,8 @@ s32 DmemManager::Free(PAddr start, u64 size, bool is_checked) {
     auto [entry, found] = m_tree.LookupEntry(start);
 
     if (is_checked) {
-        for (; entry != m_tree.end() && entry->end < end; ++entry) {
-            if (!entry->IsAllocated()) {
+        for (auto temp = entry; temp != m_tree.end() && temp->end < end; ++temp) {
+            if (!temp->IsAllocated()) {
                 return ORBIS_KERNEL_ERROR_EACCES;
             }
         }
@@ -115,7 +119,6 @@ s32 DmemManager::MapDirectMemory(VmMap& map, VAddr* out_addr, u64 length,
                                  DmemMemoryType mtype_override, MemoryProt prot,
                                  MemoryMapFlags flags, PAddr phys_addr, u32 alignment_shift) {
     const PAddr phys_end = phys_addr + length;
-    constexpr MemoryMapFlags MapWritableWbGarlic = static_cast<MemoryMapFlags>(0x800000);
 
     if ((phys_addr >> 36) > 4 || phys_end < phys_addr) {
         return ORBIS_KERNEL_ERROR_EINVAL;
@@ -161,31 +164,8 @@ s32 DmemManager::MapDirectMemory(VmMap& map, VAddr* out_addr, u64 length,
     }
 
     MemoryProt max_prot = MemoryProt::All;
-    {
-        std::scoped_lock lock{m_mutex};
-
-        auto [dentry, found] = m_tree.LookupEntry(phys_addr);
-        PAddr cursor = phys_addr;
-
-        while (cursor < phys_end) {
-            if (dentry->start > cursor || dentry->end <= cursor || dentry->is_free ||
-                !dentry->IsAllocated()) {
-                return ORBIS_KERNEL_ERROR_EINVAL;
-            }
-
-            const bool wants_write = True(prot & (MemoryProt::CpuWrite | MemoryProt::GpuWrite));
-            const auto effective_mtype =
-                (mtype_override != DmemMemoryType::Invalid) ? mtype_override : dentry->mtype;
-            if (wants_write && effective_mtype == DmemMemoryType::WbGarlic &&
-                False(flags & MapWritableWbGarlic)) {
-                return ORBIS_KERNEL_ERROR_EINVAL;
-            }
-
-            // TODO: accumulate max_prot from ACL permissions.
-
-            cursor = dentry->end;
-            ++dentry;
-        }
+    if (!IsDmemBackingValid(phys_addr, length, mtype_override, prot, flags, &max_prot)) {
+        return ORBIS_KERNEL_ERROR_EINVAL;
     }
 
     VAddr vaddr = *out_addr;
@@ -486,6 +466,35 @@ s32 DmemManager::SetDirectMemoryType(PAddr addr, u64 size, s32 mtype) {
         ++entry;
     }
     return ORBIS_OK;
+}
+
+bool DmemManager::IsDmemBackingValid(PAddr addr, u64 size, DmemMemoryType mtype_override,
+                                     MemoryProt prot, MemoryMapFlags flags, MemoryProt* max_prot) {
+    std::scoped_lock lock{m_mutex};
+
+    auto [dentry, found] = m_tree.LookupEntry(addr);
+    PAddr cursor = addr;
+
+    while (cursor < (addr + size)) {
+        if (dentry->start > cursor || dentry->end <= cursor || dentry->is_free ||
+            !dentry->IsAllocated()) {
+            return false;
+        }
+
+        const bool wants_write = True(prot & (MemoryProt::CpuWrite | MemoryProt::GpuWrite));
+        const auto effective_mtype =
+            (mtype_override != DmemMemoryType::Invalid) ? mtype_override : dentry->mtype;
+        if (wants_write && effective_mtype == DmemMemoryType::WbGarlic && False(flags & MemoryMapFlags::WriteWbGarlic)) {
+            return false;
+        }
+
+        // TODO: accumulate max_prot from ACL permissions.
+
+        cursor = dentry->end;
+        ++dentry;
+    }
+
+    return true;
 }
 
 bool DmemManager::IncludesWbGarlicMemory(PAddr addr, u64 size) {

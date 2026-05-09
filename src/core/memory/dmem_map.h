@@ -134,6 +134,10 @@ public:
         return m_total_size;
     }
 
+    std::shared_ptr<VmObject>& GetDmemObject() {
+        return m_dmem_object;
+    }
+
     void Init(u64 dmem_size);
 
     s32 Allocate(PAddr search_start, PAddr search_end, u64 size, u64 alignment, s32 mtype,
@@ -157,6 +161,9 @@ public:
     s32 GetDirectMemoryType(PAddr addr, s32* mtype_out, PAddr* start_out, PAddr* end_out);
 
     s32 SetDirectMemoryType(PAddr addr, u64 size, s32 mtype);
+
+    bool IsDmemBackingValid(PAddr addr, u64 size, DmemMemoryType mtype_override,
+                            MemoryProt prot, MemoryMapFlags flags, MemoryProt* max_prot);
 
     bool IncludesWbGarlicMemory(PAddr addr, u64 size);
 

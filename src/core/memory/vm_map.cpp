@@ -184,8 +184,11 @@ s32 VmMap::MapMemory(VAddr* out_addr, u64 size, MemoryProt prot, MemoryProt max_
                 });
                 break;
             }
-            default:
+            case VmObjectType::Self:
+                impl.Map(addr, size, -1, True(prot & MemoryProt::CpuExec));
                 break;
+            default:
+                UNREACHABLE_MSG("Unknown vm object type {}", u32(object->type));
             }
 
             if (object->IsDmem()) {
@@ -202,13 +205,6 @@ s32 VmMap::MapMemory(VAddr* out_addr, u64 size, MemoryProt prot, MemoryProt max_
         rasterizer->MapMemory(addr, size);
     }
 
-    if (m_wire_on_map && False(flags & (MemoryMapFlags::Void | MemoryMapFlags::Sanitizer))) {
-        if (Wire(addr, addr + size, VmMapWireFlags::User | VmMapWireFlags::HolesOk)) {
-            Delete(addr, addr + size);
-            return ORBIS_KERNEL_ERROR_ENOMEM;
-        }
-    }
-
     *out_addr = addr;
     return ORBIS_OK;
 }
@@ -217,7 +213,6 @@ s32 VmMap::Delete(VAddr start, VAddr end) {
     m_tree.VerifyIntegrity();
     auto [entry, found] = m_tree.LookupEntry(start);
     if (!found) {
-        auto& ent = *entry;
         entry++;
     } else if (entry->start < start) {
         if (entry->IsBlockpool()) {
@@ -225,8 +220,6 @@ s32 VmMap::Delete(VAddr start, VAddr end) {
         }
         ClipStart(entry, start);
     }
-
-    auto& ent = *entry;
 
     // Make sure no partial blockpool entries are unmapped
     for (auto temp = entry; temp != m_tree.end() && temp->start < end; ++temp) {
@@ -425,11 +418,11 @@ s32 VmMap::Wire(VAddr start, VAddr end, VmMapWireFlags flags) {
             ClipEnd(entry, end);
         }
 
-        if (entry->protection == MemoryProt::NoAccess || False(entry->protection & prot)) {
+        if (entry->protection == MemoryProt::NoAccess || (entry->protection & prot) != prot) {
             if (False(flags & VmMapWireFlags::HolesOk)) {
                 auto next = std::next(entry);
                 if (next != m_tree.end() && next->start < end && next->start > entry->end) {
-                    return ORBIS_KERNEL_ERROR_EINVAL; // gap without holes_ok
+                    return ORBIS_KERNEL_ERROR_EINVAL;
                 }
             }
             ++entry;
@@ -447,8 +440,6 @@ s32 VmMap::Wire(VAddr start, VAddr end, VmMapWireFlags flags) {
                     return ORBIS_KERNEL_ERROR_ENOMEM;
                 }
                 entry->eflags |= VmEntryFlags::InBudget;
-            } else {
-                UNREACHABLE();
             }
             entry->wired_count = 1;
         } else {

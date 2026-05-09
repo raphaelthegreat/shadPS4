@@ -58,4 +58,19 @@ s32 DmemDevice::ioctl(u32 cmd, void* args) {
     return 0;
 }
 
+s32 DmemDevice::mmap(u64 offset, u64 size, Core::MemoryProt prot, Core::MemoryProt* max_prot,
+                     Core::MemoryMapFlags flags, std::shared_ptr<VmObject>* out_object) {
+    auto* memory = Core::Memory::Instance();
+    auto& dmem = memory->GetDmemManager();
+
+    if (-1 < s64(offset) && size <= (DmemManager::DMEM_MAX_ADDRESS - offset)) {
+        if (dmem.IsDmemBackingValid(offset, size, Core::DmemMemoryType::Invalid, prot, flags, max_prot)) {
+            *out_object = dmem.GetDmemObject();
+            return ORBIS_OK;
+        }
+    }
+
+    return ORBIS_KERNEL_ERROR_EACCES;
+}
+
 } // namespace Core::Devices

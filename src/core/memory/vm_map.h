@@ -46,6 +46,7 @@ enum class MemoryMapFlags : u32 {
     NoCore = 0x20000,
     Sanitizer = 0x200000,
     NoCoalesce = 0x400000,
+    WriteWbGarlic = 0x800000,
 };
 DECLARE_ENUM_FLAG_OPERATORS(MemoryMapFlags)
 
@@ -179,6 +180,8 @@ public:
     s32 MapMemory(VAddr* out_addr, u64 size, MemoryProt prot, MemoryProt max_prot,
                   MemoryMapFlags flags, std::shared_ptr<VmObject> object, u64 offset,
                   std::string_view name);
+
+    s32 MapInsert();
 
     s32 Delete(VAddr start, VAddr end);
 
