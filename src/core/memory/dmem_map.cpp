@@ -165,7 +165,7 @@ s32 DmemManager::MapDirectMemory(VmMap& map, VAddr* out_addr, u64 length,
 
     MemoryProt max_prot = MemoryProt::All;
     if (!IsDmemBackingValid(phys_addr, length, mtype_override, prot, flags, &max_prot)) {
-        return ORBIS_KERNEL_ERROR_EINVAL;
+        return ORBIS_KERNEL_ERROR_EACCES;
     }
 
     VAddr vaddr = *out_addr;
@@ -260,7 +260,7 @@ s32 DmemManager::MapDirectMemory(VmMap& map, VAddr* out_addr, u64 length,
     return ORBIS_OK;
 }
 
-void DmemManager::RmapInsert(void* vmspace, VAddr vaddr, u64 vsize, PAddr phys_offset) {
+void DmemManager::RmapInsert(VmMap* vmspace, VAddr vaddr, u64 vsize, PAddr phys_offset) {
     std::scoped_lock lock{m_rmap_mutex};
     DmemRmap* rmap = FindOrCreateRmap(vmspace);
 
@@ -275,7 +275,7 @@ void DmemManager::RmapInsert(void* vmspace, VAddr vaddr, u64 vsize, PAddr phys_o
     rmap->Dereference();
 }
 
-void DmemManager::RmapRemove(void* vmspace, VAddr vaddr, u64 vsize, PAddr phys_offset) {
+void DmemManager::RmapRemove(VmMap* vmspace, VAddr vaddr, u64 vsize, PAddr phys_offset) {
     std::scoped_lock lock{m_rmap_mutex};
     DmemRmap* rmap = FindRmap(vmspace);
     if (!rmap) {
@@ -489,6 +489,7 @@ bool DmemManager::IsDmemBackingValid(PAddr addr, u64 size, DmemMemoryType mtype_
         }
 
         // TODO: accumulate max_prot from ACL permissions.
+        *max_prot &= ~MemoryProt::CpuExec;
 
         cursor = dentry->end;
         ++dentry;
@@ -585,9 +586,6 @@ void DmemManager::FreeEntry(Tree::iterator entry) {
 }
 
 void DmemManager::UnmapVirtualMappings(Tree::iterator entry) {
-    if (!m_unmap_callback) {
-        return;
-    }
     std::scoped_lock lock{m_rmap_mutex};
 
     const s32 start_page = entry->start >> PAGE_SHIFT;
@@ -600,7 +598,6 @@ void DmemManager::UnmapVirtualMappings(Tree::iterator entry) {
             continue;
         }
 
-        rmap->Reference();
         auto* hit = rmap->tree.FindOverlapping(start_page, end_page);
 
         // Collect hits before mutating the tree.
@@ -621,7 +618,7 @@ void DmemManager::UnmapVirtualMappings(Tree::iterator entry) {
         }
 
         for (const auto& hit : hits) {
-            m_unmap_callback(rmap->vmspace, hit.addr, hit.size);
+            //m_unmap_callback(rmap->vmspace, hit.addr, hit.size);
 
             if (start_page <= hit.ps && end_page >= hit.pe) {
                 rmap->tree.Remove(hit.entry);
@@ -653,7 +650,7 @@ void DmemManager::UnmapVirtualMappings(Tree::iterator entry) {
     }
 }
 
-DmemRmap* DmemManager::FindRmap(void* vmspace) {
+DmemRmap* DmemManager::FindRmap(VmMap* vmspace) {
     for (auto* rmap = m_rmap_head; rmap; rmap = rmap->next_rmap) {
         if (rmap->vmspace == vmspace) {
             return rmap;
@@ -662,7 +659,7 @@ DmemRmap* DmemManager::FindRmap(void* vmspace) {
     return nullptr;
 }
 
-DmemRmap* DmemManager::FindOrCreateRmap(void* vmspace) {
+DmemRmap* DmemManager::FindOrCreateRmap(VmMap* vmspace) {
     if (auto* rmap = FindRmap(vmspace)) {
         rmap->Reference();
         return rmap;

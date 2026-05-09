@@ -87,8 +87,6 @@ VmMap::Tree::iterator VmMap::Insert(Tree::iterator prev, VAddr start, VAddr end,
 VmMap::Tree::iterator VmMap::ClipStart(Tree::iterator entry, VAddr addr) {
     ASSERT(addr > entry->start && addr < entry->end);
     SimplifyEntry(entry);
-    if (addr <= entry->start || addr >= entry->end)
-        return entry;
 
     auto* new_entry = new VmMapEntry{};
     *new_entry = *entry;
@@ -102,9 +100,6 @@ VmMap::Tree::iterator VmMap::ClipStart(Tree::iterator entry, VAddr addr) {
 
 VmMap::Tree::iterator VmMap::ClipEnd(Tree::iterator entry, VAddr addr) {
     ASSERT(addr > entry->start && addr < entry->end);
-    SimplifyEntry(entry);
-    if (addr <= entry->start || addr >= entry->end)
-        return entry;
 
     auto* new_entry = new VmMapEntry{};
     *new_entry = *entry;
@@ -216,7 +211,7 @@ s32 VmMap::Delete(VAddr start, VAddr end) {
         entry++;
     } else if (entry->start < start) {
         if (entry->IsBlockpool()) {
-            return 4;
+            return ORBIS_KERNEL_ERROR_EINTR;
         }
         ClipStart(entry, start);
     }
@@ -224,7 +219,7 @@ s32 VmMap::Delete(VAddr start, VAddr end) {
     // Make sure no partial blockpool entries are unmapped
     for (auto temp = entry; temp != m_tree.end() && temp->start < end; ++temp) {
         if (end < temp->end && temp->IsBlockpool()) {
-            return 4;
+            return ORBIS_KERNEL_ERROR_EINTR;
         }
     }
 
@@ -260,6 +255,10 @@ s32 VmMap::Protect(DmemManager& dmem, VAddr start, VAddr end, MemoryProt new_pro
     start = std::max(start, m_min_offset);
     end = std::min(end, m_max_offset);
 
+    if (True(new_prot & MemoryProt::CpuWrite)) {
+        new_prot |= MemoryProt::CpuRead;
+    }
+
     auto [entry, found] = m_tree.LookupEntry(start);
     if (!found) {
         entry++;
@@ -270,17 +269,18 @@ s32 VmMap::Protect(DmemManager& dmem, VAddr start, VAddr end, MemoryProt new_pro
     // Validation pass.
     for (auto cur = entry; cur != m_tree.end() && cur->start < end; ++cur) {
         if (set_max && cur->IsBlockpool()) {
-            return ORBIS_KERNEL_ERROR_EINVAL;
+            return ORBIS_KERNEL_ERROR_EINTR;
         }
         MemoryProt eff = cur->max_protection;
         if (True(cur->ext_flags & VmExtFlags::GpuOnly)) {
-            eff = static_cast<MemoryProt>(static_cast<u32>(eff) & 0x30);
+            eff &= MemoryProt::GpuReadWrite;
         }
         if (True(cur->ext_flags & VmExtFlags::Hide)) {
             eff = MemoryProt::NoAccess;
         }
-        if ((static_cast<u32>(new_prot) & ~static_cast<u32>(eff)) != 0) {
-            return ORBIS_KERNEL_ERROR_EACCES;
+        if ((eff & new_prot) != new_prot) {
+            LOG_WARNING(Kernel_Vmm, "Protection request exceeds max_protection, this succeeds on console for some reason");
+            // return ORBIS_KERNEL_ERROR_ENOENT;
         }
         if (cur->IsDmem()) {
             if (True(new_prot & (MemoryProt::GpuWrite | MemoryProt::CpuWrite))) {

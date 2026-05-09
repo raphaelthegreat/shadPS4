@@ -230,7 +230,7 @@ s32 MemoryManager::MapMemory(VAddr* out_addr, u64 size, MemoryProt prot, MemoryM
             break;
         case Core::FileSys::FileType::Regular:
             max_prot = MemoryProt::CpuReadWrite;
-            if (False(file->f.GetAccessMode() & Common::FS::FileAccessMode::Write) ||
+            if (False(file->f.GetAccessMode() & Common::FS::FileAccessMode::Write) &&
                 False(file->f.GetAccessMode() & Common::FS::FileAccessMode::Append)) {
                 // If the file does not have write access, ensure prot does not contain write
                 // permissions. On real hardware, these mappings succeed, but the memory cannot be
@@ -316,8 +316,8 @@ s32 MemoryManager::QueryProtection(VAddr addr, VAddr* out_start, VAddr* out_end,
 }
 
 s32 MemoryManager::Protect(VAddr start, u64 size, MemoryProt new_prot) {
+    size = Common::AlignUpPow2((start & 0x3fff) + size, PAGE_SIZE);
     start = Common::AlignDownPow2(start, PAGE_SIZE);
-    size = Common::AlignUpPow2(size, PAGE_SIZE);
     return vm_map.Protect(dmem, start, start + size, new_prot, 0);
 }
 

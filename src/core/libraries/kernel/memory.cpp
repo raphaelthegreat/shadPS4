@@ -61,6 +61,11 @@ s32 PS4_SYSV_ABI sceKernelAllocateDirectMemory(PAddr search_start, PAddr search_
     return ret;
 }
 
+s32 PS4_SYSV_ABI sceKernelAllocateMainDirectMemory(u64 size, u64 alignment, s32 memory_type,
+                                                   PAddr* out_addr) {
+    return sceKernelAllocateDirectMemory(0, sceKernelGetDirectMemorySize(), size, alignment, memory_type, out_addr);
+}
+
 s32 PS4_SYSV_ABI sceKernelCheckedReleaseDirectMemory(u64 start, u64 len) {
     LOG_INFO(Kernel_Vmm, "called start = {:#x}, len = {:#x}", start, len);
     auto release_args = Core::Devices::DmemDevice::ReleaseMemoryArgs{
@@ -693,6 +698,7 @@ void RegisterMemory(Core::Loader::SymbolsResolver* sym) {
                  sceKernelEnableDmemAliasing);
     LIB_FUNCTION("usHTMoFoBTM", "libkernel", 1, "libkernel", sceKernelEnableDmemAliasing);
     LIB_FUNCTION("rTXw65xmLIA", "libkernel", 1, "libkernel", sceKernelAllocateDirectMemory);
+    LIB_FUNCTION("B+vc2AO2Zrc", "libkernel", 1, "libkernel", sceKernelAllocateMainDirectMemory);
     LIB_FUNCTION("C0f7TJcbfac", "libkernel", 1, "libkernel", sceKernelAvailableDirectMemorySize);
     LIB_FUNCTION("hwVSPCmp5tM", "libkernel", 1, "libkernel", sceKernelCheckedReleaseDirectMemory);
     LIB_FUNCTION("rVjRvHJ0X6c", "libkernel", 1, "libkernel", sceKernelVirtualQuery);

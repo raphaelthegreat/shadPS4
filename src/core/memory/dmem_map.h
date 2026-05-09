@@ -4,7 +4,6 @@
 #pragma once
 
 #include <atomic>
-#include <functional>
 #include <memory>
 #include <mutex>
 
@@ -52,14 +51,15 @@ struct DmemRmapTraits {
     }
 };
 
+class VmMap;
+
 struct DmemRmap {
     using Tree = RmapSplayTree<DmemRmapTraits>;
 
     DmemRmap* next_rmap{};
-    void* vmspace{};
+    VmMap* vmspace{};
     Tree tree;
     std::atomic<s32> ref_count{1};
-    std::atomic<s32> wait_count{0};
 
     void Reference() {
         ref_count.fetch_add(1, std::memory_order_relaxed);
@@ -103,14 +103,11 @@ struct DmemSplayTraits {
 
 struct VmMapEntry;
 struct VmObject;
-class VmMap;
 
 enum class MemoryProt : u32;
 enum class MemoryMapFlags : u32;
 
 class AddressSpace;
-
-using VirtualUnmapCallback = std::function<void(void* vmspace, VAddr vaddr, u64 size)>;
 
 class DmemManager {
 public:
@@ -125,10 +122,6 @@ public:
 
     DmemManager(const DmemManager&) = delete;
     DmemManager& operator=(const DmemManager&) = delete;
-
-    void SetUnmapCallback(VirtualUnmapCallback cb) {
-        m_unmap_callback = std::move(cb);
-    }
 
     u64 GetTotalSize() const {
         return m_total_size;
@@ -149,9 +142,9 @@ public:
                         MemoryProt prot, MemoryMapFlags flags, PAddr phys_addr,
                         u32 alignment_shift);
 
-    void RmapInsert(void* vmspace, VAddr vaddr, u64 vsize, PAddr phys_offset);
+    void RmapInsert(VmMap* vmspace, VAddr vaddr, u64 vsize, PAddr phys_offset);
 
-    void RmapRemove(void* vmspace, VAddr vaddr, u64 vsize, PAddr phys_offset);
+    void RmapRemove(VmMap* vmspace, VAddr vaddr, u64 vsize, PAddr phys_offset);
 
     s32 Query(PAddr addr, bool find_next, PAddr* start_out, PAddr* end_out, s32* mtype_out);
 
@@ -176,9 +169,9 @@ private:
 
     void UnmapVirtualMappings(Tree::iterator entry);
 
-    DmemRmap* FindRmap(void* vmspace);
+    DmemRmap* FindRmap(VmMap* vmspace);
 
-    DmemRmap* FindOrCreateRmap(void* vmspace);
+    DmemRmap* FindOrCreateRmap(VmMap* vmspace);
 
     void UnlinkRmap(DmemRmap* rmap);
 
@@ -194,7 +187,6 @@ private:
 
     DmemRmap* m_rmap_head{};
     std::shared_ptr<VmObject> m_dmem_object;
-    VirtualUnmapCallback m_unmap_callback;
 
     u64 m_total_size{};
     u32 m_entry_count{};
