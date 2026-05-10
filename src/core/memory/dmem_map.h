@@ -56,7 +56,7 @@ class VmMap;
 struct DmemRmap {
     using Tree = RmapSplayTree<DmemRmapTraits>;
 
-    DmemRmap* next_rmap{};
+    DmemRmap* next{};
     VmMap* vmspace{};
     Tree tree;
     std::atomic<s32> ref_count{1};
@@ -164,6 +164,8 @@ public:
 
 private:
     void Split(Tree::iterator entry, PAddr addr);
+
+    void SimplifyDmemEntry(Tree::iterator entry);
 
     void FreeEntry(Tree::iterator entry);
 

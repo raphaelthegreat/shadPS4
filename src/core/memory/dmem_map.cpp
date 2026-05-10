@@ -57,7 +57,9 @@ s32 DmemManager::Allocate(PAddr search_start, PAddr search_end, u64 size, u64 al
     entry->mtype = static_cast<DmemMemoryType>(mtype);
     entry->is_free = false;
     entry->budget_id = 0xff;
-    m_tree.Link(prev, entry);
+    auto it = m_tree.Link(prev, entry);
+    SimplifyDmemEntry(it);
+    SimplifyDmemEntry(std::next(it));
     m_entry_count++;
     *out_addr = addr;
     return ORBIS_OK;
@@ -134,12 +136,13 @@ s32 DmemManager::MapDirectMemory(VmMap& map, VAddr* out_addr, u64 length,
         const s32 start_page = phys_addr >> PAGE_SHIFT;
         const s32 end_page = phys_end >> PAGE_SHIFT;
 
-        for (DmemRmap* rmap = m_rmap_head; rmap; rmap = rmap->next_rmap) {
-            if (!rmap->vmspace || rmap->tree.IsEmpty())
+        for (DmemRmap* rmap = m_rmap_head; rmap; rmap = rmap->next) {
+            if (!rmap->vmspace || rmap->tree.IsEmpty()) {
                 continue;
+            }
 
-            auto* hit = rmap->tree.FindOverlapping(start_page, end_page);
-            for (auto* cur = hit; cur; cur = RmapSplayTree<DmemRmapTraits>::NextOverlap(cur)) {
+            auto overlaps = rmap->tree.FindOverlapping(start_page, end_page);
+            for (auto cur = overlaps.begin(); cur != overlaps.end(); ++cur) {
                 // Compute overlapping page range.
                 s32 os = std::max(start_page, cur->p_start_idx);
                 s32 oe = std::min(end_page, cur->p_end_idx);
@@ -268,9 +271,6 @@ void DmemManager::RmapInsert(VmMap* vmspace, VAddr vaddr, u64 vsize, PAddr phys_
     entry->p_start_idx = phys_offset >> PAGE_SHIFT;
     entry->p_end_idx = (phys_offset + vsize) >> PAGE_SHIFT;
     entry->vaddr = vaddr;
-
-    auto* nearest = rmap->tree.Find(entry->p_start_idx, vaddr);
-    rmap->tree.Splay(nearest);
     rmap->tree.Insert(entry);
     rmap->Dereference();
 }
@@ -282,12 +282,11 @@ void DmemManager::RmapRemove(VmMap* vmspace, VAddr vaddr, u64 vsize, PAddr phys_
         return;
     }
 
-    const s32 page = static_cast<s32>(phys_offset >> PAGE_SHIFT);
-    auto* const found = rmap->tree.Find(page, vaddr);
-    if (found && found->p_start_idx == page && found->vaddr == vaddr) {
-        rmap->tree.Splay(found);
-        rmap->tree.Remove(found);
-        delete found;
+    const s32 page = phys_offset >> PAGE_SHIFT;
+    auto it = rmap->tree.Find(page, vaddr);
+    if (it != rmap->tree.end() && it->p_start_idx == page && it->vaddr == vaddr) {
+        rmap->tree.Remove(it);
+        delete std::addressof(*it);
     }
     if (rmap->tree.IsEmpty() && rmap->ref_count.load() <= 1) {
         UnlinkRmap(rmap);
@@ -533,9 +532,8 @@ bool DmemManager::CheckGpuWriteAlias(VmMap& map, VmMapEntry& entry, VAddr protec
     const s32 start_page = static_cast<s32>(phys_start >> PAGE_SHIFT);
     const s32 end_page = static_cast<s32>(phys_end >> PAGE_SHIFT);
 
-    auto* hit = rmap->tree.FindOverlapping(start_page, end_page);
-
-    for (auto* cur = hit; cur; cur = DmemRmap::Tree::NextOverlap(cur)) {
+    auto overlaps = rmap->tree.FindOverlapping(start_page, end_page);
+    for (auto cur = overlaps.begin(); cur != overlaps.end(); ++cur) {
         const s64 our_offset = start_page - (entry.start >> PAGE_SHIFT);
         const s64 their_offset = cur->p_start_idx - (cur->vaddr >> PAGE_SHIFT);
         if (our_offset == their_offset) {
@@ -577,6 +575,38 @@ void DmemManager::Split(Tree::iterator entry, PAddr addr) {
     m_entry_count++;
 }
 
+void DmemManager::SimplifyDmemEntry(Tree::iterator entry) {
+    if (entry == m_tree.end()) {
+        return;
+    }
+    auto prev = std::prev(entry);
+    if (prev == m_tree.end()) {
+        return;
+    }
+
+    //if (prev->busy != entry->busy) {
+    //    return;
+    //}
+    if (prev->mtype != entry->mtype) {
+        return;
+    }
+    if (prev->end != entry->start) {
+        return;
+    }
+    if (prev->is_free != entry->is_free) {
+        return;
+    }
+    // hash_entry, budget_id, control_count, ACL
+
+    // Absorb prev into entry.
+    m_tree.Unlink(prev);
+    entry->start = prev->start;
+    if (auto new_prev = std::prev(entry); new_prev != m_tree.end()) {
+        m_tree.ResizeFree(new_prev);
+    }
+    delete std::addressof(*prev);
+}
+
 void DmemManager::FreeEntry(Tree::iterator entry) {
     UnmapVirtualMappings(entry);
 
@@ -586,72 +616,70 @@ void DmemManager::FreeEntry(Tree::iterator entry) {
 }
 
 void DmemManager::UnmapVirtualMappings(Tree::iterator entry) {
-    std::scoped_lock lock{m_rmap_mutex};
-
     const s32 start_page = entry->start >> PAGE_SHIFT;
     const s32 end_page = entry->end >> PAGE_SHIFT;
+    s32 remaining_pages = end_page - start_page;
 
-    for (DmemRmap* rmap = m_rmap_head; rmap;) {
-        DmemRmap* next_rmap = rmap->next_rmap;
-        if (!rmap->vmspace || rmap->tree.IsEmpty()) {
-            rmap = next_rmap;
+    std::scoped_lock rmap_lock{m_rmap_mutex};
+
+    // Walk all vmspaces that have an rmap for this dmem object.
+    for (auto* rmap = m_rmap_head; rmap; rmap = rmap->next) {
+        auto& tree = rmap->tree;
+        if (!rmap->vmspace || tree.IsEmpty()) {
             continue;
         }
 
-        auto* hit = rmap->tree.FindOverlapping(start_page, end_page);
+        // Find overlapping rmap entries using the intrusive hit list.
+        auto overlaps = tree.FindOverlapping(start_page, end_page);
+        for (auto hit = overlaps.begin(); remaining_pages > 0 && hit != overlaps.end(); ++hit) {
+            const s32 entry_start = hit->p_start_idx;
+            const s32 entry_end = hit->p_end_idx;
 
-        // Collect hits before mutating the tree.
-        struct Hit {
-            VAddr addr;
-            u64 size;
-            s32 ps;
-            s32 pe;
-            DmemRmapEntry* entry;
-        };
-        std::vector<Hit> hits;
-        for (auto* c = hit; c; c = DmemRmap::Tree::NextOverlap(c)) {
-            s32 os = std::max(start_page, c->p_start_idx);
-            s32 oe = std::min(end_page, c->p_end_idx);
-            s32 off = os - c->p_start_idx;
-            hits.emplace_back(c->vaddr + u64(off) * PAGE_SIZE, u64(oe - os) * PAGE_SIZE,
-                              c->p_start_idx, c->p_end_idx, c);
-        }
+            // Compute the overlap in page indices.
+            const s32 overlap_start = std::max(start_page, entry_start);
+            const s32 overlap_end = std::min(end_page, entry_end);
+            remaining_pages -= (overlap_end - overlap_start);
 
-        for (const auto& hit : hits) {
-            //m_unmap_callback(rmap->vmspace, hit.addr, hit.size);
+            const VAddr unmap_vaddr = hit->vaddr + (overlap_start - entry_start) * PAGE_SIZE;
+            const u64 unmap_size = (overlap_end - overlap_start) * PAGE_SIZE;
 
-            if (start_page <= hit.ps && end_page >= hit.pe) {
-                rmap->tree.Remove(hit.entry);
-                delete hit.entry;
-            } else if (start_page <= hit.ps) {
-                hit.entry->vaddr += u64(end_page - hit.ps) * PAGE_SIZE;
-                hit.entry->p_start_idx = end_page;
-            } else if (end_page >= hit.pe) {
-                hit.entry->p_end_idx = start_page;
+            if (entry_start >= start_page && entry_end <= end_page) {
+                // Rmap entry is fully contained in the freed range, remove it entirely and delete the VA mapping.
+                tree.Remove(hit);
+                delete std::addressof(*hit);
+            } else if (entry_start < start_page && entry_end > end_page) {
+                // Rmap entry fully contains freed range, trim entry to [entry_start, start_page),
+                // create new entry for [end_page, entry_end).
+                auto* new_entry = new DmemRmapEntry{};
+                new_entry->vaddr = hit->vaddr + (end_page - entry_start) * PAGE_SIZE;
+                new_entry->p_start_idx = end_page;
+                new_entry->p_end_idx = entry_end;
+
+                tree.Splay(hit);
+                hit->p_end_idx = start_page;
+                tree.UpdateAug(hit);
+                tree.Insert(new_entry);
+            } else if (entry_start < start_page) {
+                // Freed entry overlaps at the end of the rmap entry, trim entry to [entry_start, start_page).
+                tree.Splay(hit);
+                hit->p_end_idx = start_page;
+                tree.UpdateAug(hit);
             } else {
-                auto* rmap_entry = new DmemRmapEntry{};
-                rmap_entry->p_start_idx = end_page;
-                rmap_entry->p_end_idx = hit.pe;
-                rmap_entry->vaddr = hit.entry->vaddr + u64(end_page - hit.ps) * PAGE_SIZE;
-
-                hit.entry->p_end_idx = start_page;
-
-                auto* near = rmap->tree.Find(rmap_entry->p_start_idx, rmap_entry->vaddr);
-                rmap->tree.Splay(near);
-                rmap->tree.Insert(rmap_entry);
+                // Freed entry overlaps at the start of the rmap entry, trim entry to [end_page, entry_end).
+                tree.Remove(hit);
+                hit->vaddr += (end_page - entry_start) * PAGE_SIZE;
+                hit->p_start_idx = end_page;
+                tree.Insert(std::addressof(*hit));
             }
-        }
 
-        if (rmap->Dereference()) {
-            UnlinkRmap(rmap);
-            delete rmap;
+            std::scoped_lock map_lock{rmap->vmspace->lock};
+            rmap->vmspace->Delete(unmap_vaddr, unmap_vaddr + unmap_size);
         }
-        rmap = next_rmap;
     }
 }
 
 DmemRmap* DmemManager::FindRmap(VmMap* vmspace) {
-    for (auto* rmap = m_rmap_head; rmap; rmap = rmap->next_rmap) {
+    for (auto* rmap = m_rmap_head; rmap; rmap = rmap->next) {
         if (rmap->vmspace == vmspace) {
             return rmap;
         }
@@ -667,7 +695,7 @@ DmemRmap* DmemManager::FindOrCreateRmap(VmMap* vmspace) {
     auto* rmap = new DmemRmap{};
     rmap->vmspace = vmspace;
     rmap->ref_count.store(2);
-    rmap->next_rmap = m_rmap_head;
+    rmap->next = m_rmap_head;
 
     m_rmap_head = rmap;
     return rmap;
@@ -675,12 +703,12 @@ DmemRmap* DmemManager::FindOrCreateRmap(VmMap* vmspace) {
 
 void DmemManager::UnlinkRmap(DmemRmap* rmap) {
     if (m_rmap_head == rmap) {
-        m_rmap_head = rmap->next_rmap;
+        m_rmap_head = rmap->next;
         return;
     }
-    for (auto* rmap = m_rmap_head; rmap; rmap = rmap->next_rmap) {
-        if (rmap->next_rmap == rmap) {
-            rmap->next_rmap = rmap->next_rmap;
+    for (auto* rmap = m_rmap_head; rmap; rmap = rmap->next) {
+        if (rmap->next == rmap) {
+            rmap->next = rmap->next;
             return;
         }
     }
