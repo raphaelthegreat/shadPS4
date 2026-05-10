@@ -104,7 +104,7 @@ public:
 
     s32 Protect(VAddr start, u64 size, MemoryProt new_prot);
 
-    s32 ProtectType(VAddr start, VAddr end, s32 new_mtype, MemoryProt new_prot);
+    s32 ProtectType(VAddr start, u64 size, DmemMemoryType new_mtype, MemoryProt new_prot);
 
     s32 VirtualQuery(VAddr addr, s32 flags, ::Libraries::Kernel::OrbisVirtualQueryInfo* info);
 

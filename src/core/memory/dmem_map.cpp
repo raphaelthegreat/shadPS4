@@ -427,12 +427,43 @@ s32 DmemManager::QueryAvailable(PAddr search_start, PAddr search_end, u64 alignm
     return ORBIS_OK;
 }
 
+void DmemManager::UpdateMtype(PAddr phys_start, PAddr phys_end, DmemMemoryType new_mtype) {
+    std::scoped_lock lock{m_mutex};
+
+    auto [entry, found] = m_tree.LookupEntry(phys_start);
+    if (!found || entry->end <= phys_start) {
+        ++entry;
+    }
+
+    if (entry != m_tree.end() && entry->mtype != new_mtype && entry->start < phys_start) {
+        Split(entry, phys_start);
+        ++entry;
+    }
+
+    while (entry != m_tree.end() && entry->start < phys_end) {
+        if (entry->mtype != new_mtype && entry->control_count == 0) {
+            if (phys_end < entry->end) {
+                Split(entry, phys_end);
+            }
+            entry->mtype = new_mtype;
+        }
+
+        SimplifyDmemEntry(entry);
+        ++entry;
+    }
+
+    if (entry != m_tree.end()) {
+        SimplifyDmemEntry(entry);
+    }
+}
+
 s32 DmemManager::GetDirectMemoryType(PAddr addr, s32* mtype_out, PAddr* start_out, PAddr* end_out) {
     if (s64(addr) < 0) {
         return ORBIS_KERNEL_ERROR_EINVAL;
     }
     std::scoped_lock lock{m_mutex};
     auto [entry, found] = m_tree.LookupEntry(addr);
+    auto& ent = *entry;
     if (!found || !entry->IsAllocated()) {
         return ORBIS_KERNEL_ERROR_ENOENT;
     }
@@ -512,6 +543,29 @@ bool DmemManager::IncludesWbGarlicMemory(PAddr addr, u64 size) {
             return true;
         }
         ++entry;
+    }
+    return false;
+}
+
+bool DmemManager::CheckRmapAlias(PAddr phys_start, PAddr phys_end,
+                                 VAddr vstart, VAddr vend) {
+    std::scoped_lock lock{m_rmap_mutex};
+
+    const s32 start_page = phys_start >> PAGE_SHIFT;
+    const s32 end_page = phys_end >> PAGE_SHIFT;
+
+    for (auto* rmap = m_rmap_head; rmap; rmap = rmap->next) {
+        if (!rmap->vmspace || rmap->tree.IsEmpty()) {
+            continue;
+        }
+        for (auto& hit : rmap->tree.FindOverlapping(start_page, end_page)) {
+            // Check if this rmap entry's virtual range is outside [vstart, vend).
+            const VAddr rmap_vstart = hit.vaddr;
+            const VAddr rmap_vend = rmap_vstart + (hit.p_end_idx - hit.p_start_idx) * PAGE_SIZE;
+            if (rmap_vstart >= vend || rmap_vend <= vstart) {
+                return true;
+            }
+        }
     }
     return false;
 }

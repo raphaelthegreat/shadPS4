@@ -44,7 +44,7 @@ struct BlockStats {
 };
 
 struct VmMapEntry;
-enum class MemoryProt : u32;
+enum class MemoryProt : u8;
 
 class AddressSpace;
 

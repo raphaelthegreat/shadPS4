@@ -104,7 +104,7 @@ struct DmemSplayTraits {
 struct VmMapEntry;
 struct VmObject;
 
-enum class MemoryProt : u32;
+enum class MemoryProt : u8;
 enum class MemoryMapFlags : u32;
 
 class AddressSpace;
@@ -151,6 +151,8 @@ public:
     s32 QueryAvailable(PAddr search_start, PAddr search_end, u64 alignment, PAddr* phys_addr_out,
                        u64* size_out);
 
+    void UpdateMtype(PAddr phys_start, PAddr phys_end, DmemMemoryType new_mtype);
+
     s32 GetDirectMemoryType(PAddr addr, s32* mtype_out, PAddr* start_out, PAddr* end_out);
 
     s32 SetDirectMemoryType(PAddr addr, u64 size, s32 mtype);
@@ -159,6 +161,8 @@ public:
                             MemoryProt prot, MemoryMapFlags flags, MemoryProt* max_prot);
 
     bool IncludesWbGarlicMemory(PAddr addr, u64 size);
+
+    bool CheckRmapAlias(PAddr phys_start, PAddr phys_end, VAddr vstart, VAddr vend);
 
     bool CheckGpuWriteAlias(VmMap& map, VmMapEntry& entry, VAddr protect_end);
 

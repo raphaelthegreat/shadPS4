@@ -359,9 +359,9 @@ s32 VmMap::Protect(DmemManager& dmem, VAddr start, VAddr end, MemoryProt new_pro
     return 0;
 }
 
-s32 VmMap::ProtectType(DmemManager& dmem, VAddr start, VAddr end, s32 new_mtype,
+s32 VmMap::ProtectType(DmemManager& dmem, VAddr start, VAddr end, DmemMemoryType new_mtype,
                        MemoryProt new_prot) {
-    if (new_mtype == 10 && True(new_prot & ~(MemoryProt::GpuRead | MemoryProt::CpuRead))) {
+    if (new_mtype == DmemMemoryType::WbGarlic && True(new_prot & ~(MemoryProt::GpuRead | MemoryProt::CpuRead))) {
         return ORBIS_KERNEL_ERROR_EACCES;
     }
 
@@ -378,15 +378,77 @@ s32 VmMap::ProtectType(DmemManager& dmem, VAddr start, VAddr end, s32 new_mtype,
     if (entry != m_tree.end() && entry->IsBlockpool()) {
         // _sx_downgrade
         if (!Common::Is64KBAligned(start) || !Common::Is64KBAligned(end) || end > entry->end) {
-            return ORBIS_KERNEL_ERROR_EINTR;
+            return ORBIS_KERNEL_ERROR_EINVAL;
         }
         // vm_map_type_protect_blockpool
         return ORBIS_OK;
     }
 
-    while (entry != m_tree.end() && entry->start < end) {
-        ++entry;
+    auto& ent = *entry;
+
+    // Validation pass.
+    auto last_entry = m_tree.end();
+    for (auto cur = entry; cur != m_tree.end() && cur->start < end; ++cur) {
+        if (True(cur->eflags & VmEntryFlags::IsSubMap)) {
+            return ORBIS_KERNEL_ERROR_EINVAL;
+        }
+        if (True(cur->ext_flags & (VmExtFlags::GpuOnly | VmExtFlags::Hide))) {
+            return ORBIS_KERNEL_ERROR_EACCES;
+        }
+        if ((static_cast<u32>(new_prot) & ~static_cast<u32>(cur->max_protection)) != 0) {
+            return ORBIS_KERNEL_ERROR_EACCES;
+        }
+        if (!cur->object || !cur->IsDmem()) {
+            return ORBIS_KERNEL_ERROR_ENOTSUP;
+        }
+
+        // Rmap alias check.
+        const VAddr vs = std::max(start, cur->start);
+        const VAddr ve = std::min(end, cur->end);
+        const PAddr ps = cur->offset + (vs - cur->start);
+        const PAddr pe = cur->offset + (ve - cur->start);
+        if (dmem.CheckRmapAlias(ps, pe, vs, ve)) {
+            return ORBIS_KERNEL_ERROR_EBUSY;
+        }
+
+        last_entry = cur;
     }
+
+    if (entry == m_tree.end()) {
+        return ORBIS_OK;
+    }
+
+    if (entry->start < start) {
+        ClipStart(entry, start);
+    }
+    if (last_entry != m_tree.end() && last_entry->end > end) {
+        ClipEnd(last_entry, end);
+    }
+
+    for (auto cur = entry; cur != m_tree.end() && cur->start < end; ) {
+        const MemoryProt old_prot = cur->protection;
+        cur->protection = new_prot;
+
+        const bool had_gpu = True(old_prot & MemoryProt::GpuReadWrite);
+        const bool wants_gpu = True(new_prot & MemoryProt::GpuReadWrite);
+        if (rasterizer && had_gpu != wants_gpu) {
+            if (wants_gpu) {
+                rasterizer->MapMemory(cur->start, cur->Size());
+            } else {
+                rasterizer->UnmapMemory(cur->start, cur->Size());
+            }
+        }
+
+        if (old_prot != new_prot) {
+            //impl.Protect(cur->start, cur->Size(), ToHostPerm(new_prot));
+        }
+        dmem.UpdateMtype(cur->offset, cur->offset + cur->Size(), new_mtype);
+
+        SimplifyEntry(cur);
+        ++cur;
+    }
+
+    return ORBIS_OK;
 }
 
 s32 VmMap::Wire(VAddr start, VAddr end, VmMapWireFlags flags) {

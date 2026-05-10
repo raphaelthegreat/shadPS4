@@ -18,7 +18,7 @@ class Rasterizer;
 
 namespace Core {
 
-enum class MemoryProt : u32 {
+enum class MemoryProt : u8 {
     NoAccess = 0,
     CpuRead = 1,
     CpuWrite = 2,
@@ -84,7 +84,13 @@ enum class VmEntryFlags : u32 {
 };
 DECLARE_ENUM_FLAG_OPERATORS(VmEntryFlags)
 
-enum class VmExtFlags : u32 { None = 0, Hide = 1, GpuOnly = 2, Kernel = 4, Page2MB = 8 };
+enum class VmExtFlags : u32 {
+    None = 0,
+    Hide = 1,
+    GpuOnly = 2,
+    Kernel = 4,
+    Page2MB = 8,
+};
 DECLARE_ENUM_FLAG_OPERATORS(VmExtFlags)
 
 struct VmMapEntry : SplayTreeNode {
@@ -148,6 +154,7 @@ struct VmMapSplayTraits {
 
 class Blockpool;
 class DmemManager;
+enum class DmemMemoryType : s32;
 
 class AddressSpace;
 
@@ -187,7 +194,7 @@ public:
 
     s32 Protect(DmemManager& dmem, VAddr start, VAddr end, MemoryProt new_prot, bool set_max);
 
-    s32 ProtectType(DmemManager& dmem, VAddr start, VAddr end, s32 mtype, MemoryProt new_prot);
+    s32 ProtectType(DmemManager& dmem, VAddr start, VAddr end, DmemMemoryType mtype, MemoryProt new_prot);
 
     s32 Wire(VAddr start, VAddr end, VmMapWireFlags flags);
 

@@ -321,17 +321,17 @@ s32 MemoryManager::Protect(VAddr start, u64 size, MemoryProt new_prot) {
     return vm_map.Protect(dmem, start, start + size, new_prot, 0);
 }
 
-s32 MemoryManager::ProtectType(VAddr start, VAddr end, s32 new_mtype, MemoryProt new_prot) {
-    if (new_mtype >= 11) {
+s32 MemoryManager::ProtectType(VAddr start, u64 size, DmemMemoryType new_mtype, MemoryProt new_prot) {
+    if (new_mtype > DmemMemoryType::WbGarlic || new_mtype < DmemMemoryType::WbOnion) {
         return ORBIS_KERNEL_ERROR_EINVAL;
     }
+    if (True(new_prot & ~MemoryProt::All)) {
+        return ORBIS_KERNEL_ERROR_EINVAL;
+    }
+    const VAddr end = Common::AlignUpPow2(start + size, PAGE_SIZE);
     start = Common::AlignDownPow2(start, PAGE_SIZE);
-    end = Common::AlignUpPow2(end, PAGE_SIZE);
-    // return vm_map.ProtectType(dmem, start, end, new_mtype, new_prot);
-    return ORBIS_OK;
+    return vm_map.ProtectType(dmem, start, end, new_mtype, new_prot);
 }
-#pragma GCC push_options
-#pragma GCC optimize("O0")
 
 s32 MemoryManager::VirtualQuery(VAddr addr, s32 flags,
                                 ::Libraries::Kernel::OrbisVirtualQueryInfo* info) {

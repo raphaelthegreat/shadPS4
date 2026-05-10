@@ -806,9 +806,9 @@ void* AddressSpace::Map(VAddr virtual_addr, u64 size, PAddr phys_addr, bool is_e
 void* AddressSpace::MapFile(VAddr virtual_addr, u64 size, u64 offset, u32 prot, uintptr_t fd) {
 #ifdef _WIN32
     return impl->Map(virtual_addr, offset, size,
-                     ToWindowsProt(std::bit_cast<Core::MemoryProt>(prot)), fd);
+                     ToWindowsProt(Core::MemoryProt(prot)), fd);
 #else
-    return impl->Map(virtual_addr, offset, size, ToPosixProt(std::bit_cast<Core::MemoryProt>(prot)),
+    return impl->Map(virtual_addr, offset, size, ToPosixProt(Core::MemoryProt(prot)),
                      fd);
 #endif
 }
