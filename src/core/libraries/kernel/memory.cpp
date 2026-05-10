@@ -287,6 +287,10 @@ s32 PS4_SYSV_ABI sceKernelMtypeprotect(VAddr addr, u64 size, s32 mtype, s32 prot
     return g_memory->ProtectType(addr, size, mem_type, mem_prot);
 }
 
+s32 PS4_SYSV_ABI sceKernelMapNamedSystemFlexibleMemory() {
+    return 0x80020016;
+}
+
 s32 PS4_SYSV_ABI sceKernelDirectMemoryQuery(PAddr addr, s32 flags, OrbisQueryInfo* query_info,
                                             u64 info_size) {
     LOG_INFO(Kernel_Vmm, "called addr = {:#x}, flags = {:#x}", addr, flags);
@@ -717,6 +721,7 @@ void RegisterMemory(Core::Loader::SymbolsResolver* sym) {
     LIB_FUNCTION("PGhQHd-dzv8", "libkernel", 1, "libkernel", sceKernelMmap);
     LIB_FUNCTION("cQke9UuBQOk", "libkernel", 1, "libkernel", sceKernelMunmap);
     LIB_FUNCTION("mL8NDH86iQI", "libkernel", 1, "libkernel", sceKernelMapNamedFlexibleMemory);
+    LIB_FUNCTION("kc+LEEIYakc", "libkernel", 1, "libkernel", sceKernelMapNamedSystemFlexibleMemory);
     LIB_FUNCTION("aNz11fnnzi4", "libkernel", 1, "libkernel", sceKernelAvailableFlexibleMemorySize);
     LIB_FUNCTION("aNz11fnnzi4", "libkernel_avlfmem", 1, "libkernel",
                  sceKernelAvailableFlexibleMemorySize);

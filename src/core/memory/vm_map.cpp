@@ -294,8 +294,7 @@ s32 VmMap::Protect(DmemManager& dmem, VAddr start, VAddr end, MemoryProt new_pro
                 }
             }
             VmMap& map = *this;
-            if (True(new_prot & MemoryProt::GpuReadWrite) &&
-                !dmem.CheckGpuWriteAlias(map, *cur, end)) {
+            if (True(new_prot & MemoryProt::GpuReadWrite) && dmem.CheckGpuWriteAlias(map, *cur, end)) {
                 return ORBIS_KERNEL_ERROR_EACCES;
             }
         }
