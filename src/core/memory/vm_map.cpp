@@ -201,6 +201,8 @@ s32 VmMap::MapMemory(VAddr* out_addr, u64 size, MemoryProt prot, MemoryProt max_
                 });
                 break;
             }
+            case VmObjectType::Blockpool:
+                break;
             case VmObjectType::Self:
                 impl.Map(addr, size, -1, True(prot & MemoryProt::CpuExec));
                 break;

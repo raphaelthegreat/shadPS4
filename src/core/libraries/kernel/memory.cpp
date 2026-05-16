@@ -470,10 +470,10 @@ s32 PS4_SYSV_ABI sceKernelMemoryPoolExpand(u64 search_start, u64 search_end, u64
 
 s32 PS4_SYSV_ABI sceKernelMemoryPoolReserve(VAddr addr_in, u64 size, u64 alignment, s32 flags,
                                             VAddr* addr_out) {
-    LOG_INFO(Kernel_Vmm, "addr_in = {}, size = {:#x}, alignment = {:#x}, flags = {:#x}", addr_in,
+    LOG_INFO(Kernel_Vmm, "addr_in = {:#x}, size = {:#x}, alignment = {:#x}, flags = {:#x}", addr_in,
              size, alignment, flags);
 
-    if ((flags & ~9)) {
+    if (flags & 0xffffff6f) {
         return ORBIS_KERNEL_ERROR_EINVAL;
     }
 
@@ -502,14 +502,14 @@ s32 PS4_SYSV_ABI sceKernelMemoryPoolReserve(VAddr addr_in, u64 size, u64 alignme
 }
 
 s32 PS4_SYSV_ABI sceKernelMemoryPoolCommit(VAddr addr, u64 len, s32 type, s32 prot, s32 flags) {
-    LOG_INFO(Kernel_Vmm, "addr = {}, len = {:#x}, type = {:#x}, prot = {:#x}, flags = {:#x}", addr,
+    LOG_INFO(Kernel_Vmm, "addr = {:#x}, len = {:#x}, type = {:#x}, prot = {:#x}, flags = {:#x}", addr,
              len, type, prot, flags);
     const auto mem_prot = static_cast<Core::MemoryProt>(prot);
     return g_memory->PoolMap(addr, len, mem_prot, type);
 }
 
 s32 PS4_SYSV_ABI sceKernelMemoryPoolDecommit(VAddr addr, u64 len, s32 flags) {
-    LOG_INFO(Kernel_Vmm, "addr = {}, len = {:#x}, flags = {:#x}", addr, len, flags);
+    LOG_INFO(Kernel_Vmm, "addr = {:#x}, len = {:#x}, flags = {:#x}", addr, len, flags);
     return g_memory->PoolUnmap(addr, len);
 }
 
@@ -629,7 +629,7 @@ s32 PS4_SYSV_ABI sceKernelConfiguredFlexibleMemorySize(u64* out_size) {
 }
 
 s32 PS4_SYSV_ABI sceKernelMunmap(VAddr addr, u64 len) {
-    LOG_DEBUG(Kernel_Vmm, "addr = {}, len = {:#x}", addr, len);
+    LOG_INFO(Kernel_Vmm, "addr = {:#x}, len = {:#x}", addr, len);
     if (len == 0) {
         return ORBIS_KERNEL_ERROR_EINVAL;
     }
