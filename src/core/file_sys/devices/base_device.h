@@ -11,7 +11,7 @@ namespace Core {
 struct VmObject;
 enum class MemoryProt : u8;
 enum class MemoryMapFlags : u32;
-}
+} // namespace Core
 
 namespace Libraries::Kernel {
 struct OrbisKernelStat;

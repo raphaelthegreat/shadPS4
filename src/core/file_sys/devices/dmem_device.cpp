@@ -64,7 +64,8 @@ s32 DmemDevice::mmap(u64 offset, u64 size, Core::MemoryProt prot, Core::MemoryPr
     auto& dmem = memory->GetDmemManager();
 
     if (-1 < s64(offset) && size <= (DmemManager::DMEM_MAX_ADDRESS - offset)) {
-        if (dmem.IsDmemBackingValid(offset, size, Core::DmemMemoryType::Invalid, prot, flags, max_prot)) {
+        if (dmem.IsDmemBackingValid(offset, size, Core::DmemMemoryType::Invalid, prot, flags,
+                                    max_prot)) {
             *out_object = dmem.GetDmemObject();
             return ORBIS_OK;
         }

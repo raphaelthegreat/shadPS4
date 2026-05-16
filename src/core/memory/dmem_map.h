@@ -157,8 +157,8 @@ public:
 
     s32 SetDirectMemoryType(PAddr addr, u64 size, s32 mtype);
 
-    bool IsDmemBackingValid(PAddr addr, u64 size, DmemMemoryType mtype_override,
-                            MemoryProt prot, MemoryMapFlags flags, MemoryProt* max_prot);
+    bool IsDmemBackingValid(PAddr addr, u64 size, DmemMemoryType mtype_override, MemoryProt prot,
+                            MemoryMapFlags flags, MemoryProt* max_prot);
 
     bool IncludesWbGarlicMemory(PAddr addr, u64 size);
 

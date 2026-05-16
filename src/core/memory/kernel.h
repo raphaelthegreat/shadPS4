@@ -73,7 +73,8 @@ public:
     }
 
     u64 GetAvailableFlexibleSize() const {
-        return budget.mlock_limit[u32(BudgetPtype::BigApp)] - budget.mlock_used[u32(BudgetPtype::BigApp)];
+        return budget.mlock_limit[u32(BudgetPtype::BigApp)] -
+               budget.mlock_used[u32(BudgetPtype::BigApp)];
     }
 
     VAddr SystemReservedVirtualBase() noexcept {

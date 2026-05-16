@@ -729,8 +729,8 @@ struct AddressSpace::Impl {
         }
     }
 
-    void* Map(VAddr virtual_addr, PAddr phys_addr, u64 size, PosixPageProtection prot,
-              int flag, int fd = -1) {
+    void* Map(VAddr virtual_addr, PAddr phys_addr, u64 size, PosixPageProtection prot, int flag,
+              int fd = -1) {
         m_free_regions.subtract({virtual_addr, virtual_addr + size});
 #ifdef __APPLE__
         if ((prot & PROT_EXEC) != 0) {
@@ -820,12 +820,13 @@ void* AddressSpace::Map(VAddr virtual_addr, u64 size, PAddr phys_addr, bool is_e
     return impl->Map(virtual_addr, phys_addr, size, prot, flag);
 }
 
-void* AddressSpace::MapFile(VAddr virtual_addr, u64 size, u64 offset, MemoryMapFlags flags, u32 prot, uintptr_t fd) {
+void* AddressSpace::MapFile(VAddr virtual_addr, u64 size, u64 offset, MemoryMapFlags flags,
+                            u32 prot, uintptr_t fd) {
 #ifdef _WIN32
-    return impl->Map(virtual_addr, offset, size,
-                     ToWindowsProt(Core::MemoryProt(prot)), fd);
+    return impl->Map(virtual_addr, offset, size, ToWindowsProt(Core::MemoryProt(prot)), fd);
 #else
-    return impl->Map(virtual_addr, offset, size, ToPosixProt(Core::MemoryProt(prot)), ToPosixFlags(flags), fd);
+    return impl->Map(virtual_addr, offset, size, ToPosixProt(Core::MemoryProt(prot)),
+                     ToPosixFlags(flags), fd);
 #endif
 }
 

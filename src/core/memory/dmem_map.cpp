@@ -145,7 +145,7 @@ s32 DmemManager::MapDirectMemory(VmMap& map, VAddr* out_addr, u64 length,
                 continue;
             }
 
-            auto overlaps = rmap->tree.FindOverlapping(start_page, end_page);
+            auto overlaps = rmap->tree.FindOverlappingAll(start_page, end_page);
             for (auto cur = overlaps.begin(); cur != overlaps.end(); ++cur) {
                 // Compute overlapping page range.
                 s32 os = std::max(start_page, cur->p_start_idx);
@@ -270,6 +270,9 @@ s32 DmemManager::MapDirectMemory(VmMap& map, VAddr* out_addr, u64 length,
 void DmemManager::RmapInsert(VmMap* vmspace, VAddr vaddr, u64 vsize, PAddr phys_offset) {
     std::scoped_lock lock{m_rmap_mutex};
     DmemRmap* rmap = FindOrCreateRmap(vmspace);
+
+    LOG_WARNING(Kernel_Vmm, "Insert addr={:#x}, size={:#x}, phys_addr={:#x}", vaddr, vsize,
+                phys_offset);
 
     auto* entry = new DmemRmapEntry{};
     entry->p_start_idx = phys_offset >> PAGE_SHIFT;
@@ -519,7 +522,8 @@ bool DmemManager::IsDmemBackingValid(PAddr addr, u64 size, DmemMemoryType mtype_
         const bool wants_write = True(prot & (MemoryProt::CpuWrite | MemoryProt::GpuWrite));
         const auto effective_mtype =
             (mtype_override != DmemMemoryType::Invalid) ? mtype_override : dentry->mtype;
-        if (wants_write && effective_mtype == DmemMemoryType::WbGarlic && False(flags & MemoryMapFlags::WriteWbGarlic)) {
+        if (wants_write && effective_mtype == DmemMemoryType::WbGarlic &&
+            False(flags & MemoryMapFlags::WriteWbGarlic)) {
             return false;
         }
 
@@ -552,8 +556,7 @@ bool DmemManager::IncludesWbGarlicMemory(PAddr addr, u64 size) {
     return false;
 }
 
-bool DmemManager::CheckRmapAlias(PAddr phys_start, PAddr phys_end,
-                                 VAddr vstart, VAddr vend) {
+bool DmemManager::CheckRmapAlias(PAddr phys_start, PAddr phys_end, VAddr vstart, VAddr vend) {
     std::scoped_lock lock{m_rmap_mutex};
 
     const s32 start_page = phys_start >> PAGE_SHIFT;
@@ -563,7 +566,7 @@ bool DmemManager::CheckRmapAlias(PAddr phys_start, PAddr phys_end,
         if (!rmap->vmspace || rmap->tree.IsEmpty()) {
             continue;
         }
-        for (auto& hit : rmap->tree.FindOverlapping(start_page, end_page)) {
+        for (auto& hit : rmap->tree.FindOverlappingAll(start_page, end_page)) {
             // Check if this rmap entry's virtual range is outside [vstart, vend).
             const VAddr rmap_vstart = hit.vaddr;
             const VAddr rmap_vend = rmap_vstart + (hit.p_end_idx - hit.p_start_idx) * PAGE_SIZE;
@@ -591,7 +594,7 @@ bool DmemManager::CheckGpuWriteAlias(VmMap& map, VmMapEntry& entry, VAddr protec
     const s32 start_page = static_cast<s32>(phys_start >> PAGE_SHIFT);
     const s32 end_page = static_cast<s32>(phys_end >> PAGE_SHIFT);
 
-    auto overlaps = rmap->tree.FindOverlapping(start_page, end_page);
+    auto overlaps = rmap->tree.FindOverlappingAll(start_page, end_page);
     for (auto cur = overlaps.begin(); cur != overlaps.end(); ++cur) {
         const s64 our_offset = start_page - (entry.start >> PAGE_SHIFT);
         const s64 their_offset = cur->p_start_idx - (cur->vaddr >> PAGE_SHIFT);
@@ -643,9 +646,9 @@ void DmemManager::SimplifyDmemEntry(Tree::iterator entry) {
         return;
     }
 
-    //if (prev->busy != entry->busy) {
-    //    return;
-    //}
+    // if (prev->busy != entry->busy) {
+    //     return;
+    // }
     if (prev->mtype != entry->mtype) {
         return;
     }
@@ -675,9 +678,11 @@ void DmemManager::FreeEntry(Tree::iterator entry) {
 }
 
 void DmemManager::UnmapVirtualMappings(Tree::iterator entry) {
+    if (entry->start == 0x10000) {
+        printf("bad\n");
+    }
     const s32 start_page = entry->start >> PAGE_SHIFT;
     const s32 end_page = entry->end >> PAGE_SHIFT;
-    s32 remaining_pages = end_page - start_page;
 
     std::scoped_lock rmap_lock{m_rmap_mutex};
 
@@ -689,21 +694,24 @@ void DmemManager::UnmapVirtualMappings(Tree::iterator entry) {
         }
 
         // Find overlapping rmap entries using the intrusive hit list.
-        auto overlaps = tree.FindOverlapping(start_page, end_page);
-        for (auto hit = overlaps.begin(); remaining_pages > 0 && hit != overlaps.end(); ++hit) {
+        auto overlaps = tree.FindOverlappingAll(start_page, end_page);
+        for (auto hit = overlaps.begin(); hit != overlaps.end(); ++hit) {
             const s32 entry_start = hit->p_start_idx;
             const s32 entry_end = hit->p_end_idx;
+            LOG_WARNING(Kernel_Vmm, "Overlap addr={:#x}, size={:#x}, phys_addr={:#x}", hit->vaddr,
+                        (entry_end - entry_start) * PAGE_SIZE, hit->p_start_idx * PAGE_SIZE);
 
             // Compute the overlap in page indices.
             const s32 overlap_start = std::max(start_page, entry_start);
             const s32 overlap_end = std::min(end_page, entry_end);
-            remaining_pages -= (overlap_end - overlap_start);
 
             const VAddr unmap_vaddr = hit->vaddr + (overlap_start - entry_start) * PAGE_SIZE;
             const u64 unmap_size = (overlap_end - overlap_start) * PAGE_SIZE;
 
             if (entry_start >= start_page && entry_end <= end_page) {
-                // Rmap entry is fully contained in the freed range, remove it entirely and delete the VA mapping.
+                // Rmap entry is fully contained in the freed range, remove it entirely and delete
+                // the VA mapping.
+                LOG_WARNING(Kernel_Vmm, "Entry is contained by free range");
                 tree.Remove(hit);
                 delete std::addressof(*hit);
             } else if (entry_start < start_page && entry_end > end_page) {
@@ -713,18 +721,23 @@ void DmemManager::UnmapVirtualMappings(Tree::iterator entry) {
                 new_entry->vaddr = hit->vaddr + (end_page - entry_start) * PAGE_SIZE;
                 new_entry->p_start_idx = end_page;
                 new_entry->p_end_idx = entry_end;
+                LOG_WARNING(Kernel_Vmm, "Entry contains free range");
 
                 tree.Splay(hit);
                 hit->p_end_idx = start_page;
                 tree.UpdateAug(hit);
                 tree.Insert(new_entry);
             } else if (entry_start < start_page) {
-                // Freed entry overlaps at the end of the rmap entry, trim entry to [entry_start, start_page).
+                // Freed entry overlaps at the end of the rmap entry, trim entry to [entry_start,
+                // start_page).
+                LOG_WARNING(Kernel_Vmm, "End overlap");
                 tree.Splay(hit);
                 hit->p_end_idx = start_page;
                 tree.UpdateAug(hit);
             } else {
-                // Freed entry overlaps at the start of the rmap entry, trim entry to [end_page, entry_end).
+                // Freed entry overlaps at the start of the rmap entry, trim entry to [end_page,
+                // entry_end).
+                LOG_WARNING(Kernel_Vmm, "Begin overlap");
                 tree.Remove(hit);
                 hit->vaddr += (end_page - entry_start) * PAGE_SIZE;
                 hit->p_start_idx = end_page;
@@ -732,6 +745,9 @@ void DmemManager::UnmapVirtualMappings(Tree::iterator entry) {
             }
 
             LOG_WARNING(Kernel_Vmm, "Unmap addr={:#x}, size={:#x}", unmap_vaddr, unmap_size);
+            if (unmap_vaddr == 0x200005000ULL && unmap_size == 0x10000) {
+                printf("bad\n");
+            }
             std::scoped_lock map_lock{rmap->vmspace->lock};
             rmap->vmspace->Delete(unmap_vaddr, unmap_vaddr + unmap_size);
         }

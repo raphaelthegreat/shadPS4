@@ -61,6 +61,7 @@ VmMap::Tree::iterator VmMap::Insert(Tree::iterator prev, VAddr start, VAddr end,
                                     std::shared_ptr<VmObject> object, u64 offset, MemoryProt prot,
                                     MemoryProt max_prot, VmEntryFlags eflags,
                                     std::string_view name) {
+    ASSERT(Common::Is16KBAligned(start) && Common::Is16KBAligned(end));
     auto* entry = new VmMapEntry{};
     entry->start = start;
     entry->end = end;
@@ -92,6 +93,7 @@ VmMap::Tree::iterator VmMap::ClipStart(Tree::iterator entry, VAddr addr) {
     *new_entry = *entry;
     static_cast<SplayTreeNode&>(*new_entry) = SplayTreeNode{};
     new_entry->end = addr;
+    ASSERT(Common::Is16KBAligned(addr));
     entry->offset += (addr - entry->start);
     entry->start = addr;
 
@@ -108,6 +110,7 @@ VmMap::Tree::iterator VmMap::ClipEnd(Tree::iterator entry, VAddr addr) {
     new_entry->start = addr;
     new_entry->offset = entry->offset + (addr - entry->start);
     entry->end = addr;
+    ASSERT(Common::Is16KBAligned(addr));
     m_tree.ResizeFree(entry);
     return m_tree.Link(entry, new_entry);
 }
@@ -141,7 +144,8 @@ s32 VmMap::MapMemory(VAddr* out_addr, u64 size, MemoryProt prot, MemoryProt max_
         if (object) {
             budget_ptype = object->budget_ptype;
         } else {
-            budget_ptype = cow_system ? BudgetPtype::System : /*td_proc->budget_ptype*/ BudgetPtype::BigApp;
+            budget_ptype =
+                cow_system ? BudgetPtype::System : /*td_proc->budget_ptype*/ BudgetPtype::BigApp;
         }
     }
 
@@ -149,7 +153,12 @@ s32 VmMap::MapMemory(VAddr* out_addr, u64 size, MemoryProt prot, MemoryProt max_
     {
         std::scoped_lock lk{lock};
 
-        if (True(flags & MemoryMapFlags::Fixed)) {
+        if (True(flags & MemoryMapFlags::Stack)) {
+            const auto [existing, found] = LookupEntry(addr);
+            if (found) {
+                return ORBIS_KERNEL_ERROR_ENOMEM;
+            }
+        } else if (True(flags & MemoryMapFlags::Fixed)) {
             if (False(flags & MemoryMapFlags::NoOverwrite)) {
                 Delete(addr, addr + size);
             } else {
@@ -181,7 +190,8 @@ s32 VmMap::MapMemory(VAddr* out_addr, u64 size, MemoryProt prot, MemoryProt max_
                 impl.Map(addr, size, offset, True(prot & MemoryProt::CpuExec));
                 break;
             case VmObjectType::Vnode:
-                impl.MapFile(addr, size, offset, flags, static_cast<u32>(prot & max_prot), object->vnode.host_fd);
+                impl.MapFile(addr, size, offset, flags, static_cast<u32>(prot & max_prot),
+                             object->vnode.host_fd);
                 break;
             case VmObjectType::Default: {
                 u64 map_offset = 0;
@@ -294,7 +304,8 @@ s32 VmMap::Protect(DmemManager& dmem, VAddr start, VAddr end, MemoryProt new_pro
             eff = MemoryProt::NoAccess;
         }
         if ((eff & new_prot) != new_prot) {
-            LOG_WARNING(Kernel_Vmm, "Protection request exceeds max_protection, this succeeds on console for some reason");
+            LOG_WARNING(Kernel_Vmm, "Protection request exceeds max_protection, this succeeds on "
+                                    "console for some reason");
             // return ORBIS_KERNEL_ERROR_ENOENT;
         }
         if (cur->IsDmem()) {
@@ -309,7 +320,8 @@ s32 VmMap::Protect(DmemManager& dmem, VAddr start, VAddr end, MemoryProt new_pro
                 }
             }
             VmMap& map = *this;
-            if (True(new_prot & MemoryProt::GpuReadWrite) && dmem.CheckGpuWriteAlias(map, *cur, end)) {
+            if (True(new_prot & MemoryProt::GpuReadWrite) &&
+                dmem.CheckGpuWriteAlias(map, *cur, end)) {
                 return ORBIS_KERNEL_ERROR_EACCES;
             }
         }
@@ -375,7 +387,8 @@ s32 VmMap::Protect(DmemManager& dmem, VAddr start, VAddr end, MemoryProt new_pro
 
 s32 VmMap::ProtectType(DmemManager& dmem, VAddr start, VAddr end, DmemMemoryType new_mtype,
                        MemoryProt new_prot) {
-    if (new_mtype == DmemMemoryType::WbGarlic && True(new_prot & ~(MemoryProt::GpuRead | MemoryProt::CpuRead))) {
+    if (new_mtype == DmemMemoryType::WbGarlic &&
+        True(new_prot & ~(MemoryProt::GpuRead | MemoryProt::CpuRead))) {
         return ORBIS_KERNEL_ERROR_EACCES;
     }
 
@@ -439,7 +452,7 @@ s32 VmMap::ProtectType(DmemManager& dmem, VAddr start, VAddr end, DmemMemoryType
         ClipEnd(last_entry, end);
     }
 
-    for (auto cur = entry; cur != m_tree.end() && cur->start < end; ) {
+    for (auto cur = entry; cur != m_tree.end() && cur->start < end;) {
         const MemoryProt old_prot = cur->protection;
         cur->protection = new_prot;
 
@@ -454,7 +467,7 @@ s32 VmMap::ProtectType(DmemManager& dmem, VAddr start, VAddr end, DmemMemoryType
         }
 
         if (old_prot != new_prot) {
-            //impl.Protect(cur->start, cur->Size(), ToHostPerm(new_prot));
+            // impl.Protect(cur->start, cur->Size(), ToHostPerm(new_prot));
         }
         dmem.UpdateMtype(cur->offset, cur->offset + cur->Size(), new_mtype);
 

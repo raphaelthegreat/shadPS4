@@ -28,8 +28,12 @@ public:
 private:
     using N = RmapNode;
 
-    static N* GetNode(Entry* entry) { return Traits::GetNode(entry); }
-    static Entry* GetEntry(N* node) { return Traits::FromNode(node); }
+    static N* GetNode(Entry* entry) {
+        return Traits::GetNode(entry);
+    }
+    static Entry* GetEntry(N* node) {
+        return Traits::FromNode(node);
+    }
 
 public:
     class Iterator {
@@ -43,18 +47,42 @@ public:
         Iterator() = default;
         explicit Iterator(N* node) : m_node{node} {}
 
-        reference operator*() const { return *GetEntry(m_node); }
-        pointer operator->() const { return GetEntry(m_node); }
+        reference operator*() const {
+            return *GetEntry(m_node);
+        }
+        pointer operator->() const {
+            return GetEntry(m_node);
+        }
 
-        Iterator& operator++() { m_node = m_node->next; return *this; }
-        Iterator operator++(int) { auto t = *this; m_node = m_node->next; return t; }
-        Iterator& operator--() { m_node = m_node->prev; return *this; }
-        Iterator operator--(int) { auto t = *this; m_node = m_node->prev; return t; }
+        Iterator& operator++() {
+            m_node = m_node->next;
+            return *this;
+        }
+        Iterator operator++(int) {
+            auto t = *this;
+            m_node = m_node->next;
+            return t;
+        }
+        Iterator& operator--() {
+            m_node = m_node->prev;
+            return *this;
+        }
+        Iterator operator--(int) {
+            auto t = *this;
+            m_node = m_node->prev;
+            return t;
+        }
 
-        bool operator==(const Iterator& o) const { return m_node == o.m_node; }
-        bool operator!=(const Iterator& o) const { return m_node != o.m_node; }
+        bool operator==(const Iterator& o) const {
+            return m_node == o.m_node;
+        }
+        bool operator!=(const Iterator& o) const {
+            return m_node != o.m_node;
+        }
 
-        N* node() const { return m_node; }
+        N* node() const {
+            return m_node;
+        }
 
     private:
         N* m_node{};
@@ -63,6 +91,7 @@ public:
     using iterator = Iterator;
 
     /// Overlap list iterator — walks the _next chain from FindOverlapping.
+    /// Pre-caches m_next so that Remove/modify during iteration is safe.
     class OverlapIterator {
     public:
         using value_type = Entry;
@@ -72,8 +101,12 @@ public:
         OverlapIterator() = default;
         explicit OverlapIterator(N* node) : m_node{node}, m_next{node ? node->_next : nullptr} {}
 
-        reference operator*() const { return *GetEntry(m_node); }
-        pointer operator->() const { return GetEntry(m_node); }
+        reference operator*() const {
+            return *GetEntry(m_node);
+        }
+        pointer operator->() const {
+            return GetEntry(m_node);
+        }
 
         OverlapIterator& operator++() {
             m_node = m_next;
@@ -81,29 +114,43 @@ public:
             return *this;
         }
 
-        bool operator==(const OverlapIterator& o) const { return m_node == o.m_node; }
-        bool operator!=(const OverlapIterator& o) const { return m_node != o.m_node; }
+        bool operator==(const OverlapIterator& o) const {
+            return m_node == o.m_node;
+        }
+        bool operator!=(const OverlapIterator& o) const {
+            return m_node != o.m_node;
+        }
 
-        N* node() const { return m_node; }
+        N* node() const {
+            return m_node;
+        }
 
     private:
         N* m_node{};
         N* m_next{};
     };
 
-           /// Range for iterating overlaps via range-based for.
+    /// Range for iterating overlaps via range-based for.
     struct OverlapRange {
         N* head;
-        OverlapIterator begin() const { return OverlapIterator{head}; }
-        OverlapIterator end() const { return OverlapIterator{nullptr}; }
+        OverlapIterator begin() const {
+            return OverlapIterator{head};
+        }
+        OverlapIterator end() const {
+            return OverlapIterator{nullptr};
+        }
     };
 
 private:
     static int CompareKeys(s32 a_idx, VAddr a_va, s32 b_idx, VAddr b_va) {
-        if (a_idx < b_idx) return -1;
-        if (a_idx > b_idx) return 1;
-        if (static_cast<s64>(a_va) < static_cast<s64>(b_va)) return -1;
-        if (static_cast<s64>(a_va) > static_cast<s64>(b_va)) return 1;
+        if (a_idx < b_idx)
+            return -1;
+        if (a_idx > b_idx)
+            return 1;
+        if (static_cast<s64>(a_va) < static_cast<s64>(b_va))
+            return -1;
+        if (static_cast<s64>(a_va) > static_cast<s64>(b_va))
+            return 1;
         return 0;
     }
 
@@ -121,7 +168,8 @@ private:
     }
 
     void SplayInternal(N* root, N* node) {
-        if (root == node) return;
+        if (root == node)
+            return;
 
         N* parent = node->parent;
         if (parent != root) {
@@ -138,11 +186,15 @@ private:
                     node->right->parent = parent;
                     node->right = parent;
                     parent->parent = node;
-                    N** gp_slot; N** node_slot;
+                    N** gp_slot;
+                    N** node_slot;
                     if (gp_left == parent) {
-                        gp_slot = &gp->left; node_slot = &parent->right; rotated = parent;
+                        gp_slot = &gp->left;
+                        node_slot = &parent->right;
+                        rotated = parent;
                     } else {
-                        gp_slot = &gp->right; node_slot = &node->left;
+                        gp_slot = &gp->right;
+                        node_slot = &node->left;
                     }
                     *gp_slot = *node_slot;
                     (*node_slot)->parent = gp;
@@ -154,11 +206,15 @@ private:
                     node->left->parent = parent;
                     node->left = parent;
                     parent->parent = node;
-                    N** gp_slot; N** node_slot;
+                    N** gp_slot;
+                    N** node_slot;
                     if (gp_right == parent) {
-                        gp_slot = &gp->right; node_slot = &parent->left; rotated = parent;
+                        gp_slot = &gp->right;
+                        node_slot = &parent->left;
+                        rotated = parent;
                     } else {
-                        gp_slot = &gp->left; node_slot = &node->right;
+                        gp_slot = &gp->left;
+                        node_slot = &node->right;
                     }
                     *gp_slot = *node_slot;
                     (*node_slot)->parent = gp;
@@ -171,20 +227,31 @@ private:
                 UpdateAug(parent);
                 node->parent = ggp;
 
-                if (gp == root) return;
+                if (gp == root)
+                    return;
 
                 N* ggp_left = ggp->left;
                 left_child = ggp_left;
-                if (ggp_left == gp) { left_child = node; ggp->left = node; }
-                else { ggp->right = node; }
+                if (ggp_left == gp) {
+                    left_child = node;
+                    ggp->left = node;
+                } else {
+                    ggp->right = node;
+                }
                 parent = ggp;
             } while (ggp != root);
         }
 
         if (root->left == node) {
-            N* nr = node->right; root->left = nr; nr->parent = root; node->right = root;
+            N* nr = node->right;
+            root->left = nr;
+            nr->parent = root;
+            node->right = root;
         } else {
-            N* nl = node->left; root->right = nl; nl->parent = root; node->left = root;
+            N* nl = node->left;
+            root->right = nl;
+            nl->parent = root;
+            node->left = root;
         }
         node->parent = root->parent;
         root->parent = node;
@@ -197,59 +264,89 @@ private:
         m_root = node;
     }
 
-    iterator make_iter(N* node) const { return iterator(node); }
+    iterator make_iter(N* node) const {
+        return iterator(node);
+    }
 
 public:
-    RmapSplayTree() { Init(); }
+    RmapSplayTree() {
+        Init();
+    }
 
     void Init() {
         m_nil = {};
-        m_nil.parent = &m_nil; m_nil.left = &m_nil; m_nil.right = &m_nil;
-        m_nil.prev = &m_nil; m_nil.next = &m_nil; m_nil.p_adj_free_idx = 0;
+        m_nil.parent = &m_nil;
+        m_nil.left = &m_nil;
+        m_nil.right = &m_nil;
+        m_nil.prev = &m_nil;
+        m_nil.next = &m_nil;
+        m_nil.p_adj_free_idx = 0;
 
         m_head = {};
-        m_head.parent = &m_nil; m_head.left = &m_nil; m_head.right = &m_tail;
-        m_head.next = &m_tail; m_head.prev = &m_tail;
-        m_head.p_start_idx = 0; m_head.p_end_idx = 0; m_head.p_adj_free_idx = 0x7fffffff;
+        m_head.parent = &m_nil;
+        m_head.left = &m_nil;
+        m_head.right = &m_tail;
+        m_head.next = &m_tail;
+        m_head.prev = &m_tail;
+        m_head.p_start_idx = 0;
+        m_head.p_end_idx = 0;
+        m_head.p_adj_free_idx = 0x7fffffff;
 
         m_tail = {};
-        m_tail.parent = &m_head; m_tail.left = &m_nil; m_tail.right = &m_nil;
-        m_tail.next = &m_head; m_tail.prev = &m_head;
-        m_tail.p_start_idx = 0x7fffffff; m_tail.p_end_idx = 0x7fffffff;
+        m_tail.parent = &m_head;
+        m_tail.left = &m_nil;
+        m_tail.right = &m_nil;
+        m_tail.next = &m_head;
+        m_tail.prev = &m_head;
+        m_tail.p_start_idx = 0x7fffffff;
+        m_tail.p_end_idx = 0x7fffffff;
         m_tail.p_adj_free_idx = 0x7fffffff;
 
         m_root = &m_head;
     }
 
-           // ---- Iterators ----
+    // ---- Iterators ----
 
-    iterator begin() const { return iterator(m_head.next); }
-    iterator end() const { return iterator(const_cast<N*>(&m_tail)); }
-    bool IsEmpty() const { return m_head.next == &m_tail; }
+    iterator begin() const {
+        return iterator(m_head.next);
+    }
+    iterator end() const {
+        return iterator(const_cast<N*>(&m_tail));
+    }
+    bool IsEmpty() const {
+        return m_head.next == &m_tail;
+    }
 
-           // ---- Lookup ----
+    // ---- Lookup ----
 
-           /// Find nearest entry to (page_idx, vaddr). Returns end() if tree is empty.
+    /// Find nearest entry to (page_idx, vaddr). Returns end() if tree is empty.
     iterator Find(s32 page_idx, VAddr vaddr) {
         N* cur = m_root;
         N* result = cur;
         while (true) {
             result = cur;
             int cmp = CompareToNode(page_idx, vaddr, cur);
-            if (cmp < 0) cur = cur->left;
-            else if (cmp > 0) cur = cur->right;
-            else return make_iter(result);
-            if (cur == &m_nil) return make_iter(result);
+            if (cmp < 0)
+                cur = cur->left;
+            else if (cmp > 0)
+                cur = cur->right;
+            else
+                return make_iter(result);
+            if (cur == &m_nil)
+                return make_iter(result);
         }
     }
 
-           // ---- Splay ----
+    // ---- Splay ----
 
-    void Splay(OverlapIterator it) { SplayToRoot(it.node()); }
+    void Splay(OverlapIterator it) {
+        SplayToRoot(it.node());
+    }
+    void Splay(iterator it) {
+        SplayToRoot(it.node());
+    }
 
-    void Splay(iterator it) { SplayToRoot(it.node()); }
-
-           // ---- Insert ----
+    // ---- Insert ----
 
     iterator Insert(Entry* entry) {
         N* node = GetNode(entry);
@@ -260,37 +357,50 @@ public:
 
         int cmp = CompareKeys(root->p_start_idx, root->vaddr, node->p_start_idx, node->vaddr);
         if (cmp < 0) {
-            node->next = root->next; root->next->prev = node;
-            node->prev = root; root->next = node;
-            node->right = root->right; root->right->parent = node;
+            node->next = root->next;
+            root->next->prev = node;
+            node->prev = root;
+            root->next = node;
+            node->right = root->right;
+            root->right->parent = node;
             root->right = &m_nil;
             s32 aug = root->left->p_adj_free_idx;
-            if (aug < root->p_end_idx) aug = root->p_end_idx;
+            if (aug < root->p_end_idx)
+                aug = root->p_end_idx;
             root->p_adj_free_idx = aug;
             node->left = root;
         } else {
-            node->prev = root->prev; root->prev->next = node;
-            node->next = root; root->prev = node;
-            node->left = root->left; root->left->parent = node;
+            node->prev = root->prev;
+            root->prev->next = node;
+            node->next = root;
+            root->prev = node;
+            node->left = root->left;
+            root->left->parent = node;
             root->left = &m_nil;
             s32 aug = root->right->p_adj_free_idx;
-            if (aug < root->p_end_idx) aug = root->p_end_idx;
+            if (aug < root->p_end_idx)
+                aug = root->p_end_idx;
             root->p_adj_free_idx = aug;
             node->right = root;
         }
         root->parent = node;
         s32 aug = root->p_adj_free_idx;
-        if (aug < node->p_end_idx) aug = node->p_end_idx;
+        if (aug < node->p_end_idx)
+            aug = node->p_end_idx;
         node->p_adj_free_idx = aug;
         node->parent = &m_nil;
         m_root = node;
         return make_iter(node);
     }
 
-           // ---- Remove ----
+    // ---- Remove ----
 
-    iterator Remove(iterator it) { return RemoveNode(it.node()); }
-    iterator Remove(OverlapIterator it) { return RemoveNode(it.node()); }
+    iterator Remove(iterator it) {
+        return RemoveNode(it.node());
+    }
+    iterator Remove(OverlapIterator it) {
+        return RemoveNode(it.node());
+    }
 
     /// Remove entry, returns iterator to the next entry.
     iterator RemoveNode(N* node) {
@@ -324,36 +434,127 @@ public:
         return iterator(next_node);
     }
 
-           // ---- FindOverlapping ----
+    // ---- FindOverlapping ----
 
-           /// Find all entries whose physical page range overlaps [start_page, end_page).
-           /// Returns an OverlapRange for range-based for iteration.
-           /// Uses intrusive _next chain (matching kernel's approach).
-    OverlapRange FindOverlapping(s32 start_page, s32 end_page) {
-        if (IsEmpty()) return {nullptr};
-
-               // Splay around end_page.
-        auto nearest = Find(end_page, static_cast<VAddr>(0x8000000000000000ULL));
-        SplayToRoot(nearest.node());
-
-        N* root = m_root;
+    /// Find all entries whose physical page range overlaps [start_page, end_page)
+    /// AND whose phys-to-virt offset matches the caller's range.
+    ///
+    /// Translation of vm_object_rmap_entry_delete's search loop (rmap.c:888-924).
+    /// Walks the entire tree from root (no initial splay).
+    /// Uses p_adj_free_idx for pruning, intrusive _next for hit list,
+    /// intrusive _next for deferred right-child stack (no conflict because
+    /// a node is on exactly one list at a time during the search).
+    ///
+    /// Parameters:
+    ///   start_page, end_page — physical page range being freed
+    ///   vaddr_start — virtual start address of the range being freed
+    ///                 (used for phys-to-virt offset matching)
+    ///
+    /// The offset check matches the kernel:
+    ///   p_start_idx - (entry->vaddr >> 14) == start_page - (vaddr_start >> 14)
+    ///
+    /// Returns OverlapRange for range-based for. Also returns remaining
+    /// uncovered page count via out parameter (0 = all pages accounted for).
+    OverlapRange FindOverlapping(s32 start_page, s32 end_page, VAddr vaddr_start,
+                                 s32* remaining_out = nullptr) {
+        s32 remaining = end_page - start_page;
         N* hit_list = nullptr;
 
-               // Check root.
-        if (root->p_start_idx < end_page && start_page < root->p_end_idx) {
-            root->_next = nullptr;
-            hit_list = root;
+        if (IsEmpty()) {
+            if (remaining_out)
+                *remaining_out = remaining;
+            return {nullptr};
         }
 
-               // Search left subtree with p_adj_free_idx pruning.
-        N* cursor = root->left;
-        if (cursor != &m_nil && start_page < cursor->p_adj_free_idx) {
-            N* stack = nullptr;
+        const s64 expected_offset =
+            static_cast<s64>(start_page) - static_cast<s64>(vaddr_start >> 14);
+
+        N* cursor = m_root;
+        N* stack = nullptr;
+
+        // Kernel loop: while(true) { do { while(true) { ... } } while(...); if(!stack) break; }
+        // Flattened into a single loop with explicit stack management.
+        while (true) {
+            // Inner: descend and check nodes.
+            while (true) {
+                const s32 p_start = cursor->p_start_idx;
+
+                // Overlap + offset check (kernel lines 895-908).
+                if (p_start < end_page) {
+                    const s64 entry_offset =
+                        static_cast<s64>(p_start) - static_cast<s64>(cursor->vaddr >> 14);
+                    if (entry_offset == expected_offset) {
+                        const s32 p_end = cursor->p_end_idx;
+                        if (start_page < p_end) {
+                            // Hit — add to list.
+                            cursor->_next = hit_list;
+                            hit_list = cursor;
+
+                            // Update remaining pages.
+                            s32 clamped_end = (end_page < p_end) ? end_page : p_end;
+                            s32 clamped_start = (start_page <= p_start) ? p_start : start_page;
+                            remaining += (clamped_start - clamped_end);
+
+                            if (remaining < 1) {
+                                // All pages accounted for — stop early.
+                                if (remaining_out)
+                                    *remaining_out = remaining;
+                                return {hit_list};
+                            }
+                        }
+                    }
+                }
+
+                // Try descend left (kernel lines 910-917).
+                N* right_child = cursor->right;
+                if (cursor->left != &m_nil && cursor->left->p_adj_free_idx > start_page) {
+                    // Left subtree might have overlaps — descend left.
+                    // Push right child onto deferred stack if it's not nil.
+                    if (right_child != &m_nil) {
+                        right_child->_next = stack;
+                        stack = right_child;
+                    }
+                    cursor = cursor->left;
+                } else {
+                    // Left pruned — try right (kernel lines 918-920).
+                    cursor = right_child;
+                    break;
+                }
+            }
+
+            // Outer: if right child was nil (== header/sentinel), pop from stack.
+            // Kernel: do { ... } while (next2 != pvVar1); then pop.
+            while (cursor == &m_nil) {
+                if (stack == nullptr) {
+                    if (remaining_out)
+                        *remaining_out = remaining;
+                    return {hit_list};
+                }
+                // Pop from stack — do NOT clear _next (matches kernel line 922-923).
+                cursor = stack;
+                stack = stack->_next;
+            }
+        }
+    }
+
+    /// Simplified FindOverlapping without offset check.
+    /// Used by CheckRmapAlias where we want all overlaps regardless of vaddr offset.
+    OverlapRange FindOverlappingAll(s32 start_page, s32 end_page) {
+        N* hit_list = nullptr;
+
+        if (IsEmpty())
+            return {nullptr};
+
+        N* cursor = m_root;
+        N* stack = nullptr;
+
+        while (true) {
             while (true) {
                 if (cursor->p_start_idx < end_page && start_page < cursor->p_end_idx) {
                     cursor->_next = hit_list;
                     hit_list = cursor;
                 }
+
                 N* right_child = cursor->right;
                 if (cursor->left != &m_nil && cursor->left->p_adj_free_idx > start_page) {
                     if (right_child != &m_nil) {
@@ -361,28 +562,34 @@ public:
                         stack = right_child;
                     }
                     cursor = cursor->left;
-                } else if (right_child != &m_nil && start_page < right_child->p_adj_free_idx) {
-                    cursor = right_child;
                 } else {
-                    if (!stack) break;
-                    cursor = stack;
-                    stack = stack->_next;
-                    cursor->_next = nullptr;
+                    cursor = right_child;
+                    break;
                 }
             }
-        }
 
-        return {hit_list};
+            while (cursor == &m_nil) {
+                if (stack == nullptr) {
+                    return {hit_list};
+                }
+                cursor = stack;
+                stack = stack->_next;
+            }
+        }
     }
 
     void UpdateAug(OverlapIterator it) {
         UpdateAug(it.node());
     }
 
-           // ---- Direct access ----
+    // ---- Direct access ----
 
-    N* Nil() { return &m_nil; }
-    N* Root() { return m_root; }
+    N* Nil() {
+        return &m_nil;
+    }
+    N* Root() {
+        return m_root;
+    }
 
 private:
     N m_nil{};
@@ -394,8 +601,12 @@ private:
 template <typename T>
 struct InheritRmapTraits {
     using EntryType = T;
-    static RmapNode* GetNode(T* entry) { return static_cast<RmapNode*>(entry); }
-    static T* FromNode(RmapNode* node) { return static_cast<T*>(node); }
+    static RmapNode* GetNode(T* entry) {
+        return static_cast<RmapNode*>(entry);
+    }
+    static T* FromNode(RmapNode* node) {
+        return static_cast<T*>(node);
+    }
 };
 
 } // namespace Core

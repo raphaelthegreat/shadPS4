@@ -169,8 +169,16 @@ s32 MemoryManager::PoolUnmap(VAddr virtual_addr, u64 size) {
 
 s32 MemoryManager::MapMemory(VAddr* out_addr, u64 size, MemoryProt prot, MemoryMapFlags flags,
                              s32 fd, u64 offset, std::string_view name) {
+    if (True(flags & MemoryMapFlags::Sanitizer) && !EmulatorSettings.IsDevKit()) {
+        return ORBIS_KERNEL_ERROR_EINVAL;
+    }
+
     if (size == 0) {
         return ORBIS_OK;
+    }
+
+    if (True(flags & (MemoryMapFlags::Anon | MemoryMapFlags::Void)) && (offset != 0 || fd != -1)) {
+        return ORBIS_KERNEL_ERROR_EINVAL;
     }
 
     if (True(prot & MemoryProt::CpuWrite)) {
@@ -188,7 +196,10 @@ s32 MemoryManager::MapMemory(VAddr* out_addr, u64 size, MemoryProt prot, MemoryM
 
     VAddr addr = *out_addr;
     const u64 page_offset = offset & PAGE_MASK;
-    size = (size + PAGE_MASK + page_offset) & ~PAGE_MASK;
+    offset -= page_offset;
+
+    size += page_offset;
+    size = Common::AlignUpPow2(size, PAGE_SIZE);
 
     // Resolve the address hint.
     if (True(flags & MemoryMapFlags::Fixed)) {
@@ -205,8 +216,6 @@ s32 MemoryManager::MapMemory(VAddr* out_addr, u64 size, MemoryProt prot, MemoryM
             addr = DEFAULT_MAPPING_BASE;
         }
     }
-
-    offset &= ~PAGE_MASK;
 
     MemoryProt max_prot = MemoryProt::NoAccess;
     std::shared_ptr<VmObject> object = nullptr;
@@ -230,6 +239,9 @@ s32 MemoryManager::MapMemory(VAddr* out_addr, u64 size, MemoryProt prot, MemoryM
         ASSERT(fd != -1);
         auto* table = Common::Singleton<Core::FileSys::HandleTable>::Instance();
         auto* file = table->GetFile(fd);
+        if (!file) {
+            return ORBIS_KERNEL_ERROR_EBADF;
+        }
         switch (file->type) {
         case Core::FileSys::FileType::Device: {
             max_prot = MemoryProt::All;
@@ -240,6 +252,31 @@ s32 MemoryManager::MapMemory(VAddr* out_addr, u64 size, MemoryProt prot, MemoryM
         }
         case Core::FileSys::FileType::Regular: {
             max_prot = MemoryProt::CpuReadWrite;
+            /*
+             *    is_read = fp->f_flag & 1;
+    _prot = VM_PROT_GPU_READ|VM_PROT_READ;
+    if (is_read == 0) {
+      _prot = 0;
+    }
+    if ((PROT_READ == 0 && (_prot2 & 0x11) == 0) || is_read) {
+      if ((_flags.int & MAP_SHARED) == 0) {
+        if ((handle->v_type != VCHR) || is_write) {
+          cap_maxprot |= (VM_PROT_GPU_WRITE|VM_PROT_WRITE);
+          _prot |= (VM_PROT_GPU_WRITE|VM_PROT_WRITE);
+        }
+      }
+      else {
+        if (!is_write) {
+          if ((_prot2 & 0x22) == 0) goto LAB_ffffffff822ed812;
+          goto switchD_ffffffff822ed528_done;
+        }
+        _prot |= (VM_PROT_GPU_WRITE|VM_PROT_WRITE);
+      }
+LAB_ffffffff822ed812:
+      handle_type = (_flags.int & MAP_SELF) ? OBJT_SELF : OBJT_VNODE;
+      break;
+    }
+    */
             /*if (False(file->f.GetAccessMode() & Common::FS::FileAccessMode::Write) &&
                 False(file->f.GetAccessMode() & Common::FS::FileAccessMode::Append)) {
                 // If the file does not have write access, ensure prot does not contain write
@@ -250,7 +287,8 @@ s32 MemoryManager::MapMemory(VAddr* out_addr, u64 size, MemoryProt prot, MemoryM
             object = std::make_shared<VmObject>();
             object->type = VmObjectType::Vnode;
             // Files in system folders don't count towards the budget.
-            const bool is_app_file = file->m_guest_name.contains("app0/") || file->m_guest_name.contains("download0/");
+            const bool is_app_file =
+                file->m_guest_name.contains("app0/") || file->m_guest_name.contains("download0/");
             object->budget_ptype = is_app_file ? BudgetPtype::BigApp : BudgetPtype::Invalid;
             object->vnode.host_fd = file->f.GetFileMapping();
             break;
@@ -273,7 +311,8 @@ s32 MemoryManager::MapMemory(VAddr* out_addr, u64 size, MemoryProt prot, MemoryM
     }
 
     if (/*m_wire_on_map &&*/ False(flags & (MemoryMapFlags::Void | MemoryMapFlags::Sanitizer))) {
-        if (s32 ret = vm_map.Wire(addr, addr + size, VmMapWireFlags::User | VmMapWireFlags::HolesOk)) {
+        if (s32 ret =
+                vm_map.Wire(addr, addr + size, VmMapWireFlags::User | VmMapWireFlags::HolesOk)) {
             UnmapMemory(addr, size);
             return ret;
         }
@@ -283,9 +322,11 @@ s32 MemoryManager::MapMemory(VAddr* out_addr, u64 size, MemoryProt prot, MemoryM
     return ORBIS_OK;
 }
 
-s32 MemoryManager::UnmapMemory(VAddr virtual_addr, u64 size) {
+s32 MemoryManager::UnmapMemory(VAddr addr, u64 size) {
     std::scoped_lock lk{vm_map.lock};
-    return vm_map.Delete(virtual_addr, virtual_addr + size);
+    size = Common::AlignUpPow2((addr & 0x3fff) + size, PAGE_SIZE);
+    addr = Common::AlignDownPow2(addr, PAGE_SIZE);
+    return vm_map.Delete(addr, addr + size);
 }
 
 s32 MemoryManager::QueryProtection(VAddr addr, VAddr* out_start, VAddr* out_end, u32* out_prot) {
@@ -336,7 +377,8 @@ s32 MemoryManager::Protect(VAddr start, u64 size, MemoryProt new_prot) {
     return vm_map.Protect(dmem, start, start + size, new_prot, 0);
 }
 
-s32 MemoryManager::ProtectType(VAddr start, u64 size, DmemMemoryType new_mtype, MemoryProt new_prot) {
+s32 MemoryManager::ProtectType(VAddr start, u64 size, DmemMemoryType new_mtype,
+                               MemoryProt new_prot) {
     if (new_mtype > DmemMemoryType::WbGarlic || new_mtype < DmemMemoryType::WbOnion) {
         return ORBIS_KERNEL_ERROR_EINVAL;
     }

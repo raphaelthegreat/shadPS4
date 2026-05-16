@@ -267,7 +267,7 @@ public:
         // Tree check — verify no node in the tree has null prev/next
         // (which would mean it was already unlinked from the list)
         if (m_root) {
-            //VerifyNode(m_root);
+            // VerifyNode(m_root);
         }
     }
 

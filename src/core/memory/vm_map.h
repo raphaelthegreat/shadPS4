@@ -194,7 +194,8 @@ public:
 
     s32 Protect(DmemManager& dmem, VAddr start, VAddr end, MemoryProt new_prot, bool set_max);
 
-    s32 ProtectType(DmemManager& dmem, VAddr start, VAddr end, DmemMemoryType mtype, MemoryProt new_prot);
+    s32 ProtectType(DmemManager& dmem, VAddr start, VAddr end, DmemMemoryType mtype,
+                    MemoryProt new_prot);
 
     s32 Wire(VAddr start, VAddr end, VmMapWireFlags flags);
 

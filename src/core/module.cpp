@@ -154,7 +154,8 @@ void Module::LoadModuleToMemory(u32& max_tls_index) {
 #ifdef ARCH_X86_64
     // Initialize trampoline generator.
     VAddr trampoline_addr = base_virtual_addr + aligned_base_size;
-    ASSERT(address_space.Map(trampoline_addr, TrampolineSize, -1, true) == reinterpret_cast<void*>(trampoline_addr));
+    ASSERT(address_space.Map(trampoline_addr, TrampolineSize, -1, true) ==
+           reinterpret_cast<void*>(trampoline_addr));
     RegisterPatchModule(reinterpret_cast<void*>(base_virtual_addr), aligned_base_size,
                         reinterpret_cast<void*>(trampoline_addr), TrampolineSize);
 #endif
@@ -188,9 +189,8 @@ void Module::LoadModuleToMemory(u32& max_tls_index) {
 
             // Map module segments
             // const auto memory_type = IsSystemLib() ? VMAType::Code : VMAType::Flexible;
-            s32 result =
-                vm_map.MapMemory(&segment_vaddr, segment_size, segment_prot, MemoryProt::All,
-                                  MemoryMapFlags::Fixed, object, i, name);
+            s32 result = vm_map.MapMemory(&segment_vaddr, segment_size, segment_prot,
+                                          MemoryProt::All, MemoryMapFlags::Fixed, object, i, name);
             ASSERT_MSG(result == ORBIS_OK, "Failed to map segment at {:#x} for module {}",
                        segment_vaddr, name);
             elf.LoadSegment(segment_vaddr, phdr.p_offset, phdr.p_filesz);
