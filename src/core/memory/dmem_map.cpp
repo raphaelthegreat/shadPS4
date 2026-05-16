@@ -27,7 +27,7 @@ void DmemManager::Init(u64 dmem_size) {
     m_dmem_object->flags |= VmObjectFlags::Dmem;
 }
 
-s32 DmemManager::Allocate(PAddr search_start, PAddr search_end, u64 size, u64 alignment, s32 mtype,
+s32 DmemManager::Allocate(PAddr search_start, PAddr search_end, u64 size, u64 alignment, u32 mtype,
                           PAddr* out_addr) {
     if (s64(search_start) < 0 || s64(search_end) < 0 || s64(size) < 1 || 10 < mtype ||
         1 < std::popcount(alignment)) {
@@ -83,10 +83,14 @@ s32 DmemManager::Free(PAddr start, u64 size, bool is_checked) {
     auto [entry, found] = m_tree.LookupEntry(start);
 
     if (is_checked) {
-        for (auto temp = entry; temp != m_tree.end() && temp->end < end; ++temp) {
-            if (!temp->IsAllocated()) {
-                return ORBIS_KERNEL_ERROR_EACCES;
+        auto temp = entry;
+        PAddr cursor = start;
+        while (temp != m_tree.end() && cursor < end) {
+            if (temp->start > cursor || temp->end <= cursor || !temp->IsAllocated()) {
+                return ORBIS_KERNEL_ERROR_ENOENT;
             }
+            cursor = temp->end;
+            ++temp;
         }
     }
 
@@ -325,7 +329,7 @@ s32 DmemManager::Query(PAddr addr, bool find_next, PAddr* start_out, PAddr* end_
 
 s32 DmemManager::QueryAvailable(PAddr search_start, PAddr search_end, u64 alignment,
                                 PAddr* phys_addr_out, u64* size_out) {
-    /*if (alignment & (alignment - 1)) {
+    if (alignment & (alignment - 1)) {
         return ORBIS_KERNEL_ERROR_EINVAL;
     }
     alignment = std::max(alignment, PAGE_SIZE);
@@ -351,7 +355,8 @@ s32 DmemManager::QueryAvailable(PAddr search_start, PAddr search_end, u64 alignm
     };
 
     // Splay to the search end. Check the gap between entry->end and the end its free space.
-    auto [entry, found] = m_tree.LookupEntry(limit);
+    auto [it, found] = m_tree.LookupEntry(limit);
+    auto* entry = std::addressof(*it);
 
     if (limit >= entry->end) {
         update_best(entry->end, entry->end + entry->adj_free);
@@ -420,10 +425,10 @@ s32 DmemManager::QueryAvailable(PAddr search_start, PAddr search_end, u64 alignm
     }
 
     if (best_size == 0) {
-        return ORBIS_KERNEL_ERROR_EAGAIN;
+        return ORBIS_KERNEL_ERROR_ENOMEM;
     }
     *phys_addr_out = best_addr;
-    *size_out = best_size;*/
+    *size_out = best_size;
     return ORBIS_OK;
 }
 
@@ -726,6 +731,7 @@ void DmemManager::UnmapVirtualMappings(Tree::iterator entry) {
                 tree.Insert(std::addressof(*hit));
             }
 
+            LOG_WARNING(Kernel_Vmm, "Unmap addr={:#x}, size={:#x}", unmap_vaddr, unmap_size);
             std::scoped_lock map_lock{rmap->vmspace->lock};
             rmap->vmspace->Delete(unmap_vaddr, unmap_vaddr + unmap_size);
         }

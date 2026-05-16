@@ -850,6 +850,10 @@ s32 PS4_SYSV_ABI posix_ftruncate(s32 fd, s64 length) {
     }
 
     file->f.SetSize(length);
+    const auto align_len = Common::AlignUpPow2(length, 16_KB);
+    if (length != align_len) {
+        file->f.SetSize(align_len);
+    }
     return ORBIS_OK;
 }
 

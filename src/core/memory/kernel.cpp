@@ -25,7 +25,7 @@ MemoryManager::MemoryManager()
     const VAddr min_offset = regions.begin()->lower();
     const VAddr max_offset = regions.rbegin()->upper();
     vm_map.Init(min_offset, max_offset, sdk_version);
-    flex_pool.Init(ORBIS_KERNEL_TOTAL_MEM, ORBIS_KERNEL_FLEXIBLE_MEMORY_SIZE);
+    flex_pool.Init(ORBIS_KERNEL_TOTAL_MEM, 8_GB - ORBIS_KERNEL_TOTAL_MEM);
     budget.mlock_limit.fill(ORBIS_KERNEL_FLEXIBLE_MEMORY_SIZE);
 }
 
@@ -178,6 +178,14 @@ s32 MemoryManager::MapMemory(VAddr* out_addr, u64 size, MemoryProt prot, MemoryM
         prot |= MemoryProt::CpuRead;
     }
 
+    if (True(flags & MemoryMapFlags::Stack)) {
+        if ((prot & (MemoryProt::CpuReadWrite)) != MemoryProt::CpuReadWrite || fd != -1) {
+            return ORBIS_KERNEL_ERROR_EINVAL;
+        }
+        flags |= MemoryMapFlags::Anon;
+        offset = 0;
+    }
+
     VAddr addr = *out_addr;
     const u64 page_offset = offset & PAGE_MASK;
     size = (size + PAGE_MASK + page_offset) & ~PAGE_MASK;
@@ -210,6 +218,7 @@ s32 MemoryManager::MapMemory(VAddr* out_addr, u64 size, MemoryProt prot, MemoryM
         max_prot = MemoryProt::All;
         object = std::make_shared<VmObject>();
         object->type = VmObjectType::Default;
+        object->budget_ptype = BudgetPtype::BigApp;
         if (!flex_pool.Allocate(size, object->anon.backing)) {
             LOG_ERROR(
                 Kernel_Vmm,
@@ -222,31 +231,37 @@ s32 MemoryManager::MapMemory(VAddr* out_addr, u64 size, MemoryProt prot, MemoryM
         auto* table = Common::Singleton<Core::FileSys::HandleTable>::Instance();
         auto* file = table->GetFile(fd);
         switch (file->type) {
-        case Core::FileSys::FileType::Device:
+        case Core::FileSys::FileType::Device: {
             max_prot = MemoryProt::All;
             if (s32 ret = file->device->mmap(offset, size, prot, &max_prot, flags, &object)) {
                 return ret;
             }
             break;
-        case Core::FileSys::FileType::Regular:
+        }
+        case Core::FileSys::FileType::Regular: {
             max_prot = MemoryProt::CpuReadWrite;
-            if (False(file->f.GetAccessMode() & Common::FS::FileAccessMode::Write) &&
+            /*if (False(file->f.GetAccessMode() & Common::FS::FileAccessMode::Write) &&
                 False(file->f.GetAccessMode() & Common::FS::FileAccessMode::Append)) {
                 // If the file does not have write access, ensure prot does not contain write
                 // permissions. On real hardware, these mappings succeed, but the memory cannot be
                 // written to.
                 max_prot &= ~MemoryProt::CpuWrite;
-            }
+            }*/
             object = std::make_shared<VmObject>();
             object->type = VmObjectType::Vnode;
+            // Files in system folders don't count towards the budget.
+            const bool is_app_file = file->m_guest_name.contains("app0/") || file->m_guest_name.contains("download0/");
+            object->budget_ptype = is_app_file ? BudgetPtype::BigApp : BudgetPtype::Invalid;
             object->vnode.host_fd = file->f.GetFileMapping();
             break;
-        case Core::FileSys::FileType::Blockpool:
+        }
+        case Core::FileSys::FileType::Blockpool: {
             max_prot = MemoryProt::All;
             object = std::make_shared<VmObject>();
             object->type = VmObjectType::Blockpool;
             object->blockpool.blocks.resize(Blockpool::ToBlocks(size));
             break;
+        }
         default:
             max_prot = MemoryProt::All;
             break;
@@ -264,7 +279,7 @@ s32 MemoryManager::MapMemory(VAddr* out_addr, u64 size, MemoryProt prot, MemoryM
         }
     }
 
-    *out_addr = addr;
+    *out_addr = addr + page_offset;
     return ORBIS_OK;
 }
 

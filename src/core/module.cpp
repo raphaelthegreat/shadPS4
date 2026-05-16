@@ -95,7 +95,7 @@ ModuleBudgetInfo ClassifyModule(std::filesystem::path path, BudgetPtype process_
 
     const auto filename = path.filename().string();
     const bool is_libc_or_fios = (filename == "libc.sprx" || filename == "libSceFios2.sprx");
-    const bool is_system = path.string().contains("/sce_module/");
+    const bool is_system = path.string().contains("/sys_modules/");
     if (is_system && !is_libc_or_fios) {
         // System library.
         info.budget_ptype = BudgetPtype::System;
@@ -162,6 +162,7 @@ void Module::LoadModuleToMemory(u32& max_tls_index) {
     // Create SELF vm object
     auto object = std::make_shared<VmObject>();
     object->type = VmObjectType::Self;
+    object->budget_ptype = BudgetPtype::BigApp;
 
     LOG_INFO(Core_Linker, "======== Load Module to Memory ========");
     LOG_INFO(Core_Linker, "base_virtual_addr ......: {:#018x}", base_virtual_addr);
@@ -195,8 +196,14 @@ void Module::LoadModuleToMemory(u32& max_tls_index) {
             elf.LoadSegment(segment_vaddr, phdr.p_offset, phdr.p_filesz);
 
             if (mod_info.wire) {
-                vm_map.Wire(segment_vaddr, segment_vaddr + segment_size, VmMapWireFlags::User);
+                // HACK
+                const auto size = Common::AlignUpPow2(segment_size, 16_KB);
+                std::vector<Core::PhysRange> ranges;
+                memory->GetFlexiblePool().Allocate(size, ranges);
+                vm_map.Wire(segment_vaddr, segment_vaddr + size, VmMapWireFlags::User);
             }
+
+            ASSERT(memory->GetFlexiblePool().GetUsedSize() == memory->budget.mlock_used[1]);
         }
         if (info.num_segments < 4) {
             auto& segment = info.segments[info.num_segments++];

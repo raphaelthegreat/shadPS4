@@ -7,6 +7,7 @@
 
 #include "common/enum.h"
 #include "common/types.h"
+#include "core/memory/budget.h"
 #include "core/memory/blockpool.h"
 #include "core/memory/flexible_pool.h"
 
@@ -38,6 +39,7 @@ struct VmObject {
     VmObjectType type;
     u64 size;
     VmObjectFlags flags{VmObjectFlags::OneMapping};
+    BudgetPtype budget_ptype{BudgetPtype::Invalid};
     struct {
         std::vector<PhysRange> backing;
     } anon;

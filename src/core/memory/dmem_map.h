@@ -133,7 +133,7 @@ public:
 
     void Init(u64 dmem_size);
 
-    s32 Allocate(PAddr search_start, PAddr search_end, u64 size, u64 alignment, s32 mtype,
+    s32 Allocate(PAddr search_start, PAddr search_end, u64 size, u64 alignment, u32 mtype,
                  PAddr* out_addr);
 
     s32 Free(PAddr start, u64 size, bool is_checked);

@@ -56,6 +56,10 @@ public:
         return dmem;
     }
 
+    FlexibleMemoryPool& GetFlexiblePool() {
+        return flex_pool;
+    }
+
     VmMap& GetVmMap() {
         return vm_map;
     }
@@ -69,7 +73,7 @@ public:
     }
 
     u64 GetAvailableFlexibleSize() const {
-        return flex_pool.GetAvailableSize();
+        return budget.mlock_limit[u32(BudgetPtype::BigApp)] - budget.mlock_used[u32(BudgetPtype::BigApp)];
     }
 
     VAddr SystemReservedVirtualBase() noexcept {
@@ -115,7 +119,7 @@ public:
 private:
     void UnmapEntry(VmMapEntry* entry);
 
-private:
+public:
     AddressSpace impl;
     BudgetState budget;
     Blockpool blockpool;

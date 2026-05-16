@@ -62,7 +62,7 @@ public:
 
     using iterator = Iterator;
 
-           /// Overlap list iterator — walks the _next chain from FindOverlapping.
+    /// Overlap list iterator — walks the _next chain from FindOverlapping.
     class OverlapIterator {
     public:
         using value_type = Entry;

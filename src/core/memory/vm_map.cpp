@@ -134,6 +134,17 @@ s32 VmMap::MapMemory(VAddr* out_addr, u64 size, MemoryProt prot, MemoryProt max_
         eflags |= VmEntryFlags::NoFault;
     }
 
+    bool is_system_map{};
+    const bool cow_system = True(flags & (MemoryMapFlags::System | MemoryMapFlags::Sanitizer));
+    BudgetPtype budget_ptype{BudgetPtype::Invalid};
+    if (!is_system_map) {
+        if (object) {
+            budget_ptype = object->budget_ptype;
+        } else {
+            budget_ptype = cow_system ? BudgetPtype::System : /*td_proc->budget_ptype*/ BudgetPtype::BigApp;
+        }
+    }
+
     VmMap::Tree::iterator entry;
     {
         std::scoped_lock lk{lock};
@@ -162,6 +173,7 @@ s32 VmMap::MapMemory(VAddr* out_addr, u64 size, MemoryProt prot, MemoryProt max_
 
         auto [prev, found] = LookupEntry(addr);
         entry = Insert(prev, addr, addr + size, object, offset, prot, max_prot, eflags, name);
+        entry->budget_ptype = budget_ptype;
 
         if (object) {
             switch (object->type) {
@@ -169,7 +181,7 @@ s32 VmMap::MapMemory(VAddr* out_addr, u64 size, MemoryProt prot, MemoryProt max_
                 impl.Map(addr, size, offset, True(prot & MemoryProt::CpuExec));
                 break;
             case VmObjectType::Vnode:
-                impl.MapFile(addr, size, offset, static_cast<u32>(prot), object->vnode.host_fd);
+                impl.MapFile(addr, size, offset, flags, static_cast<u32>(prot & max_prot), object->vnode.host_fd);
                 break;
             case VmObjectType::Default: {
                 u64 map_offset = 0;
@@ -230,6 +242,9 @@ s32 VmMap::Delete(VAddr start, VAddr end) {
         } else {
             if (entry->end > end) {
                 ClipEnd(entry, end);
+            }
+            if (entry->wired_count != 0) {
+                UnwireRange(entry, entry->end, {});
             }
             if (entry->IsGpuMapping()) {
                 rasterizer->UnmapMemory(entry->start, entry->Size());
@@ -498,7 +513,7 @@ s32 VmMap::Wire(VAddr start, VAddr end, VmMapWireFlags flags) {
                 if (budget.ReserveWire(entry->budget_ptype, entry->Size())) {
                     entry->wired_count = -1;
                     UnwireRange(first_entry, entry->end, flags);
-                    return ORBIS_KERNEL_ERROR_ENOMEM;
+                    return ORBIS_KERNEL_ERROR_EINVAL;
                 }
                 entry->eflags |= VmEntryFlags::InBudget;
             }

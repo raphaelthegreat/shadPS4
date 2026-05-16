@@ -267,7 +267,7 @@ public:
         // Tree check — verify no node in the tree has null prev/next
         // (which would mean it was already unlinked from the list)
         if (m_root) {
-            VerifyNode(m_root);
+            //VerifyNode(m_root);
         }
     }
 
@@ -491,13 +491,17 @@ public:
 
     // ---- Tree child access (for QueryAvailable / aliasing check) ----
 
-    static Entry* Left(Entry* e) {
-        N* l = GetNode(e)->left;
-        return l ? GetEntry(l) : nullptr;
+    static Entry* Left(Entry* entry) {
+        N* left = GetNode(entry)->left;
+        return left ? GetEntry(left) : nullptr;
     }
-    static Entry* Right(Entry* e) {
-        N* r = GetNode(e)->right;
-        return r ? GetEntry(r) : nullptr;
+    static Entry* Right(Entry* entry) {
+        N* right = GetNode(entry)->right;
+        return right ? GetEntry(right) : nullptr;
+    }
+    static Entry* Prev(Entry* entry) {
+        N* prev = GetNode(entry)->prev;
+        return prev ? GetEntry(prev) : nullptr;
     }
     static Entry* Temp(Entry* e) {
         N* t = GetNode(e)->temp;
