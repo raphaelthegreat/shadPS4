@@ -202,8 +202,6 @@ void Module::LoadModuleToMemory(u32& max_tls_index) {
                 memory->GetFlexiblePool().Allocate(size, ranges);
                 vm_map.Wire(segment_vaddr, segment_vaddr + size, VmMapWireFlags::User);
             }
-
-            ASSERT(memory->GetFlexiblePool().GetUsedSize() == memory->budget.mlock_used[1]);
         }
         if (info.num_segments < 4) {
             auto& segment = info.segments[info.num_segments++];

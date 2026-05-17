@@ -314,10 +314,7 @@ s32 DmemManager::Query(PAddr addr, bool find_next, PAddr* start_out, PAddr* end_
     if (!find_next) {
         return ORBIS_KERNEL_ERROR_EACCES;
     }
-    auto next = found ? std::next(entry) : entry;
-    if (next == m_tree.end() && found) {
-        next = std::next(entry);
-    }
+    auto next = std::next(entry);
     while (next != m_tree.end()) {
         if (next->IsAllocated()) {
             *start_out = next->start;
@@ -678,9 +675,6 @@ void DmemManager::FreeEntry(Tree::iterator entry) {
 }
 
 void DmemManager::UnmapVirtualMappings(Tree::iterator entry) {
-    if (entry->start == 0x10000) {
-        printf("bad\n");
-    }
     const s32 start_page = entry->start >> PAGE_SHIFT;
     const s32 end_page = entry->end >> PAGE_SHIFT;
 
@@ -698,8 +692,6 @@ void DmemManager::UnmapVirtualMappings(Tree::iterator entry) {
         for (auto hit = overlaps.begin(); hit != overlaps.end(); ++hit) {
             const s32 entry_start = hit->p_start_idx;
             const s32 entry_end = hit->p_end_idx;
-            LOG_WARNING(Kernel_Vmm, "Overlap addr={:#x}, size={:#x}, phys_addr={:#x}", hit->vaddr,
-                        (entry_end - entry_start) * PAGE_SIZE, hit->p_start_idx * PAGE_SIZE);
 
             // Compute the overlap in page indices.
             const s32 overlap_start = std::max(start_page, entry_start);
@@ -711,7 +703,6 @@ void DmemManager::UnmapVirtualMappings(Tree::iterator entry) {
             if (entry_start >= start_page && entry_end <= end_page) {
                 // Rmap entry is fully contained in the freed range, remove it entirely and delete
                 // the VA mapping.
-                LOG_WARNING(Kernel_Vmm, "Entry is contained by free range");
                 tree.Remove(hit);
                 delete std::addressof(*hit);
             } else if (entry_start < start_page && entry_end > end_page) {
@@ -721,7 +712,6 @@ void DmemManager::UnmapVirtualMappings(Tree::iterator entry) {
                 new_entry->vaddr = hit->vaddr + (end_page - entry_start) * PAGE_SIZE;
                 new_entry->p_start_idx = end_page;
                 new_entry->p_end_idx = entry_end;
-                LOG_WARNING(Kernel_Vmm, "Entry contains free range");
 
                 tree.Splay(hit);
                 hit->p_end_idx = start_page;
@@ -730,24 +720,18 @@ void DmemManager::UnmapVirtualMappings(Tree::iterator entry) {
             } else if (entry_start < start_page) {
                 // Freed entry overlaps at the end of the rmap entry, trim entry to [entry_start,
                 // start_page).
-                LOG_WARNING(Kernel_Vmm, "End overlap");
                 tree.Splay(hit);
                 hit->p_end_idx = start_page;
                 tree.UpdateAug(hit);
             } else {
                 // Freed entry overlaps at the start of the rmap entry, trim entry to [end_page,
                 // entry_end).
-                LOG_WARNING(Kernel_Vmm, "Begin overlap");
                 tree.Remove(hit);
                 hit->vaddr += (end_page - entry_start) * PAGE_SIZE;
                 hit->p_start_idx = end_page;
                 tree.Insert(std::addressof(*hit));
             }
 
-            LOG_WARNING(Kernel_Vmm, "Unmap addr={:#x}, size={:#x}", unmap_vaddr, unmap_size);
-            if (unmap_vaddr == 0x200005000ULL && unmap_size == 0x10000) {
-                printf("bad\n");
-            }
             std::scoped_lock map_lock{rmap->vmspace->lock};
             rmap->vmspace->Delete(unmap_vaddr, unmap_vaddr + unmap_size);
         }
