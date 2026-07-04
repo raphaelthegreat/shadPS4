@@ -42,9 +42,60 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_,
         liverpool->BindRasterizer(this);
     }
     memory->SetRasterizer(this);
+    scheduler.SetOnSubmitCallback([this](SubmitInfo& info) { FlushGpuMemoryMaps(info); });
 }
 
 Rasterizer::~Rasterizer() = default;
+
+void Rasterizer::FlushGpuMemoryMaps(SubmitInfo& info) {
+    std::scoped_lock lock{mapped_ranges_mutex};
+    if (pending_mapped_ranges.IsEmpty()) {
+        return;
+    }
+    boost::container::small_vector<vk::SparseMemoryBind, 8> binds;
+    const auto& address_space = buffer_cache.GetAddressSpace();
+    auto* master_semaphore = scheduler.GetMasterSemaphore();
+    pending_mapped_ranges.ForEach([&](VAddr start, VAddr end) {
+        LOG_WARNING(Render, "Binding backing sparse bo_addr={:#x}, end={:#x}, size={:#x}",
+                    VAddr(address_space.buffer.bda_addr) + start, VAddr(address_space.buffer.bda_addr) + end, end - start);
+        const u64 size = end - start;
+        const vk::MemoryAllocateInfo allocate_info = {
+            .allocationSize = size,
+            .memoryTypeIndex = address_space.mem_type,
+        };
+        const auto memory = Check(instance.GetDevice().allocateMemory(allocate_info));
+        auto& bind = binds.emplace_back();
+        bind.resourceOffset = start;
+        bind.size = size;
+        bind.memory = memory;
+        bind.memoryOffset = 0;
+    });
+    pending_mapped_ranges.Clear();
+    const vk::SparseBufferMemoryBindInfo buf_bind = {
+        .buffer = address_space.Handle(),
+        .bindCount = static_cast<u32>(binds.size()),
+        .pBinds = binds.data(),
+    };
+    const auto signal_sema = master_semaphore->Handle();
+    const u64 signal_value = master_semaphore->NextTick();
+    const vk::TimelineSemaphoreSubmitInfo timeline_si = {
+        .waitSemaphoreValueCount = 0u,
+        .pWaitSemaphoreValues = nullptr,
+        .signalSemaphoreValueCount = 1u,
+        .pSignalSemaphoreValues = &signal_value,
+    };
+    const vk::BindSparseInfo sparse_info = {
+        .pNext = &timeline_si,
+        .bufferBindCount = 1u,
+        .pBufferBinds = &buf_bind,
+        .signalSemaphoreCount = 1u,
+        .pSignalSemaphores = &signal_sema,
+    };
+    Check(instance.GetGraphicsQueue().bindSparse(sparse_info));
+
+    // Ensure the following commands wait for the sparse binds so no unmapped memory is accessed
+    info.AddWait(signal_sema, signal_value);
+}
 
 void Rasterizer::CpSync() {
     scheduler.EndRendering();
@@ -386,13 +437,8 @@ void Rasterizer::Finish() {
 }
 
 void Rasterizer::OnSubmit() {
-    if (fault_process_pending) {
-        fault_process_pending = false;
-        buffer_cache.ProcessFaultBuffer();
-    }
     texture_cache.ProcessDownloadImages();
     texture_cache.RunGarbageCollector();
-    buffer_cache.RunGarbageCollector();
 }
 
 bool Rasterizer::BindResources(const Pipeline* pipeline) {
@@ -428,9 +474,9 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
         // We only use fault buffer for DMA right now.
         Common::RecursiveSharedLock lock{mapped_ranges_mutex};
         for (auto& range : mapped_ranges) {
-            buffer_cache.SynchronizeBuffersInRange(range.lower(), range.upper() - range.lower());
+            buffer_cache.SynchronizeMemory(range.lower(), range.upper() - range.lower(),
+                                           false, false);
         }
-        fault_process_pending = true;
     }
 
     return true;
@@ -599,41 +645,37 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, Shader::Backend::Binding
                              Shader::PushData& push_data) {
     buffer_bindings.clear();
 
+    int idx{};
     for (const auto& desc : stage.buffers) {
         const auto vsharp = desc.GetSharp(stage);
         if (!desc.IsSpecial() && vsharp.base_address != 0 && vsharp.GetSize() > 0) {
             const u64 size = memory->ClampRangeSize(vsharp.base_address, vsharp.GetSize());
-            const auto buffer_id = buffer_cache.FindBuffer(vsharp.base_address, size);
-            buffer_bindings.emplace_back(buffer_id, vsharp, size);
+            buffer_bindings.emplace_back(true, vsharp, size);
+            //ASSERT(IsMapped(vsharp.base_address, size));
+            //LOG_WARNING(Render, "Shader {:#x} binding {} addr={:#x} size={:#x}", stage.pgm_hash, idx++, vsharp.base_address, size);
         } else {
-            buffer_bindings.emplace_back(VideoCore::BufferId{}, vsharp, 0);
+            buffer_bindings.emplace_back(false, vsharp, 0);
         }
     }
 
     // Second pass to re-bind buffers that were updated after binding
     for (u32 i = 0; i < buffer_bindings.size(); i++) {
-        const auto& [buffer_id, vsharp, size] = buffer_bindings[i];
+        const auto& [is_bound, vsharp, size] = buffer_bindings[i];
         const auto& desc = stage.buffers[i];
         const bool is_storage = desc.IsStorage(vsharp);
-        const u32 alignment =
+        const u64 alignment =
             is_storage ? instance.StorageMinAlignment() : instance.UniformMinAlignment();
         // Buffer is not from the cache, either a special buffer or unbound.
-        if (!buffer_id) {
+        if (!is_bound) {
             if (desc.buffer_type == Shader::BufferType::GdsBuffer) {
-                const auto* gds_buf = buffer_cache.GetGdsBuffer();
-                buffer_infos.emplace_back(gds_buf->Handle(), 0, gds_buf->SizeBytes());
+                const auto& gds_buf = buffer_cache.GetGdsBuffer();
+                buffer_infos.emplace_back(gds_buf.Handle(), 0, gds_buf.SizeBytes());
             } else if (desc.buffer_type == Shader::BufferType::Flatbuf) {
                 auto& vk_buffer = buffer_cache.GetUtilityBuffer(VideoCore::MemoryUsage::Stream);
                 const u32 ubo_size = stage.flattened_ud_buf.size() * sizeof(u32);
                 const u64 offset =
                     vk_buffer.Copy(stage.flattened_ud_buf.data(), ubo_size, alignment);
                 buffer_infos.emplace_back(vk_buffer.Handle(), offset, ubo_size);
-            } else if (desc.buffer_type == Shader::BufferType::BdaPagetable) {
-                const auto* bda_buffer = buffer_cache.GetBdaPageTableBuffer();
-                buffer_infos.emplace_back(bda_buffer->Handle(), 0, bda_buffer->SizeBytes());
-            } else if (desc.buffer_type == Shader::BufferType::FaultBuffer) {
-                const auto* fault_buffer = buffer_cache.GetFaultBuffer();
-                buffer_infos.emplace_back(fault_buffer->Handle(), 0, fault_buffer->SizeBytes());
             } else if (desc.buffer_type == Shader::BufferType::SharedMemory) {
                 auto& lds_buffer = buffer_cache.GetUtilityBuffer(VideoCore::MemoryUsage::Stream);
                 const auto& cs_program = liverpool->GetCsRegs();
@@ -644,14 +686,15 @@ void Rasterizer::BindBuffers(const Shader::Info& stage, Shader::Backend::Binding
             } else if (instance.IsNullDescriptorSupported()) {
                 buffer_infos.emplace_back(VK_NULL_HANDLE, 0, VK_WHOLE_SIZE);
             } else {
-                auto& null_buffer = buffer_cache.GetBuffer(VideoCore::NULL_BUFFER_ID);
-                buffer_infos.emplace_back(null_buffer.Handle(), 0, VK_WHOLE_SIZE);
+                UNREACHABLE_MSG("Null descriptor support required");
+                //auto& null_buffer = buffer_cache.GetBuffer(VideoCore::NULL_BUFFER_ID);
+                //buffer_infos.emplace_back(null_buffer.Handle(), 0, VK_WHOLE_SIZE);
             }
         } else {
             const auto [vk_buffer, offset] = buffer_cache.ObtainBuffer(
-                vsharp.base_address, size, desc.is_written, desc.is_formatted, buffer_id);
-            const u32 offset_aligned = Common::AlignDown(offset, alignment);
-            const u32 adjust = offset - offset_aligned;
+                vsharp.base_address, size, desc.is_written, desc.is_formatted);
+            const u64 offset_aligned = Common::AlignDown(offset, alignment);
+            const u64 adjust = offset - offset_aligned;
             ASSERT(adjust % 4 == 0);
             push_data.AddOffset(binding.buffer, adjust);
             buffer_infos.emplace_back(vk_buffer->Handle(), offset_aligned, size + adjust);
@@ -1043,9 +1086,9 @@ void Rasterizer::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, b
 }
 
 u32 Rasterizer::ReadDataFromGds(u32 gds_offset) {
-    auto* gds_buf = buffer_cache.GetGdsBuffer();
+    const auto& gds_buf = buffer_cache.GetGdsBuffer();
     u32 value;
-    std::memcpy(&value, gds_buf->mapped_data.data() + gds_offset, sizeof(u32));
+    std::memcpy(&value, gds_buf.mapped_data.data() + gds_offset, sizeof(u32));
     return value;
 }
 
@@ -1086,6 +1129,7 @@ bool Rasterizer::IsMapped(VAddr addr, u64 size) {
 void Rasterizer::MapMemory(VAddr addr, u64 size) {
     {
         std::scoped_lock lock{mapped_ranges_mutex};
+        pending_mapped_ranges.Add(addr, size);
         mapped_ranges += decltype(mapped_ranges)::interval_type::right_open(addr, addr + size);
     }
     page_manager.OnGpuMap(addr, size);
@@ -1097,6 +1141,7 @@ void Rasterizer::UnmapMemory(VAddr addr, u64 size) {
     page_manager.OnGpuUnmap(addr, size);
     {
         std::scoped_lock lock{mapped_ranges_mutex};
+        pending_mapped_ranges.Subtract(addr, size);
         mapped_ranges -= decltype(mapped_ranges)::interval_type::right_open(addr, addr + size);
     }
 }

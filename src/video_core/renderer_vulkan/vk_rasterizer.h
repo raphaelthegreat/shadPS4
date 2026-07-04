@@ -24,6 +24,8 @@ class Scheduler;
 class RenderState;
 class GraphicsPipeline;
 
+struct SubmitInfo;
+
 class Rasterizer {
 public:
     explicit Rasterizer(const Instance& instance, Scheduler& scheduler,
@@ -83,6 +85,7 @@ public:
     }
 
 private:
+    void FlushGpuMemoryMaps(SubmitInfo& info);
     void PrepareRenderState(const GraphicsPipeline* pipeline);
     RenderState BeginRendering(const GraphicsPipeline* pipeline);
     void Resolve();
@@ -124,6 +127,7 @@ private:
     VideoCore::TextureCache texture_cache;
     AmdGpu::Liverpool* liverpool;
     Core::MemoryManager* memory;
+    VideoCore::RangeSet pending_mapped_ranges;
     boost::icl::interval_set<VAddr> mapped_ranges;
     Common::SharedFirstMutex mapped_ranges_mutex;
     PipelineCache pipeline_cache;
@@ -140,7 +144,7 @@ private:
     Pipeline::BufferBarriers buffer_barriers;
     Shader::PushData push_data;
 
-    using BufferBindingInfo = std::tuple<VideoCore::BufferId, AmdGpu::Buffer, u64>;
+    using BufferBindingInfo = std::tuple<bool, AmdGpu::Buffer, u64>;
     boost::container::static_vector<BufferBindingInfo, Shader::NUM_BUFFERS> buffer_bindings;
     using ImageBindingInfo = std::pair<VideoCore::ImageId, VideoCore::TextureCache::ImageDesc>;
     boost::container::static_vector<ImageBindingInfo, Shader::NUM_IMAGES> image_bindings;

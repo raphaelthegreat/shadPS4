@@ -423,6 +423,10 @@ public:
         priority_pending_ops_cv.notify_one();
     }
 
+    void SetOnSubmitCallback(std::move_only_function<void(SubmitInfo&)>&& callback) {
+        on_submit_cb = std::move(callback);
+    }
+
     static std::mutex submit_mutex;
 
 private:
@@ -438,6 +442,7 @@ private:
     CommandPool command_pool;
     DynamicState dynamic_state;
     vk::CommandBuffer current_cmdbuf;
+    std::move_only_function<void(SubmitInfo&)> on_submit_cb;
     std::condition_variable_any event_cv;
     struct PendingOp {
         Common::UniqueFunction<void> callback;

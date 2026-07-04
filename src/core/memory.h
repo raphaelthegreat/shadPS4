@@ -191,10 +191,10 @@ public:
         return impl.SystemReservedVirtualBase();
     }
 
-    bool IsValidGpuMapping(VAddr virtual_addr, u64 size) {
+    bool IsValidGpuMapping(VAddr virtual_addr, u64 size, MemoryProt prot) {
         // The PS4's GPU can only handle 40 bit addresses.
         const VAddr max_gpu_address{0x10000000000};
-        return virtual_addr + size < max_gpu_address;
+        return virtual_addr + size < max_gpu_address && True(prot & MemoryProt::GpuReadWrite);
     }
 
     bool IsValidMapping(const VAddr virtual_addr, const u64 size = 0) {

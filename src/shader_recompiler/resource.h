@@ -20,8 +20,6 @@ static constexpr u32 NUM_FMASKS = 8;
 enum class BufferType : u32 {
     Guest,
     Flatbuf,
-    BdaPagetable,
-    FaultBuffer,
     GdsBuffer,
     SharedMemory,
 };

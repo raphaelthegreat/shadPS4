@@ -335,7 +335,7 @@ s32 MemoryManager::Free(PAddr phys_addr, u64 size, bool is_checked) {
 
     // Early unmap from GPU to avoid deadlocking.
     for (auto& [addr, unmap_size] : remove_list) {
-        if (IsValidGpuMapping(addr, unmap_size)) {
+        if (IsValidGpuMapping(addr, unmap_size, MemoryProt::GpuReadWrite)) {
             rasterizer->UnmapMemory(addr, unmap_size);
         }
     }
@@ -451,7 +451,7 @@ s32 MemoryManager::PoolCommit(VAddr virtual_addr, u64 size, MemoryProt prot, s32
     MergeAdjacent(vma_map, new_vma_handle);
 
     lk2.unlock();
-    if (IsValidGpuMapping(mapped_addr, size)) {
+    if (IsValidGpuMapping(mapped_addr, size, prot)) {
         rasterizer->MapMemory(mapped_addr, size);
     }
 
@@ -569,7 +569,7 @@ s32 MemoryManager::MapMemory(void** out_addr, VAddr virtual_addr, u64 size, Memo
     }
 
     // Perform early GPU unmap to avoid potential deadlocks
-    if (IsValidGpuMapping(virtual_addr, size)) {
+    if (IsValidGpuMapping(virtual_addr, size, prot)) {
         rasterizer->UnmapMemory(virtual_addr, size);
     }
 
@@ -673,7 +673,7 @@ s32 MemoryManager::MapMemory(void** out_addr, VAddr virtual_addr, u64 size, Memo
         lk2.unlock();
 
         // If this is not a reservation, then map to GPU and address space
-        if (IsValidGpuMapping(mapped_addr, size)) {
+        if (IsValidGpuMapping(mapped_addr, size, prot)) {
             rasterizer->MapMemory(mapped_addr, size);
         }
     }
@@ -746,7 +746,7 @@ s32 MemoryManager::MapFile(void** out_addr, VAddr virtual_addr, u64 size, Memory
     }
 
     // Perform early GPU unmap to avoid potential deadlocks
-    if (IsValidGpuMapping(virtual_addr, size)) {
+    if (IsValidGpuMapping(virtual_addr, size, prot)) {
         rasterizer->UnmapMemory(virtual_addr, size);
     }
 
@@ -783,7 +783,7 @@ s32 MemoryManager::PoolDecommit(VAddr virtual_addr, u64 size) {
     }
 
     // Perform early GPU unmap to avoid potential deadlocks
-    if (IsValidGpuMapping(virtual_addr, size)) {
+    if (IsValidGpuMapping(virtual_addr, size, it->second.prot)) {
         rasterizer->UnmapMemory(virtual_addr, size);
     }
 
@@ -865,11 +865,6 @@ s32 MemoryManager::UnmapMemory(VAddr virtual_addr, u64 size) {
         return ORBIS_KERNEL_ERROR_EINVAL;
     }
 
-    // If the requested range has GPU access, unmap from GPU.
-    if (IsValidGpuMapping(virtual_addr, size)) {
-        rasterizer->UnmapMemory(virtual_addr, size);
-    }
-
     // Acquire writer lock.
     std::scoped_lock lk2{mutex};
     return UnmapMemoryImpl(virtual_addr, size);
@@ -949,6 +944,9 @@ s32 MemoryManager::UnmapMemoryImpl(VAddr virtual_addr, u64 size) {
     do {
         auto it = FindVMA(virtual_addr + unmapped_bytes);
         auto& vma_base = it->second;
+        if (IsValidGpuMapping(virtual_addr, size, vma_base.prot)) {
+            rasterizer->UnmapMemory(virtual_addr, size);
+        }
         auto unmapped =
             UnmapBytesFromEntry(virtual_addr + unmapped_bytes, vma_base, size - unmapped_bytes);
         ASSERT_MSG(unmapped > 0, "Failed to unmap memory, progress is impossible");

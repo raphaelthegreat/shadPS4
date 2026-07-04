@@ -149,7 +149,6 @@ void Scheduler::AllocateWorkerCommandBuffers() {
 
 void Scheduler::SubmitExecution(SubmitInfo& info) {
     std::scoped_lock lk{submit_mutex};
-    const u64 signal_value = master_semaphore.NextTick();
 
 #if TRACY_GPU_ENABLED
     auto* profiler_ctx = instance.GetProfilerContext();
@@ -159,10 +158,15 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
     }
 #endif
 
+    if (on_submit_cb) {
+        on_submit_cb(info);
+    }
+
     EndRendering();
     Check(current_cmdbuf.end());
 
     const vk::Semaphore timeline = master_semaphore.Handle();
+    const u64 signal_value = master_semaphore.NextTick();
     info.AddSignal(timeline, signal_value);
 
     static constexpr std::array<vk::PipelineStageFlags, 2> wait_stage_masks = {

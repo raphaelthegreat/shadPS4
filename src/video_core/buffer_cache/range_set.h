@@ -41,6 +41,10 @@ struct RangeSet {
         m_ranges_set.subtract(interval);
     }
 
+    bool IsEmpty() const {
+        return m_ranges_set.empty();
+    }
+
     void Clear() {
         m_ranges_set.clear();
     }

@@ -759,8 +759,7 @@ EmitContext::BufferSpv EmitContext::DefineBuffer(bool is_storage, bool is_writte
                                                  BufferType buffer_type, Id data_type) {
     // Define array type.
     const Id max_num_items = ConstU32(u32(profile.max_ubo_size) >> elem_shift);
-    const Id record_array_type{is_storage ? TypeRuntimeArray(data_type)
-                                          : TypeArray(data_type, max_num_items)};
+    const Id record_array_type{TypeArray(data_type, max_num_items)};
     // Define block struct type. Don't perform decorations twice on the same Id.
     const Id struct_type{TypeStruct(record_array_type)};
     if (std::ranges::find(buf_type_ids, record_array_type.value, &Id::value) ==
@@ -789,12 +788,6 @@ EmitContext::BufferSpv EmitContext::DefineBuffer(bool is_storage, bool is_writte
     case BufferType::Flatbuf:
         Name(id, "srt_flatbuf");
         break;
-    case BufferType::BdaPagetable:
-        Name(id, "bda_pagetable");
-        break;
-    case BufferType::FaultBuffer:
-        Name(id, "fault_buffer");
-        break;
     case BufferType::SharedMemory:
         Name(id, "ssbo_shmem");
         break;
@@ -814,10 +807,6 @@ void EmitContext::DefineBuffers() {
         // Set indexes for special buffers.
         if (desc.buffer_type == BufferType::Flatbuf) {
             flatbuf_index = buffers.size();
-        } else if (desc.buffer_type == BufferType::BdaPagetable) {
-            bda_pagetable_index = buffers.size();
-        } else if (desc.buffer_type == BufferType::FaultBuffer) {
-            fault_buffer_index = buffers.size();
         }
 
         // Define aliases depending on the shader usage.
@@ -1150,7 +1139,7 @@ Id EmitContext::DefineUfloatM5ToFloat32(u32 mantissa_bits, const std::string_vie
 }
 
 Id EmitContext::DefineGetBdaPointer() {
-    const auto caching_pagebits{
+    /*const auto caching_pagebits{
         Constant(U64, static_cast<u64>(VideoCore::BufferCache::CACHING_PAGEBITS))};
     const auto caching_pagemask{Constant(U64, VideoCore::BufferCache::CACHING_PAGESIZE - 1)};
 
@@ -1205,7 +1194,8 @@ Id EmitContext::DefineGetBdaPointer() {
     const auto result{OpPhi(U64, addr, available_label, fallback_result, fault_label)};
     OpReturnValue(result);
     OpFunctionEnd();
-    return func;
+    return func;*/
+    UNREACHABLE();
 }
 
 Id EmitContext::DefineReadConst(bool dynamic) {
