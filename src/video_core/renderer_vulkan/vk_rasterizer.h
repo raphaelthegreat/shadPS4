@@ -63,8 +63,9 @@ public:
     bool InvalidateMemory(VAddr addr, u64 size);
     bool ReadMemory(VAddr addr, u64 size);
     bool IsMapped(VAddr addr, u64 size);
-    void MapMemory(VAddr addr, u64 size);
+    void MapMemory(VAddr addr, u64 size, bool device_mem);
     void UnmapMemory(VAddr addr, u64 size);
+    uintptr_t CreateGpuMem(PAddr phys, u64 size, bool device_mem);
 
     void CpSync();
     u64 Flush();
@@ -73,15 +74,6 @@ public:
 
     PipelineCache& GetPipelineCache() {
         return pipeline_cache;
-    }
-
-    template <typename Func>
-    void ForEachMappedRangeInRange(VAddr addr, u64 size, Func&& func) {
-        const auto range = decltype(mapped_ranges)::interval_type::right_open(addr, addr + size);
-        Common::RecursiveSharedLock lock{mapped_ranges_mutex};
-        for (const auto& mapped_range : (mapped_ranges & range)) {
-            func(mapped_range);
-        }
     }
 
 private:
@@ -117,7 +109,7 @@ private:
     bool IsComputeImageCopy(const Pipeline* pipeline);
     bool IsComputeImageClear(const Pipeline* pipeline);
 
-private:
+public:
     friend class VideoCore::BufferCache;
 
     const Instance& instance;
@@ -127,9 +119,10 @@ private:
     VideoCore::TextureCache texture_cache;
     AmdGpu::Liverpool* liverpool;
     Core::MemoryManager* memory;
-    VideoCore::RangeSet pending_mapped_ranges;
-    boost::icl::interval_set<VAddr> mapped_ranges;
+    VideoCore::MapRanges pending_mapped_ranges;
+    VideoCore::MapRanges mapped_ranges;
     Common::SharedFirstMutex mapped_ranges_mutex;
+    using Interval = decltype(mapped_ranges)::interval_type;
     PipelineCache pipeline_cache;
 
     using RenderTargetInfo = std::pair<VideoCore::ImageId, VideoCore::TextureCache::ImageDesc>;

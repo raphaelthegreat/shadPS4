@@ -670,6 +670,7 @@ Frame* Presenter::PrepareLastFrame() {
     frame->ready_semaphore = scheduler.GetMasterSemaphore()->Handle();
     frame->ready_tick = scheduler.CurrentTick();
     SubmitInfo info{};
+    info.do_callback = false;
     scheduler.Flush(info);
     return frame;
 }
@@ -850,6 +851,7 @@ Frame* Presenter::PrepareBlankFrame(bool present_thread) {
     frame->ready_semaphore = scheduler.GetMasterSemaphore()->Handle();
     frame->ready_tick = scheduler.CurrentTick();
     SubmitInfo info{};
+    info.do_callback = false;
     scheduler.Flush(info);
     return frame;
 }

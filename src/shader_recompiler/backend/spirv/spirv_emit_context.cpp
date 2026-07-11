@@ -739,6 +739,7 @@ void EmitContext::DefinePushDataBlock() {
     MemberName(struct_type, PushData::BufOffsetIndex + 0, "buf_offsets0");
     MemberName(struct_type, PushData::BufOffsetIndex + 1, "buf_offsets1");
     MemberName(struct_type, PushData::BufOffsetIndex + 2, "buf_offsets2");
+    //MemberName(struct_type, PushData::GuestSpaceIndex, "guest_space_addr");
     MemberDecorate(struct_type, PushData::XOffsetIndex, spv::Decoration::Offset, 0U);
     MemberDecorate(struct_type, PushData::YOffsetIndex, spv::Decoration::Offset, 4U);
     MemberDecorate(struct_type, PushData::XScaleIndex, spv::Decoration::Offset, 8U);
@@ -750,6 +751,7 @@ void EmitContext::DefinePushDataBlock() {
     MemberDecorate(struct_type, PushData::BufOffsetIndex + 0, spv::Decoration::Offset, 80U);
     MemberDecorate(struct_type, PushData::BufOffsetIndex + 1, spv::Decoration::Offset, 96U);
     MemberDecorate(struct_type, PushData::BufOffsetIndex + 2, spv::Decoration::Offset, 112U);
+    //MemberDecorate(struct_type, PushData::GuestSpaceIndex, spv::Decoration::Offset, 120U);
     push_data_block = DefineVar(struct_type, spv::StorageClass::PushConstant);
     Name(push_data_block, "push_data");
     interfaces.push_back(push_data_block);
@@ -759,7 +761,8 @@ EmitContext::BufferSpv EmitContext::DefineBuffer(bool is_storage, bool is_writte
                                                  BufferType buffer_type, Id data_type) {
     // Define array type.
     const Id max_num_items = ConstU32(u32(profile.max_ubo_size) >> elem_shift);
-    const Id record_array_type{TypeArray(data_type, max_num_items)};
+    const Id record_array_type{is_storage ? TypeRuntimeArray(data_type)
+                                          : TypeArray(data_type, max_num_items)};
     // Define block struct type. Don't perform decorations twice on the same Id.
     const Id struct_type{TypeStruct(record_array_type)};
     if (std::ranges::find(buf_type_ids, record_array_type.value, &Id::value) ==

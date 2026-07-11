@@ -72,6 +72,7 @@ struct PhysicalMemoryArea {
     u64 size = 0;
     s32 memory_type = 0;
     PhysicalMemoryType dma_type = PhysicalMemoryType::Free;
+    uintptr_t gpu_mem{};
 
     PAddr GetEnd() const {
         return base + size;
@@ -241,6 +242,8 @@ public:
     void CopySparseMemory(VAddr source, u8* dest, u64 size);
 
     bool TryWriteBacking(void* address, const void* data, u64 size);
+
+    bool EnsureBackingIsHost(void* address, u64 size);
 
     void SetupMemoryRegions(u64 flexible_size, bool use_extended_mem1, bool use_extended_mem2);
 

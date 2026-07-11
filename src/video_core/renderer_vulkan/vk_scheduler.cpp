@@ -158,7 +158,7 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
     }
 #endif
 
-    if (on_submit_cb) {
+    if (info.do_callback && on_submit_cb) {
         on_submit_cb(info);
     }
 

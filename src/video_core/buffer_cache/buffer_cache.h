@@ -26,6 +26,8 @@ class TextureCache;
 class MemoryTracker;
 class PageManager;
 
+using MapRanges = boost::icl::interval_map<VAddr, bool, boost::icl::partial_enricher>;
+
 class BufferCache {
 public:
     static constexpr u32 CACHING_PAGEBITS = 14;
@@ -37,7 +39,7 @@ public:
 public:
     explicit BufferCache(const Vulkan::Instance& instance, Vulkan::Scheduler& scheduler,
                          AmdGpu::Liverpool* liverpool, TextureCache& texture_cache,
-                         PageManager& tracker);
+                         PageManager& tracker, MapRanges& mapped_ranges);
     ~BufferCache();
 
     /// Returns a pointer to GDS device local buffer.
@@ -118,6 +120,7 @@ private:
     StreamBuffer device_buffer;
     Buffer gds_buffer;
     RangeSet gpu_modified_ranges;
+    MapRanges& mapped_ranges;
 };
 
 } // namespace VideoCore

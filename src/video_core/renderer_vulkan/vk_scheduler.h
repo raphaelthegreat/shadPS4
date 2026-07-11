@@ -60,6 +60,7 @@ struct SubmitInfo {
     vk::Fence fence;
     u32 num_wait_semas;
     u32 num_signal_semas;
+    bool do_callback{true};
 
     void AddWait(vk::Semaphore semaphore, u64 tick = 1) {
         wait_semas[num_wait_semas] = semaphore;

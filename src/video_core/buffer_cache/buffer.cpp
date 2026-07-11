@@ -162,12 +162,17 @@ void Buffer::Fill(u64 offset, u32 num_bytes, u32 value) {
     });
 }
 
-AddressSpaceBuffer::AddressSpaceBuffer(const Vulkan::Instance& instance_, u64 size_bytes_) : Buffer{instance_, size_bytes_} {
+AddressSpaceBuffer::AddressSpaceBuffer(const Vulkan::Instance& instance_, u64 size_bytes_)
+    : Buffer{instance_, size_bytes_} {
     const auto device = instance->GetDevice();
     const auto sparse_budget = instance->SparseAddressSpaceSize();
     ASSERT_MSG(size_bytes <= sparse_budget, "Address space size exceeds sparseAddressSpaceSize {:#x}", sparse_budget);
 
+    const vk::ExternalMemoryBufferCreateInfo external_mem_info = {
+        .handleTypes = vk::ExternalMemoryHandleTypeFlagBits::eHostAllocationEXT,
+    };
     const vk::BufferCreateInfo bci = {
+        .pNext = &external_mem_info,
         .flags = vk::BufferCreateFlagBits::eSparseBinding |
                  vk::BufferCreateFlagBits::eSparseResidency,
         .size = size_bytes,

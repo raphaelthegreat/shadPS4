@@ -149,6 +149,18 @@ public:
         m_ranges_map -= interval;
     }
 
+    auto Find(VAddr base_address) {
+        return m_ranges_map.find(base_address);
+    }
+
+    auto End() {
+        return m_ranges_map.end();
+    }
+
+    bool IsEmpty() const {
+        return m_ranges_map.empty();
+    }
+
     void Clear() {
         m_ranges_map.clear();
     }
