@@ -784,7 +784,7 @@ void TextureCache::RefreshImage(Image& image) {
         });
     }
 
-    if (image_copies.empty()) {
+    if (image_copies.empty() || image.info.guest_address == 68719476736ULL) {
         image.flags &= ~ImageFlagBits::Dirty;
         return;
     }
@@ -859,6 +859,8 @@ void TextureCache::TrackImage(ImageId image_id) {
         return;
     }
     const auto image_begin = image.info.guest_address;
+    if (image_begin == 68719476736ULL || image_begin == 346185269248ULL)
+        return;
     const auto image_end = image.info.guest_address + image.info.guest_size;
     if (image_begin == image.track_addr && image_end == image.track_addr_end) {
         return;

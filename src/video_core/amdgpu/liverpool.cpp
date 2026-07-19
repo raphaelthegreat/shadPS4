@@ -139,6 +139,7 @@ void Liverpool::Process(std::stop_token stoken) {
         }
 
         if (submit_done) {
+            rasterizer->GetScheduler().Flush();
             VideoCore::EndCapture();
             if (rasterizer) {
                 rasterizer->OnSubmit();
@@ -727,8 +728,8 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                         label_writes[VAddr(address)] = data;
                         auto* memory = Core::Memory::Instance();
                         //memory->EnsureBackingIsHost(address, num_bytes);
-                        LOG_WARNING(Render, "EventWriteEop is_host = {}, address = {:#x}",
-                                    memory->EnsureBackingIsHost(address, num_bytes), VAddr(address));
+                        //LOG_WARNING(Render, "EventWriteEop is_host = {}, address = {:#x}",
+                        //            memory->EnsureBackingIsHost(address, num_bytes), VAddr(address));
                         auto& scheduler = rasterizer->GetScheduler();
                         auto& address_space = rasterizer->GetBufferCache().GetAddressSpace();
                         scheduler.EndRendering();
@@ -956,6 +957,18 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 UNREACHABLE_MSG("Unknown PM4 type 3 opcode {:#x} with count {}",
                                 static_cast<u32>(opcode), count);
             }
+
+            /*vk::MemoryBarrier2 memory_barrier{};
+            memory_barrier.dstStageMask = vk::PipelineStageFlagBits2::eAllCommands;
+            memory_barrier.dstAccessMask =
+                vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite;
+            memory_barrier.srcStageMask = vk::PipelineStageFlagBits2::eAllCommands;
+            memory_barrier.srcAccessMask = vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite;
+            rasterizer->GetScheduler().CommandBuffer().pipelineBarrier2(vk::DependencyInfo{
+                .dependencyFlags = vk::DependencyFlagBits::eByRegion,
+                .memoryBarrierCount = 1,
+                .pMemoryBarriers = &memory_barrier,
+            });*/
             dcb = NextPacket(dcb, header->type3.NumWords() + 1);
             break;
         }
@@ -1298,7 +1311,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
                             static_cast<u32>(opcode), header->type3.NumWords());
         }
 
-        vk::MemoryBarrier2 memory_barrier{};
+        /*vk::MemoryBarrier2 memory_barrier{};
         memory_barrier.dstStageMask = vk::PipelineStageFlagBits2::eAllCommands;
         memory_barrier.dstAccessMask =
             vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eMemoryWrite;
@@ -1308,7 +1321,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
             .dependencyFlags = vk::DependencyFlagBits::eByRegion,
             .memoryBarrierCount = 1,
             .pMemoryBarriers = &memory_barrier,
-        });
+        });*/
         acb = NextPacket(acb, next_dw_off);
 
         if constexpr (!is_indirect) {
@@ -1318,7 +1331,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
     }
 
     if (!is_indirect) {
-        rasterizer->GetScheduler().Flush();
+        //rasterizer->GetScheduler().Flush();
     }
 
     FIBER_EXIT;
@@ -1393,8 +1406,7 @@ void Liverpool::SubmitAsc(u32 gnm_vqid, std::span<const u32> acb) {
 }
 
 bool Liverpool::IsGpuIdle() const {
-    auto& scheduler = rasterizer->GetScheduler();
-    return scheduler.IsFree(scheduler.CurrentTick() - 1);
+    return num_submits == 0;
 }
 
 } // namespace AmdGpu

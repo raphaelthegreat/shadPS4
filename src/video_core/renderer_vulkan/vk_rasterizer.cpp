@@ -18,6 +18,8 @@
 #undef MemoryBarrier
 #endif
 
+extern bool allow_prot;
+
 namespace Vulkan {
 
 static Shader::PushData MakeUserData(const AmdGpu::Regs& regs) {
@@ -53,6 +55,7 @@ void Rasterizer::FlushGpuMemoryMaps(SubmitInfo& info) {
     if (pending_mapped_ranges.empty()) {
         return;
     }
+    instance.GetDevice().waitIdle();
     boost::container::small_vector<vk::SparseMemoryBind, 8> binds;
     const auto& address_space = buffer_cache.GetAddressSpace();
     auto* master_semaphore = scheduler.GetMasterSemaphore();
@@ -63,6 +66,7 @@ void Rasterizer::FlushGpuMemoryMaps(SubmitInfo& info) {
         bool device_mem = range.second;
         LOG_WARNING(Render, "Binding backing sparse bo_addr={:#x}, end={:#x}, offset={:#x} size={:#x}",
                     VAddr(address_space.buffer.bda_addr) + start, VAddr(address_space.buffer.bda_addr) + end, start, end - start);
+        //if (start == 0xa000000000ULL) allow_prot = true;
         const u64 size = end - start;
         vk::DeviceMemory mem;
         if (device_mem) {
@@ -1194,7 +1198,7 @@ void Rasterizer::MapMemory(VAddr addr, u64 size, bool device_mem) {
         pending_mapped_ranges.insert({Interval{addr, addr+size}, device_mem});
         mapped_ranges.insert({Interval{addr, addr+size}, device_mem});
     }
-    page_manager.OnGpuMap(addr, size);
+    page_manager.OnGpuMap(addr, size, device_mem);
 }
 
 void Rasterizer::UnmapMemory(VAddr addr, u64 size) {

@@ -148,8 +148,6 @@ void Scheduler::AllocateWorkerCommandBuffers() {
 }
 
 void Scheduler::SubmitExecution(SubmitInfo& info) {
-    std::scoped_lock lk{submit_mutex};
-
 #if TRACY_GPU_ENABLED
     auto* profiler_ctx = instance.GetProfilerContext();
     if (profiler_ctx) {
@@ -192,9 +190,12 @@ void Scheduler::SubmitExecution(SubmitInfo& info) {
         .pSignalSemaphores = info.signal_semas.data(),
     };
 
+    {
+    std::scoped_lock lk{submit_mutex};
     ImGui::Core::TextureManager::Submit();
     auto submit_result = instance.GetGraphicsQueue().submit(submit_info, info.fence);
     ASSERT_MSG(submit_result != vk::Result::eErrorDeviceLost, "Device lost during submit");
+    }
 
     master_semaphore.Refresh();
     AllocateWorkerCommandBuffers();
