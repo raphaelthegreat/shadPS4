@@ -237,6 +237,9 @@ TileManager::Result TileManager::DetileImage(vk::Buffer in_buffer, u64 in_offset
     cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, *pl_layout, 0, set_writes);
 
     const auto dim_x = (info.guest_size / (info.num_bits / 8)) / 64;
+    if (dim_x == 87373) {
+        printf("bad\n");
+    }
     cmdbuf.dispatch(dim_x, 1, 1);
     return {out_buffer, 0};
 }

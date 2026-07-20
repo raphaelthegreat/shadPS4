@@ -704,8 +704,11 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                     //memory->EnsureBackingIsHost(address, num_bytes);
                     auto& scheduler = rasterizer->GetScheduler();
                     auto& address_space = rasterizer->GetBufferCache().GetAddressSpace();
-                    scheduler.EndRendering();
-                    scheduler.CommandBuffer().updateBuffer(address_space.Handle(), VAddr(address), num_bytes, &data);
+                    //scheduler.EndRendering();
+                    //scheduler.CommandBuffer().updateBuffer(address_space.Handle(), VAddr(address), num_bytes, &data);
+                    ASSERT(num_bytes == 4);
+                    scheduler.CommandBuffer().writeBufferMarker2AMD(vk::PipelineStageFlagBits2::eBottomOfPipe,
+                                                                    address_space.Handle(), VAddr(address), data);
 
                     //if (!memory->TryWriteBacking(address, &data, num_bytes)) {
                     //    memcpy(address, &data, num_bytes);
@@ -722,6 +725,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 break;
             }
             case PM4ItOpcode::EventWriteEop: {
+#pragma clang optimize off
                 const auto* event_eop = reinterpret_cast<const PM4CmdEventWriteEop*>(header);
                 event_eop->SignalFence(
                     [this](void* address, u64 data, u32 num_bytes) {
@@ -732,8 +736,13 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                         //            memory->EnsureBackingIsHost(address, num_bytes), VAddr(address));
                         auto& scheduler = rasterizer->GetScheduler();
                         auto& address_space = rasterizer->GetBufferCache().GetAddressSpace();
-                        scheduler.EndRendering();
-                        scheduler.CommandBuffer().updateBuffer(address_space.Handle(), VAddr(address), num_bytes, &data);
+                        if (num_bytes == 4) {
+                        scheduler.CommandBuffer().writeBufferMarker2AMD(vk::PipelineStageFlagBits2::eBottomOfPipe,
+                                                                        address_space.Handle(), VAddr(address), data);
+                        } else {
+                            scheduler.EndRendering();
+                            scheduler.CommandBuffer().updateBuffer(address_space.Handle(), VAddr(address), num_bytes, &data);
+                        }
                         //if (!memory->TryWriteBacking(address, &data, num_bytes)) {
                         //    memcpy(address, &data, num_bytes);
                         //}
@@ -741,6 +750,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                     [] { Platform::IrqC::Instance()->Signal(Platform::InterruptId::GfxEop); });
                 break;
             }
+#pragma clang optimize on
             case PM4ItOpcode::DmaData: {
                 const auto* dma_data = reinterpret_cast<const PM4DmaData*>(header);
                 if (dma_data->dst_addr_lo == 0x3022C || !rasterizer) {
@@ -791,8 +801,13 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                     //memory->EnsureBackingIsHost(address, data_size);
                     auto& scheduler = rasterizer->GetScheduler();
                     auto& address_space = rasterizer->GetBufferCache().GetAddressSpace();
-                    scheduler.EndRendering();
-                    scheduler.CommandBuffer().updateBuffer(address_space.Handle(), address, data_size, write_data->data);
+                    if (data_size == 4) {
+                    scheduler.CommandBuffer().writeBufferMarker2AMD(vk::PipelineStageFlagBits2::eBottomOfPipe,
+                                                                    address_space.Handle(), address, write_data->data[0]);
+                    } else {
+                        scheduler.EndRendering();
+                        scheduler.CommandBuffer().updateBuffer(address_space.Handle(), address, data_size, write_data->data);
+                    }
                     //std::memcpy((void*)address, write_data->data, data_size);
                     } else {
                         std::memcpy((void*)address, write_data->data, data_size);
@@ -1208,8 +1223,11 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
                 LOG_WARNING(Render, "WriteDataAsc is_host = {}", memory->EnsureBackingIsHost(address, data_size));
                 auto& scheduler = rasterizer->GetScheduler();
                 auto& address_space = rasterizer->GetBufferCache().GetAddressSpace();
-                scheduler.EndRendering();
-                scheduler.CommandBuffer().updateBuffer(address_space.Handle(), VAddr(address), data_size, &write_data->data);
+                ASSERT(data_size == 4);
+                scheduler.CommandBuffer().writeBufferMarker2AMD(vk::PipelineStageFlagBits2::eBottomOfPipe,
+                                                                address_space.Handle(), VAddr(address), write_data->data[0]);
+                //scheduler.EndRendering();
+                //scheduler.CommandBuffer().updateBuffer(address_space.Handle(), VAddr(address), data_size, &write_data->data);
                 //std::memcpy(write_data->Address<void*>(), write_data->data, data_size);
             } else {
                 UNREACHABLE();
@@ -1289,8 +1307,13 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
                                 memory->EnsureBackingIsHost(address, size), VAddr(address), data, *(u32*)address);
                     auto& scheduler = rasterizer->GetScheduler();
                     auto& address_space = rasterizer->GetBufferCache().GetAddressSpace();
+                    if (size == 4) {
+                    scheduler.CommandBuffer().writeBufferMarker2AMD(vk::PipelineStageFlagBits2::eBottomOfPipe,
+                                                                    address_space.Handle(), VAddr(address), data);
+                    } else {
                     scheduler.EndRendering();
                     scheduler.CommandBuffer().updateBuffer(address_space.Handle(), VAddr(address), size, &data);
+                    }
                     //std::memcpy(address, &data, size);
                     //rasterizer->Finish();
                 },
