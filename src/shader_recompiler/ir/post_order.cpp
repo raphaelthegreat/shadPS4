@@ -8,15 +8,11 @@
 
 namespace Shader::IR {
 
-BlockList PostOrder(const AbstractSyntaxNode& root) {
+BlockList PostOrder(Block* const first_block) {
     boost::container::small_vector<Block*, 16> block_stack;
     boost::container::flat_set<Block*> visited;
     BlockList post_order_blocks;
 
-    if (root.type != AbstractSyntaxNode::Type::Block) {
-        UNREACHABLE_MSG("First node in abstract syntax list root is not a block");
-    }
-    Block* const first_block{root.data.block};
     visited.insert(first_block);
     block_stack.push_back(first_block);
 

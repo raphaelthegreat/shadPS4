@@ -68,6 +68,9 @@ public:
     [[nodiscard]] U1 GetMaskLaneVariable(IR::VectorReg vgpr, u32 lane);
     void SetMaskLaneVariable(IR::VectorReg vgpr, u32 lane, const U1& value);
 
+    [[nodiscard]] Value GetVirtualRegister(IR::VirtualReg reg);
+    void SetVirtualRegister(IR::VirtualReg reg, const Value& value);
+
     [[nodiscard]] U1 GetScc();
     [[nodiscard]] U1 GetExec();
     [[nodiscard]] U1 GetVcc();

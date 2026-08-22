@@ -210,6 +210,14 @@ void IREmitter::SetMaskLaneVariable(IR::VectorReg vgpr, u32 lane, const U1& valu
     Inst(Opcode::SetMaskLaneVariable, vgpr, Imm32(lane), value);
 }
 
+Value IREmitter::GetVirtualRegister(IR::VirtualReg reg) {
+    return Inst(Opcode::GetVirtualRegister, reg);
+}
+
+void IREmitter::SetVirtualRegister(IR::VirtualReg reg, const Value& value) {
+    Inst(Opcode::SetVirtualRegister, reg, value);
+}
+
 U1 IREmitter::GetScc() {
     return Inst<U1>(Opcode::GetScc);
 }

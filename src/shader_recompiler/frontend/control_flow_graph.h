@@ -15,6 +15,10 @@
 #include "shader_recompiler/frontend/instruction.h"
 #include "shader_recompiler/ir/condition.h"
 
+namespace Shader::IR {
+class Block;
+}
+
 namespace Shader::Gcn {
 
 using Hook =
@@ -42,14 +46,31 @@ struct Block : Hook {
     EndClass end_class{};
     Block* branch_true{};
     Block* branch_false{};
+    Shader::IR::Block* ir_block{};
     bool is_dummy{};
 };
 
 class CFG {
     using Label = u32;
+    using BlockList = boost::intrusive::set<Block>;
+    using iterator = BlockList::iterator;
+    using const_iterator = BlockList::const_iterator;
 
 public:
     explicit CFG(Common::ObjectPool<Block>& block_pool, std::span<const GcnInst> inst_list);
+
+    [[nodiscard]] iterator begin() {
+        return blocks.begin();
+    }
+    [[nodiscard]] const_iterator begin() const {
+        return blocks.cbegin();
+    }
+    [[nodiscard]] iterator end() {
+        return blocks.end();
+    }
+    [[nodiscard]] const_iterator end() const {
+        return blocks.cend();
+    }
 
     [[nodiscard]] std::string Dot() const;
 
@@ -64,7 +85,7 @@ private:
         if (it == labels.end()) {
             labels.push_back(address);
         }
-    };
+    }
 
     size_t GetIndex(Label label) {
         if (label == 0) {
@@ -73,7 +94,7 @@ private:
         const auto it_index = std::ranges::lower_bound(index_to_pc, label);
         ASSERT(it_index != index_to_pc.end() || label > index_to_pc.back());
         return std::distance(index_to_pc.begin(), it_index);
-    };
+    }
 
 public:
     Common::ObjectPool<Block>& block_pool;

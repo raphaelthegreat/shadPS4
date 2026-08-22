@@ -158,7 +158,6 @@ public:
     /// It can be null as IR has additional control flow blocks.
     const Shader::Gcn::Block* cfg_block{};
 
-private:
     /// Memory pool for instruction list
     Common::ObjectPool<Inst>* inst_pool;
 
