@@ -1139,6 +1139,29 @@ struct PM4CmdDrawIndexIndirectCountMulti {
     u32 draw_initiator; ///< Draw Initiator Register
 };
 
+
+struct PM4CmdSetPredication {
+    enum class PredicateOp : u32 {
+        Clear = 0,
+        Zpass = 1,
+        PrimCount = 2,
+        Memory = 3,
+    };
+
+    PM4Type3Header header;
+    u32 address_lo;
+    struct {
+        u32 address_hi : 8;
+        u32 predication_bool : 1;
+        u32 reserved1 : 3;
+        u32 hint : 1;
+        u32 reserved2 : 3;
+        PredicateOp pred_op : 3;
+        u32 reserved3 : 12;
+        u32 continue_bit : 1;
+    };
+};
+
 struct PM4CmdMemSemaphore {
     enum class ClientCode : u32 {
         CommandProcessor = 0u,

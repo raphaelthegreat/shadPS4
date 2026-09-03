@@ -409,7 +409,8 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 break;
             }
             case PM4ItOpcode::SetPredication: {
-                LOG_WARNING(Render, "Unimplemented IT_SET_PREDICATION");
+                const auto* set_predication = reinterpret_cast<const PM4CmdSetPredication*>(header);
+                LOG_WARNING(Render, "Unimplemented IT_SET_PREDICATION pred_op = {}", magic_enum::enum_name(set_predication->pred_op));
                 break;
             }
             case PM4ItOpcode::IndexType: {
@@ -677,6 +678,7 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                     // immediately
                     regs.cp_strmout_cntl.offset_update_done = 1;
                 } else if (event->event_index.Value() == EventIndex::ZpassDone) {
+                    LOG_WARNING(Render, "ZPASS DONE");
                     if (event->event_type.Value() == EventType::PixelPipeStatDump) {
                         static constexpr u64 OcclusionCounterValidMask = 0x8000000000000000ULL;
                         static constexpr u64 OcclusionCounterStep = 0x2FFFFFFULL;
