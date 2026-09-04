@@ -610,7 +610,10 @@ BufferId BufferCache::CreateBuffer(VAddr device_addr, u32 wanted_size) {
         slot_buffers.insert(instance, scheduler, MemoryUsage::DeviceLocal, overlap.begin,
                             AllFlags | vk::BufferUsageFlagBits::eShaderDeviceAddress, size);
     auto& new_buffer = slot_buffers[new_buffer_id];
+    LOG_WARNING(Render, "Creating buffer {:#x}:{:#x} bda_addr={:#x}", device_addr, wanted_size, u64(new_buffer.buffer.bda_addr));
     for (const BufferId overlap_id : overlap.ids) {
+        auto& overlap_buf = slot_buffers[overlap_id];
+        LOG_WARNING(Render, "Overlap buffer {:#x}:{:#x} bda_addr={:#x}", overlap_buf.cpu_addr, overlap_buf.size_bytes, u64(overlap_buf.buffer.bda_addr));
         JoinOverlap(new_buffer_id, overlap_id, !overlap.has_stream_leap);
     }
     Register(new_buffer_id);
@@ -743,6 +746,7 @@ vk::Buffer BufferCache::UploadCopies(Buffer& buffer, std::span<vk::BufferCopy> c
         auto temp_buffer =
             std::make_unique<Buffer>(instance, scheduler, MemoryUsage::Upload, 0,
                                      vk::BufferUsageFlagBits::eTransferSrc, total_size_bytes);
+        temp_buffer->buffer.name = "temp_buffer";
         const vk::Buffer src_buffer = temp_buffer->Handle();
         u8* const staging = temp_buffer->mapped_data.data();
         for (const auto& copy : copies) {

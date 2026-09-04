@@ -48,7 +48,7 @@ struct SharpFetch {
         }
         std::memcpy(out, out_dw.data(), sizeof(out_dw));
         return true;
-    }
+        }
 };
 
 enum class SharpFetchPostOp : u8 {

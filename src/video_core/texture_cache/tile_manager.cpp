@@ -95,6 +95,7 @@ TileManager::ScratchBuffer TileManager::GetScratchBuffer(u32 size) {
     const auto result = vmaCreateBuffer(instance.GetAllocator(), &buffer_ci_unsafe, &alloc_info,
                                         &buffer, &allocation, nullptr);
     ASSERT(result == VK_SUCCESS);
+    Vulkan::SetObjectName(instance.GetDevice(), vk::Buffer{buffer}, "Tile buffer");
     return {buffer, allocation};
 }
 

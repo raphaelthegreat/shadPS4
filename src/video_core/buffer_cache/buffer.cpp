@@ -64,13 +64,14 @@ UniqueBuffer::UniqueBuffer(vk::Device device_, VmaAllocator allocator_)
 
 UniqueBuffer::~UniqueBuffer() {
     if (buffer) {
+        LOG_WARNING(Render, "Destroying buffer bda_addr={:#x}, {}", u64(bda_addr),  name);
         vmaDestroyBuffer(allocator, buffer, allocation);
     }
 }
 
 void UniqueBuffer::Create(const vk::BufferCreateInfo& buffer_ci, MemoryUsage usage,
-                          VmaAllocationInfo* out_alloc_info) {
-    const bool with_bda = bool(buffer_ci.usage & vk::BufferUsageFlagBits::eShaderDeviceAddress);
+                          VmaAllocationInfo* out_alloc_info, std::string name) {
+    const bool with_bda = /*bool(buffer_ci.usage & vk::BufferUsageFlagBits::eShaderDeviceAddress)*/true;
     const VmaAllocationCreateFlags bda_flag =
         with_bda ? VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT : 0;
     const VmaAllocationCreateInfo alloc_ci = {
@@ -82,7 +83,8 @@ void UniqueBuffer::Create(const vk::BufferCreateInfo& buffer_ci, MemoryUsage usa
         .pUserData = nullptr,
     };
 
-    const VkBufferCreateInfo buffer_ci_unsafe = static_cast<VkBufferCreateInfo>(buffer_ci);
+    VkBufferCreateInfo buffer_ci_unsafe = static_cast<VkBufferCreateInfo>(buffer_ci);
+    buffer_ci_unsafe.usage |= VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
     VkBuffer unsafe_buffer{};
     VkResult result = vmaCreateBuffer(allocator, &buffer_ci_unsafe, &alloc_ci, &unsafe_buffer,
                                       &allocation, out_alloc_info);
@@ -98,22 +100,26 @@ void UniqueBuffer::Create(const vk::BufferCreateInfo& buffer_ci, MemoryUsage usa
         ASSERT_MSG(bda_result != 0, "Failed to get buffer device address");
         bda_addr = bda_result;
     }
+
+    this->name = name;
 }
 
 Buffer::Buffer(const Vulkan::Instance& instance_, Vulkan::Scheduler& scheduler_, MemoryUsage usage_,
                VAddr cpu_addr_, vk::BufferUsageFlags flags, u64 size_bytes_)
     : cpu_addr{cpu_addr_}, size_bytes{size_bytes_}, instance{&instance_}, scheduler{&scheduler_},
       usage{usage_}, buffer{instance->GetDevice(), instance->GetAllocator()} {
+    const auto name = fmt::format("Buffer {:#x}:{:#x}", cpu_addr, size_bytes);
+
     // Create buffer object.
     const vk::BufferCreateInfo buffer_ci = {
         .size = size_bytes,
         .usage = flags,
     };
     VmaAllocationInfo alloc_info{};
-    buffer.Create(buffer_ci, usage, &alloc_info);
+    buffer.Create(buffer_ci, usage, &alloc_info, name);
 
     const auto device = instance->GetDevice();
-    Vulkan::SetObjectName(device, Handle(), "Buffer {:#x}:{:#x}", cpu_addr, size_bytes);
+    Vulkan::SetObjectName(device, Handle(), name);
 
     // Map it if it is host visible.
     VkMemoryPropertyFlags property_flags{};
@@ -169,8 +175,10 @@ StreamBuffer::StreamBuffer(const Vulkan::Instance& instance, Vulkan::Scheduler& 
     ReserveWatches(current_watches, WATCHES_INITIAL_RESERVE);
     ReserveWatches(previous_watches, WATCHES_INITIAL_RESERVE);
     const auto device = instance.GetDevice();
-    Vulkan::SetObjectName(device, Handle(), "StreamBuffer({}):{:#x}", BufferTypeName(usage),
+    const auto name = fmt::format("StreamBuffer({}):{:#x}", BufferTypeName(usage),
                           size_bytes);
+    Vulkan::SetObjectName(device, Handle(), name);
+    buffer.name = name;
 }
 
 std::pair<u8*, u64> StreamBuffer::Map(u64 size, u64 alignment, bool allow_wait) {

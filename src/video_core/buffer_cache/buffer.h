@@ -59,7 +59,7 @@ struct UniqueBuffer {
     }
 
     void Create(const vk::BufferCreateInfo& image_ci, MemoryUsage usage,
-                VmaAllocationInfo* out_alloc_info);
+                VmaAllocationInfo* out_alloc_info, std::string name = "");
 
     operator vk::Buffer() const {
         return buffer;
@@ -70,6 +70,7 @@ struct UniqueBuffer {
     VmaAllocation allocation;
     vk::Buffer buffer{};
     vk::DeviceAddress bda_addr = 0;
+    std::string name = "";
 };
 
 class Buffer {
