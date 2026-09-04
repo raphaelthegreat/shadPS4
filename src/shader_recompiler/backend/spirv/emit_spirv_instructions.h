@@ -479,8 +479,8 @@ Id EmitBallot(EmitContext& ctx, Id bit);
 Id EmitBallotFindLsb(EmitContext& ctx, Id mask);
 Id EmitInverseBallot(EmitContext& ctx, Id mask);
 Id EmitGroupAny(EmitContext& ctx, Id bit);
-Id EmitDataAppend(EmitContext& ctx, u32 gds_addr, u32 binding);
-Id EmitDataConsume(EmitContext& ctx, u32 gds_addr, u32 binding);
+Id EmitDataAppend(EmitContext& ctx, Id gds_addr, u32 binding);
+Id EmitDataConsume(EmitContext& ctx, Id gds_addr, u32 binding);
 
 void EmitEmitVertex(EmitContext& ctx);
 void EmitEmitPrimitive(EmitContext& ctx);

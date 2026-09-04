@@ -829,8 +829,7 @@ void EmitContext::DefineBuffers() {
         const auto buf_sharp = desc.GetSharp(info);
         // MTYPE class 3 marks guest buffers shared between invocations; shared
         // memory lowered to a storage buffer needs the same guarantee.
-        const bool is_coherent =
-            desc.buffer_type == BufferType::SharedMemory || buf_sharp.mtype == 3;
+        const bool is_coherent = desc.is_written;
 
         // Set indexes for special buffers.
         if (desc.buffer_type == BufferType::Flatbuf) {

@@ -453,15 +453,15 @@ static Id DataAppendConsume(EmitContext& ctx, auto&& atomic_op) {
     return ctx.OpGroupNonUniformBroadcastFirst(ctx.U32[1], subgroup_scope, base);
 }
 
-Id EmitDataAppend(EmitContext& ctx, u32 gds_addr, u32 handle) {
+Id EmitDataAppend(EmitContext& ctx, Id gds_addr, u32 handle) {
     return DataAppendConsume(ctx, [&](Id exec_bits) {
-        return EmitBufferAtomicIAdd32(ctx, nullptr, handle, ctx.ConstU32(gds_addr), exec_bits);
+        return EmitBufferAtomicIAdd32(ctx, nullptr, handle, gds_addr, exec_bits);
     });
 }
 
-Id EmitDataConsume(EmitContext& ctx, u32 gds_addr, u32 handle) {
+Id EmitDataConsume(EmitContext& ctx, Id gds_addr, u32 handle) {
     return DataAppendConsume(ctx, [&](Id exec_bits) {
-        return EmitBufferAtomicISub32(ctx, nullptr, handle, ctx.ConstU32(gds_addr), exec_bits);
+        return EmitBufferAtomicISub32(ctx, nullptr, handle, gds_addr, exec_bits);
     });
 }
 

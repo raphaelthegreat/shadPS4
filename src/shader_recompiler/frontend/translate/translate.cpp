@@ -362,7 +362,7 @@ T Translator::GetSrc(const InstOperand& operand) {
         break;
     case OperandField::ExecLo:
         if constexpr (is_float) {
-            UNREACHABLE();
+            value = ir.BitCast<IR::F32>(IR::U32{ir.CompositeExtract(ir.UnpackUint2x32(ir.Ballot(ir.GetExec())), 0)});
         } else {
             value = IR::U32{ir.CompositeExtract(ir.UnpackUint2x32(ir.Ballot(ir.GetExec())), 0)};
         }
