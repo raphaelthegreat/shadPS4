@@ -138,6 +138,12 @@ Id TypeId(const EmitContext& ctx, IR::Type type) {
         return ctx.U32[1];
     case IR::Type::F32:
         return ctx.F32[1];
+    case IR::Type::U32x2:
+        return ctx.U32[2];
+    case IR::Type::U64:
+        return ctx.U64;
+    case IR::Type::U32x4:
+        return ctx.U32[4];
     default:
         UNREACHABLE_MSG("Phi node type {}", type);
     }

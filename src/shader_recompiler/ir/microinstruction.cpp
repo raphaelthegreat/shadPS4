@@ -150,6 +150,9 @@ void Inst::SetArg(size_t index, Value value) {
     if (index >= NumArgs()) {
         UNREACHABLE_MSG("Out of bounds argument index {} in opcode {}", index, op);
     }
+    if (GetOpcode() == IR::Opcode::IMul32 && value.IsEmpty()) {
+        UNREACHABLE();
+    }
     const IR::Value arg{Arg(index)};
     if (auto* inst = arg.TryInst()) {
         UndoUse(inst, index);
