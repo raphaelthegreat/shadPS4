@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
+#include <limits>
 #include "common/logging/classes.h"
 #pragma clang optimize off
 #include <unordered_map>
@@ -135,6 +136,100 @@ void LowerLdsSpillsToRegistersPass(IR::Program& program, const RuntimeInfo& runt
     Shader::Optimization::SsaRewritePass(program);
 }
 
+void InverseBallotEliminationPass(IR::Program& program) {
+    std::vector<IR::Inst*> worklist;
+    for (IR::Block* const block : program.blocks) {
+        for (IR::Inst& inst : block->Instructions()) {
+            if (inst.GetOpcode() != IR::Opcode::InverseBallot) {
+                continue;
+            }
+            worklist.push_back(&inst);
+        }
+    }
+    std::unordered_map<IR::Inst*, IR::Value> bitwise_to_logical_map;
+    while (!worklist.empty()) {
+        IR::Inst* const inst = worklist.back();
+        worklist.pop_back();
+
+        if (inst->GetOpcode() == IR::Opcode::Void) {
+            continue;
+        }
+
+        IR::Value value{inst->Arg(0)};
+        if (value.IsImmediate()) {
+            if (value.U64() == 0ull) {
+                inst->ReplaceUsesWithAndRemove(IR::Value{false});
+            } else if (value.U64() == std::numeric_limits<u64>::max()) {
+                inst->ReplaceUsesWithAndRemove(IR::Value{true});
+            } else {
+                UNREACHABLE_MSG("Unexpected immediate argument for InverseBallot {:#x}", value.U64());
+            }
+            continue;
+        }
+
+        IR::Inst* const prod = value.Inst();
+        if (prod->GetOpcode() == IR::Opcode::Ballot) {
+            inst->ReplaceUsesWithAndRemove(prod->Arg(0));
+            continue;
+        }
+
+        if (prod->GetOpcode() != IR::Opcode::BitwiseAnd64 &&
+            prod->GetOpcode() != IR::Opcode::BitwiseNot64 &&
+            prod->GetOpcode() != IR::Opcode::BitwiseOr64 &&
+            prod->GetOpcode() != IR::Opcode::BitwiseXor64 &&
+            prod->GetOpcode() != IR::Opcode::SelectU64) {
+            continue;
+        }
+
+        if (std::ranges::none_of(prod->Uses(), [](const IR::Use& use) { return use.user->GetOpcode() == IR::Opcode::InverseBallot; })) {
+            continue;
+        }
+
+        auto [it, is_new] = bitwise_to_logical_map.try_emplace(prod);
+        if (is_new) {
+            IR::IREmitter ir{*prod->GetParent(), IR::Block::InstructionList::s_iterator_to(*prod)};
+
+            if (prod->GetOpcode() == IR::Opcode::SelectU64) {
+                const IR::U1 a = ir.InverseBallot(IR::U64{prod->Arg(1)});
+                worklist.push_back(a.Inst());
+                const IR::U1 b = ir.InverseBallot(IR::U64{prod->Arg(2)});
+                worklist.push_back(b.Inst());
+                it->second = ir.Select(IR::U1{prod->Arg(0)}, a, b);
+            } else {
+                const IR::U1 a = ir.InverseBallot(IR::U64{prod->Arg(0)});
+                worklist.push_back(a.Inst());
+
+                if (prod->GetOpcode() == IR::Opcode::BitwiseNot64) {
+                    it->second = ir.LogicalNot(a);
+                } else {
+                    const IR::U1 b = ir.InverseBallot(IR::U64{prod->Arg(1)});
+                    worklist.push_back(b.Inst());
+                    switch (prod->GetOpcode()) {
+                    case IR::Opcode::BitwiseAnd64:
+                        it->second = ir.LogicalAnd(a, b);
+                        break;
+                    case IR::Opcode::BitwiseOr64:
+                        it->second = ir.LogicalOr(a, b);
+                        break;
+                    case IR::Opcode::BitwiseXor64:
+                        it->second = ir.LogicalXor(a, b);
+                        break;
+                    default:
+                        break;
+                    }
+                }
+            }
+        }
+
+        auto uses = prod->Uses();
+        for (auto [user, operand] : uses) {
+            if (user->GetOpcode() == IR::Opcode::InverseBallot) {
+                user->ReplaceUsesWithAndRemove(it->second);
+            }
+        }
+    }
+}
+
 IR::Program TranslateProgram(const std::span<const u32>& code, Pools& pools, Info& info,
                              RuntimeInfo& runtime_info, const Profile& profile) {
     // Ensure first instruction is expected.
@@ -170,8 +265,11 @@ IR::Program TranslateProgram(const std::span<const u32>& code, Pools& pools, Inf
         Shader::Optimization::LowerFp64ToFp32(program);
     }
     Shader::Optimization::SsaRewritePass(program);
-    Shader::IR::DumpProgram(program, info, "post-ssa1.");
     Shader::Optimization::ConstantPropagationPass(program.post_order_blocks);
+    Shader::IR::DumpProgram(program, info, "post-ssa1.");
+    if (program.info.pgm_hash == 0x41d379bc) {
+        printf("Bad\n");
+    }
     LowerLdsSpillsToRegistersPass(program, runtime_info);
     if (info.l_stage == LogicalStage::TessellationControl) {
         Shader::Optimization::TessellationPreprocess(program, runtime_info);
@@ -210,11 +308,12 @@ IR::Program TranslateProgram(const std::span<const u32>& code, Pools& pools, Inf
     Shader::IR::DumpProgram(program, info, "post-repair.");
     Shader::Optimization::SsaRewritePass(program);
     Shader::IR::DumpProgram(program, info, "post-ssa2.");
+    InverseBallotEliminationPass(program);
     Shader::Optimization::ConstantPropagationPass(program.post_order_blocks);
     Shader::Optimization::DeadCodeEliminationPass(program);
     Shader::Optimization::SharedMemoryBarrierPass(program, runtime_info, profile);
     Shader::Optimization::CollectShaderInfoPass(program, profile);
-    // Shader::IR::DumpProgram(program, info);
+    Shader::IR::DumpProgram(program, info);
 
     return program;
 }
