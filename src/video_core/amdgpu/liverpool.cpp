@@ -49,6 +49,8 @@ static const char* acb_task_name[] = NAME_ARRAY(ACB_TASK, MAX_NAMES);
 #define RESUME_GFX(task) RESUME(task, dcb_task_name)
 #define RESUME_ASC(task, id) RESUME(task, acb_task_name[id])
 
+static std::ofstream pm4_dump("pm4.bin", std::ios::binary | std::ios::out);
+
 std::array<u8, 48_KB> Liverpool::ConstantEngine::constants_heap;
 
 static std::span<const u32> NextPacket(std::span<const u32> span, size_t offset) {
@@ -143,6 +145,9 @@ void Liverpool::Process(std::stop_token stoken) {
                 rasterizer->Flush();
             }
             submit_done = false;
+            static int counter = 0;
+            pm4_dump.close();
+            pm4_dump.open(fmt::format("pm4{}.bin", counter++), std::ios::binary | std::ios::out);
         }
 
         Platform::IrqC::Instance()->Signal(Platform::InterruptId::GpuIdle);
@@ -238,6 +243,8 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
 
         const auto* header = reinterpret_cast<const PM4Header*>(dcb.data());
         const u32 type = header->type;
+
+        pm4_dump.write((const char*)header, (header->type3.NumWords() + 1) * sizeof(u32));
 
         switch (type) {
         default:
@@ -409,7 +416,9 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                 break;
             }
             case PM4ItOpcode::SetPredication: {
-                LOG_WARNING(Render, "Unimplemented IT_SET_PREDICATION");
+                const auto* set_predication = reinterpret_cast<const PM4CmdSetPredication*>(header);
+                LOG_WARNING(Render, "Unimplemented IT_SET_PREDICATION pred_op={}, predication_boolean={}, continue_bit={}",
+                    magic_enum::enum_name(set_predication->pred_op), set_predication->predication_boolean, set_predication->continue_bit);
                 break;
             }
             case PM4ItOpcode::IndexType: {
@@ -493,10 +502,14 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                     if (host_markers_enabled) {
                         rasterizer->ScopeMarkerBegin(
                             fmt::format("gfx:{}:DrawIndirect", cmd_address));
-                        rasterizer->DrawIndirect(false, indirect_args_addr, offset, stride, 1, 0);
+                        rasterizer->DrawIndirect(false, indirect_args_addr, offset, stride, 1, 0,
+                            draw_indirect->base_vtx_loc.Value(),
+                            draw_indirect->start_inst_loc.Value());
                         rasterizer->ScopeMarkerEnd();
                     } else {
-                        rasterizer->DrawIndirect(false, indirect_args_addr, offset, stride, 1, 0);
+                        rasterizer->DrawIndirect(false, indirect_args_addr, offset, stride, 1, 0,
+                            draw_indirect->base_vtx_loc.Value(),
+                            draw_indirect->start_inst_loc.Value());
                     }
                 }
                 break;
@@ -514,11 +527,15 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                         rasterizer->ScopeMarkerBegin(
                             fmt::format("gfx:{}:DrawIndirectMulti", cmd_address));
                         rasterizer->DrawIndirect(false, indirect_args_addr, offset,
-                                                 draw_indirect->stride, draw_indirect->count, 0);
+                                                 draw_indirect->stride, draw_indirect->count, 0,
+                                                 draw_indirect->base_vtx_loc.Value(),
+                                                 draw_indirect->start_inst_loc.Value());
                         rasterizer->ScopeMarkerEnd();
                     } else {
                         rasterizer->DrawIndirect(false, indirect_args_addr, offset,
-                                                 draw_indirect->stride, draw_indirect->count, 0);
+                                                 draw_indirect->stride, draw_indirect->count, 0,
+                                                 draw_indirect->base_vtx_loc.Value(),
+                                                 draw_indirect->start_inst_loc.Value());
                     }
                 }
                 break;
@@ -535,11 +552,16 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                     const auto cmd_address = reinterpret_cast<const void*>(header);
                     if (host_markers_enabled) {
                         rasterizer->ScopeMarkerBegin(
-                            fmt::format("gfx:{}:DrawIndexIndirect", cmd_address));
-                        rasterizer->DrawIndirect(true, indirect_args_addr, offset, stride, 1, 0);
+                            fmt::format("gfx:{}:DrawIndexIndirect base_vtx_loc={}, start_inst_loc={}", cmd_address, draw_index_indirect->base_vtx_loc.Value(),
+                                draw_index_indirect->start_inst_loc.Value()));
+                        rasterizer->DrawIndirect(true, indirect_args_addr, offset, stride, 1, 0,
+                            draw_index_indirect->base_vtx_loc.Value(),
+                            draw_index_indirect->start_inst_loc.Value());
                         rasterizer->ScopeMarkerEnd();
                     } else {
-                        rasterizer->DrawIndirect(true, indirect_args_addr, offset, stride, 1, 0);
+                        rasterizer->DrawIndirect(true, indirect_args_addr, offset, stride, 1, 0,
+                            draw_index_indirect->base_vtx_loc.Value(),
+                            draw_index_indirect->start_inst_loc.Value());
                     }
                 }
                 break;
@@ -558,12 +580,16 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                             fmt::format("gfx:{}:DrawIndexIndirectMulti", cmd_address));
                         rasterizer->DrawIndirect(true, indirect_args_addr, offset,
                                                  draw_index_indirect->stride,
-                                                 draw_index_indirect->count, 0);
+                                                 draw_index_indirect->count, 0,
+                                                 draw_index_indirect->base_vtx_loc.Value(),
+                                                 draw_index_indirect->start_inst_loc.Value());
                         rasterizer->ScopeMarkerEnd();
                     } else {
                         rasterizer->DrawIndirect(true, indirect_args_addr, offset,
                                                  draw_index_indirect->stride,
-                                                 draw_index_indirect->count, 0);
+                                                 draw_index_indirect->count, 0,
+                                                 draw_index_indirect->base_vtx_loc.Value(),
+                                                 draw_index_indirect->start_inst_loc.Value());
                     }
                 }
                 break;
@@ -585,7 +611,9 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                                                  draw_index_indirect->count,
                                                  draw_index_indirect->count_indirect_enable.Value()
                                                      ? draw_index_indirect->count_addr
-                                                     : 0);
+                                                     : 0,
+                                                     draw_index_indirect->base_vtx_loc.Value(),
+                                                     draw_index_indirect->start_inst_loc.Value());
                         rasterizer->ScopeMarkerEnd();
                     } else {
                         rasterizer->DrawIndirect(true, indirect_args_addr, offset,
@@ -593,7 +621,9 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb, std::span<c
                                                  draw_index_indirect->count,
                                                  draw_index_indirect->count_indirect_enable.Value()
                                                      ? draw_index_indirect->count_addr
-                                                     : 0);
+                                                     : 0,
+                                                     draw_index_indirect->base_vtx_loc.Value(),
+                                                     draw_index_indirect->start_inst_loc.Value());
                     }
                 }
                 break;
@@ -920,6 +950,8 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
 
         auto* header = reinterpret_cast<const PM4Header*>(acb.data());
         u32 next_dw_off = header->type3.NumWords() + 1;
+
+        pm4_dump.write((const char*)header, next_dw_off * sizeof(u32));
 
         // If we have a buffered packet, use it.
         if (queue.tmp_dwords > 0) [[unlikely]] {

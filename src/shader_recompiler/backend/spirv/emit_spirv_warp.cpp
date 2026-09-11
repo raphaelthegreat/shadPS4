@@ -31,9 +31,6 @@ Id EmitShuffle(EmitContext& ctx, Id value, Id index) {
 }
 
 Id EmitReadLane(EmitContext& ctx, Id value, Id lane) {
-    if (ctx.profile.subgroup_size < 64) {
-        lane = ctx.OpBitwiseAnd(ctx.U32[1], lane, ctx.ConstU32(ctx.profile.subgroup_size - 1));
-    }
     return ctx.OpGroupNonUniformBroadcast(ctx.U32[1], SubgroupScope(ctx), value, lane);
 }
 

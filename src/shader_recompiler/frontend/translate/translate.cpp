@@ -87,7 +87,7 @@ void Translator::EmitPrologue(IR::Block* first_block) {
     switch (info.l_stage) {
     case LogicalStage::Vertex:
         // v0: vertex ID, always present
-        ir.SetVectorReg(dst_vreg++, ir.GetAttributeU32(IR::Attribute::VertexId));
+        ir.SetVectorReg(dst_vreg++, ir.ISub(ir.GetAttributeU32(IR::Attribute::VertexId), ir.GetAttributeU32(IR::Attribute::BaseVertex)));
         if (info.stage == Stage::Local) {
             // v1: rel patch ID
             if (runtime_info.num_input_vgprs > 0) {
@@ -102,6 +102,15 @@ void Translator::EmitPrologue(IR::Block* first_block) {
                 ir.SetVectorReg(dst_vreg++, ir.GetAttributeU32(IR::Attribute::InstanceId));
             }
         } else {
+            ASSERT(info.stage == Stage::Vertex);
+
+            if (runtime_info.vs_info.vertex_sgpr_offset != 0) {
+                ir.SetScalarReg(IR::ScalarReg(runtime_info.vs_info.vertex_sgpr_offset - 76), ir.GetAttributeU32(IR::Attribute::BaseVertex));
+            }
+            if (runtime_info.vs_info.instance_sgpr_offset != 0) {
+                ir.SetScalarReg(IR::ScalarReg(runtime_info.vs_info.instance_sgpr_offset - 76), ir.GetAttributeU32(IR::Attribute::BaseInstance));
+            }
+
             // v1: instance ID, step rate 0
             if (runtime_info.num_input_vgprs > 0) {
                 if (runtime_info.vs_info.step_rate_0 != 0) {
@@ -124,7 +133,7 @@ void Translator::EmitPrologue(IR::Block* first_block) {
             }
             // v3: instance ID, plain
             if (runtime_info.num_input_vgprs > 2) {
-                ir.SetVectorReg(dst_vreg++, ir.GetAttributeU32(IR::Attribute::InstanceId));
+                ir.SetVectorReg(dst_vreg++, ir.ISub(ir.GetAttributeU32(IR::Attribute::InstanceId), ir.GetAttributeU32(IR::Attribute::BaseInstance)));
             }
         }
         break;

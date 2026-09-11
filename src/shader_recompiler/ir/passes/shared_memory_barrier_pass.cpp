@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: Copyright 2024 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
-
+#pragma clang optimize off
 #include <unordered_set>
 #include "shader_recompiler/ir/breadth_first_search.h"
 #include "shader_recompiler/ir/ir_emitter.h"
@@ -65,6 +65,9 @@ static void EmitBarrierAtBlockStart(IR::Block* block) {
 
 static bool IsDivergent(const IR::U1& cond) {
     return IR::BreadthFirstSearch(cond, [](IR::Inst* inst) -> std::optional<bool> {
+               if (inst->GetOpcode() == IR::Opcode::ReadLane) {
+                   return false;
+               }
                if (inst->GetOpcode() == IR::Opcode::GetAttributeU32 &&
                    inst->Arg(0).Attribute() == IR::Attribute::LocalInvocationId) {
                    return true;
@@ -130,6 +133,9 @@ void SharedMemoryBarrierPass(IR::Program& program, const RuntimeInfo& runtime_in
     using Type = IR::AbstractSyntaxNode::Type;
     u32 divergence_depth{};
     NodeSet divergence_end;
+    if (program.info.pgm_hash == 0x57bd9f27) {
+        printf("bad\n");
+    }
     const NodeSet divergent_loops = FindDivergentLoops(program.syntax_list);
     for (const IR::AbstractSyntaxNode& node : program.syntax_list) {
         if (node.type == Type::EndIf) {

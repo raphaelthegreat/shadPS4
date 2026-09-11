@@ -236,7 +236,7 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
 }
 
 void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u32 stride,
-                              u32 max_count, VAddr count_address) {
+                              u32 max_count, VAddr count_address, u32 vertex_sgpr_offset, u32 instance_sgpr_offset) {
     RENDERER_TRACE;
 
     scheduler.PopPendingOperations();
@@ -245,7 +245,7 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
         return;
     }
 
-    const GraphicsPipeline* pipeline = pipeline_cache.GetGraphicsPipeline();
+    const GraphicsPipeline* pipeline = pipeline_cache.GetGraphicsPipeline(vertex_sgpr_offset, instance_sgpr_offset);
     if (!pipeline) {
         return;
     }

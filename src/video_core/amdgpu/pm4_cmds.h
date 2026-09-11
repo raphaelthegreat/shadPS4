@@ -714,6 +714,28 @@ struct PM4CmdWaitRegMem {
     }
 };
 
+struct PM4CmdSetPredication {
+    enum class Operation : u32 {
+        Clear = 0,
+        Zpass = 1,
+        Primcount = 2,
+        Memory = 3,
+    };
+
+    PM4Type3Header header;
+    u32 address_lo;
+    struct {
+        u32 address_hi : 8;
+        u32 predication_boolean : 1;
+        u32 reserved1 : 3;
+        u32 hint : 1;
+        u32 reserved2 : 3;
+        Operation pred_op : 3;
+        u32 reserved3 : 12;
+        u32 continue_bit : 1;
+    };
+};
+
 struct PM4CmdWriteData {
     PM4Type3Header header;
     union {

@@ -87,7 +87,7 @@ static u32 MapOutputs(std::span<Shader::OutputMap, 3> outputs, const AmdGpu::VsO
     return num_outputs;
 }
 
-const Shader::RuntimeInfo& PipelineCache::BuildRuntimeInfo(Stage stage, LogicalStage l_stage) {
+const Shader::RuntimeInfo& PipelineCache::BuildRuntimeInfo(Stage stage, LogicalStage l_stage, u32 vertex_sgpr_offset, u32 instance_sgpr_offset) {
     auto& info = runtime_infos[u32(l_stage)];
     const auto& regs = liverpool->regs;
     const auto BuildCommon = [&](const auto& program) {
@@ -147,6 +147,8 @@ const Shader::RuntimeInfo& PipelineCache::BuildRuntimeInfo(Stage stage, LogicalS
             info.es_vs_info.tess_topology = regs.tess_config.topology;
             info.es_vs_info.tess_partitioning = regs.tess_config.partitioning;
         }
+        info.vs_info.vertex_sgpr_offset = vertex_sgpr_offset;
+        info.vs_info.instance_sgpr_offset = instance_sgpr_offset;
         break;
     }
     case Stage::Geometry: {
@@ -320,8 +322,8 @@ PipelineCache::PipelineCache(const Instance& instance_, Scheduler& scheduler_,
 
 PipelineCache::~PipelineCache() = default;
 
-const GraphicsPipeline* PipelineCache::GetGraphicsPipeline() {
-    if (!RefreshGraphicsKey()) {
+const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(u32 vertex_sgpr_offset, u32 instance_sgpr_offset) {
+    if (!RefreshGraphicsKey(vertex_sgpr_offset, instance_sgpr_offset)) {
         return nullptr;
     }
     const auto [it, is_new] = graphics_pipelines.try_emplace(graphics_key);
@@ -374,7 +376,7 @@ const ComputePipeline* PipelineCache::GetComputePipeline() {
     return it->second.get();
 }
 
-bool PipelineCache::RefreshGraphicsKey() {
+bool PipelineCache::RefreshGraphicsKey(u32 vertex_sgpr_offset, u32 instance_sgpr_offset) {
     std::memset(&graphics_key, 0, sizeof(GraphicsPipelineKey));
     const auto& regs = liverpool->regs;
     auto& key = graphics_key;
@@ -428,7 +430,7 @@ bool PipelineCache::RefreshGraphicsKey() {
     }
 
     // Compile and bind shader stages
-    if (!RefreshGraphicsStages()) {
+    if (!RefreshGraphicsStages(vertex_sgpr_offset, instance_sgpr_offset)) {
         return false;
     }
 
@@ -475,7 +477,7 @@ bool PipelineCache::RefreshGraphicsKey() {
     return true;
 }
 
-bool PipelineCache::RefreshGraphicsStages() {
+bool PipelineCache::RefreshGraphicsStages(u32 vertex_sgpr_offset, u32 instance_sgpr_offset) {
     const auto& regs = liverpool->regs;
     auto& key = graphics_key;
     fetch_shader = std::nullopt;
@@ -501,7 +503,7 @@ bool PipelineCache::RefreshGraphicsStages() {
         std::optional<Shader::Gcn::FetchShaderData> fetch_shader_;
         std::tie(infos[stage_out_idx], modules[stage_out_idx], fetch_shader_,
                  key.stage_hashes[stage_out_idx]) =
-            GetProgram(stage_in, stage_out, params, binding);
+            GetProgram(stage_in, stage_out, params, binding, vertex_sgpr_offset, instance_sgpr_offset);
         if (fetch_shader_) {
             fetch_shader = fetch_shader_;
         }
@@ -642,8 +644,9 @@ vk::ShaderModule PipelineCache::CompileModule(Shader::Info& info, Shader::Runtim
 
 PipelineCache::Result PipelineCache::GetProgram(Stage stage, LogicalStage l_stage,
                                                 const Shader::ShaderParams& params,
-                                                Shader::Backend::Bindings& binding) {
-    auto runtime_info = BuildRuntimeInfo(stage, l_stage);
+                                                Shader::Backend::Bindings& binding,
+                                                u32 vertex_sgpr_offset, u32 instance_sgpr_offset) {
+    auto runtime_info = BuildRuntimeInfo(stage, l_stage, vertex_sgpr_offset, instance_sgpr_offset);
     auto [it_pgm, new_program] = program_cache.try_emplace(params.hash);
     if (new_program) {
         it_pgm.value() = std::make_unique<Program>(stage, l_stage, params);

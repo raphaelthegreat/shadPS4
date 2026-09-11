@@ -76,14 +76,15 @@ public:
     bool LoadGraphicsPipeline(Serialization::Archive& ar);
     bool LoadPipelineStage(Serialization::Archive& ar, size_t stage);
 
-    const GraphicsPipeline* GetGraphicsPipeline();
+    const GraphicsPipeline* GetGraphicsPipeline(u32 vertex_sgpr_offset = 0, u32 instance_sgpr_offset = 0);
 
     const ComputePipeline* GetComputePipeline();
 
     using Result = std::tuple<const Shader::Info*, vk::ShaderModule,
                               std::optional<Shader::Gcn::FetchShaderData>, u64>;
     Result GetProgram(Shader::Stage stage, Shader::LogicalStage l_stage,
-                      const Shader::ShaderParams& params, Shader::Backend::Bindings& binding);
+                      const Shader::ShaderParams& params, Shader::Backend::Bindings& binding,
+                      u32 vertex_sgpr_offset = 0, u32 instance_sgpr_offset = 0);
 
     std::optional<vk::ShaderModule> ReplaceShader(vk::ShaderModule module,
                                                   std::span<const u32> spv_code);
@@ -96,8 +97,8 @@ public:
     }
 
 private:
-    bool RefreshGraphicsKey();
-    bool RefreshGraphicsStages();
+    bool RefreshGraphicsKey(u32 vertex_sgpr_offset, u32 instance_sgpr_offset);
+    bool RefreshGraphicsStages(u32 vertex_sgpr_offset, u32 instance_sgpr_offset);
     bool RefreshComputeKey();
 
     void DumpShader(std::span<const u32> code, u64 hash, Shader::Stage stage, size_t perm_idx,
@@ -107,7 +108,8 @@ private:
     vk::ShaderModule CompileModule(Shader::Info& info, Shader::RuntimeInfo& runtime_info,
                                    const std::span<const u32>& code, size_t perm_idx,
                                    Shader::Backend::Bindings& binding);
-    const Shader::RuntimeInfo& BuildRuntimeInfo(Shader::Stage stage, Shader::LogicalStage l_stage);
+    const Shader::RuntimeInfo& BuildRuntimeInfo(Shader::Stage stage, Shader::LogicalStage l_stage,
+        u32 vertex_sgpr_offset, u32 instance_sgpr_offset);
 
     [[nodiscard]] bool IsPipelineCacheDirty() const {
         return num_new_pipelines > 0;
