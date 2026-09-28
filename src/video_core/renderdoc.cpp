@@ -23,6 +23,7 @@ enum class CaptureState {
     Idle,
     Triggered,
     InProgress,
+    Finishing,
 };
 static CaptureState capture_state{CaptureState::Idle};
 static std::atomic<u32> screenshot_game_only_count{0};
@@ -97,7 +98,7 @@ void StartCapture() {
     if (!rdoc_api) {
         return;
     }
-
+    return;
     if (capture_state == CaptureState::Triggered) {
         rdoc_api->StartFrameCapture(nullptr, nullptr);
         capture_state = CaptureState::InProgress;
@@ -109,7 +110,10 @@ void EndCapture() {
         return;
     }
 
-    if (capture_state == CaptureState::InProgress) {
+    if (capture_state == CaptureState::Triggered) {
+        rdoc_api->StartFrameCapture(nullptr, nullptr);
+        capture_state = CaptureState::InProgress;
+    } else if (capture_state == CaptureState::Finishing) {
         rdoc_api->EndFrameCapture(nullptr, nullptr);
         capture_state = CaptureState::Idle;
     }
@@ -118,6 +122,8 @@ void EndCapture() {
 void TriggerCapture() {
     if (capture_state == CaptureState::Idle) {
         capture_state = CaptureState::Triggered;
+    } else if (capture_state == CaptureState::InProgress) {
+        capture_state = CaptureState::Finishing;
     }
 }
 
