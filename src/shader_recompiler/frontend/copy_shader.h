@@ -4,7 +4,6 @@
 #pragma once
 
 #include <map>
-#include <span>
 
 #include "common/types.h"
 #include "shader_recompiler/ir/attribute.h"
@@ -18,6 +17,6 @@ struct CopyShaderData {
     u32 num_comps{0};
 };
 
-CopyShaderData ParseCopyShader(std::span<const u32> code);
+CopyShaderData ParseCopyShader(const u32* code, u32 num_dwords);
 
 } // namespace Shader

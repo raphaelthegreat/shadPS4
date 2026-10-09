@@ -32,13 +32,9 @@ GraphicsPipeline::GraphicsPipeline(
     const Shader::Profile& profile, const GraphicsPipelineKey& key_,
     vk::PipelineCache pipeline_cache, std::span<const Shader::Info*, MaxShaderStages> infos,
     std::span<const Shader::RuntimeInfo, MaxShaderStages> runtime_infos,
-    const Shader::Gcn::FetchShaderData* fetch_shader_, std::span<const vk::ShaderModule> modules,
+    const Shader::Gcn::FetchShaderData& fetch_shader_, std::span<const vk::ShaderModule> modules,
     SerializationSupport& sdata, bool preloading)
-    : Pipeline{instance, scheduler, desc_heap, profile, pipeline_cache}, key{key_} {
-    if (fetch_shader_) {
-        fetch_shader = *fetch_shader_;
-    }
-
+    : Pipeline{instance, scheduler, desc_heap, profile, pipeline_cache}, key{key_}, fetch_shader{fetch_shader_} {
     const vk::Device device = instance.GetDevice();
     std::ranges::copy(infos, stages.begin());
     BuildDescSetLayout(preloading);
@@ -487,9 +483,6 @@ void GraphicsPipeline::BuildDescSetLayout(bool preloading) {
         }
         const auto stage_bit = LogicalStageToStageBit[u32(stage->sw_stage)];
         for (const auto& buffer : stage->buffers) {
-            const auto sharp =
-                preloading ? AmdGpu::Buffer{}
-                           : buffer.GetSharp(*stage); // See for the comment in compute PL creation
             bindings.push_back({
                 .binding = binding++,
                 .descriptorType = vk::DescriptorType::eStorageBuffer,
@@ -498,7 +491,8 @@ void GraphicsPipeline::BuildDescSetLayout(bool preloading) {
             });
         }
         for (const auto& image : stage->images) {
-            const u32 num_bindings = image.NumBindings(*stage);
+            const auto sharp = image.GetSharp(*stage);
+            const u32 num_bindings = image.NumBindings(sharp);
             bindings.push_back({
                 .binding = binding,
                 .descriptorType = image.is_written ? vk::DescriptorType::eStorageImage

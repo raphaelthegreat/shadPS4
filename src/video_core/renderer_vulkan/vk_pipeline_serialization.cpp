@@ -5,15 +5,17 @@
 #include "core/emulator_settings.h"
 #include "shader_recompiler/frontend/fetch_shader.h"
 #include "shader_recompiler/info.h"
+#include "shader_recompiler/specialization.h"
 #include "video_core/cache_storage.h"
+#include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 #include "video_core/renderer_vulkan/vk_shader_util.h"
 
 namespace Serialization {
 /* You should increment versions below once corresponding serialization scheme is changed. */
-static constexpr u32 ShaderBinaryVersion = 6u;
-static constexpr u32 ShaderMetaVersion = 6u;
+static constexpr u32 ShaderBinaryVersion = 7u;
+static constexpr u32 ShaderMetaVersion = 7u;
 static constexpr u32 PipelineKeyVersion = 3u;
 } // namespace Serialization
 
@@ -58,7 +60,6 @@ void RegisterPipelineData(const GraphicsPipelineKey& key, u64 hash,
 }
 
 void RegisterShaderMeta(const Shader::Info& info,
-                        const std::optional<Shader::Gcn::FetchShaderData>& fetch_shader_data,
                         const Shader::StageSpecialization& spec, size_t perm_hash,
                         size_t perm_idx) {
     if (!Storage::DataBase::Instance().IsOpened()) {
@@ -156,10 +157,10 @@ bool PipelineCache::LoadComputePipeline(Serialization::Archive& ar) {
         return false;
     }
 
-    const auto [it, is_new] = compute_pipelines.try_emplace(compute_key);
+    const auto [it, is_new] = compute_pipelines.try_emplace(compute_key.value);
     ASSERT(is_new);
 
-    it.value() =
+    it->second =
         std::make_unique<ComputePipeline>(instance, scheduler, desc_heap, profile, *pipeline_cache,
                                           compute_key, *infos[0], modules[0], sdata, true);
 
@@ -231,25 +232,25 @@ bool PipelineCache::LoadGraphicsPipeline(Serialization::Archive& ar) {
         }
     }
 
-    const auto [it, is_new] = graphics_pipelines.try_emplace(graphics_key);
+    const auto graphics_hash = absl::Hash<GraphicsPipelineKey>{}(graphics_key);
+    const auto [it, is_new] = graphics_pipelines.try_emplace(graphics_hash);
     ASSERT(is_new);
 
-    it.value() = std::make_unique<GraphicsPipeline>(
+    it->second = std::make_unique<GraphicsPipeline>(
         instance, scheduler, desc_heap, profile, graphics_key, *pipeline_cache, infos,
         runtime_infos, fetch_shader, modules, sdata, true);
 
     infos.fill(nullptr);
     modules.fill(nullptr);
-    fetch_shader = nullptr;
+    fetch_shader.Reset();
 
     return true;
 }
 
 bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) {
     auto program = std::make_unique<Program>();
-    Shader::StageSpecialization spec{};
-    spec.info = &program->info;
-    size_t perm_idx{};
+    Shader::StageSpecialization spec;
+    size_t perm_idx;
     if (!LoadShaderMeta(ar, program->info, spec, perm_idx)) {
         return false;
     }
@@ -270,14 +271,14 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
     auto [it_pgm, new_program] = program_cache.try_emplace(program->info.pgm_hash);
     if (new_program) {
         module = CompileSPV(spv, instance.GetDevice());
-        it_pgm.value() = std::move(program);
+        it_pgm->second = std::move(program);
     } else {
-        const auto& it = std::ranges::find(it_pgm.value()->modules, spec, &Program::Module::spec);
-        if (it != it_pgm.value()->modules.end()) {
+        const auto& it = std::ranges::find(it_pgm->second->modules, spec, &Program::Module::spec);
+        if (it != it_pgm->second->modules.end()) {
             // A matching permutation is valid only at its original index. A different index means
             // the store holds entries from more than one cache generation, so this pipeline is
             // left to compile at runtime.
-            const auto idx = std::distance(it_pgm.value()->modules.begin(), it);
+            const auto idx = std::distance(it_pgm->second->modules.begin(), it);
             if (perm_idx != idx) {
                 LOG_WARNING(Render_Vulkan,
                             "Cached permutation {} of {}_{:x} conflicts with index {}, skipping "
@@ -290,14 +291,10 @@ bool PipelineCache::LoadPipelineStage(Serialization::Archive& ar, size_t stage) 
             module = CompileSPV(spv, instance.GetDevice());
         }
     }
-    it_pgm.value()->InsertPermut(module, std::move(spec), perm_idx);
+    it_pgm->second->modules[perm_idx] = {module, std::move(spec)};
 
-    infos[stage] = &it_pgm.value()->info;
+    infos[stage] = &it_pgm->second->info;
     modules[stage] = module;
-    if (auto& fetch = it_pgm.value()->modules[perm_idx].spec.fetch_shader_data; !fetch.Empty()) {
-        fetch_shader = &fetch;
-    }
-
     return true;
 }
 
@@ -448,49 +445,21 @@ bool PersistentSrtInfo::Deserialize(Serialization::Archive& ar) {
 void StageSpecialization::Serialize(Serialization::Archive& ar) const {
     Serialization::Writer spec{ar};
 
-    spec.Write(start);
     spec.Write(runtime_info);
-
-    spec.Write(bitset.to_string());
-
-    if (!fetch_shader_data.Empty()) {
-        spec.Write(sizeof(fetch_shader_data));
-        fetch_shader_data.Serialize(ar);
-    } else {
-        spec.Write(size_t{0});
-    }
-
-    spec.Write(vs_attribs);
-    spec.Write(buffers);
-    spec.Write(images);
-    spec.Write(fmasks);
-    spec.Write(samplers);
+    spec.Write(start_binding);
+    spec.Write(bitset.bits.data(), sizeof(bitset));
+    spec.Write(num_entries);
+    spec.Write(entries.data(), num_entries * sizeof(SpecializationEntry));
 }
 
 bool StageSpecialization::Deserialize(Serialization::Archive& ar) {
     Serialization::Reader spec{ar};
 
-    spec.Read(start);
     spec.Read(runtime_info);
-
-    std::string bits{};
-    spec.Read(bits);
-    bitset = std::bitset<MaxStageResources>(bits);
-
-    u64 fetch_data_size{};
-    spec.Read(fetch_data_size);
-
-    if (fetch_data_size) {
-        Gcn::FetchShaderData fetch_data;
-        fetch_data.Deserialize(ar);
-        fetch_shader_data = fetch_data;
-    }
-
-    spec.Read(vs_attribs);
-    spec.Read(buffers);
-    spec.Read(images);
-    spec.Read(fmasks);
-    spec.Read(samplers);
+    spec.Read(start_binding);
+    spec.Read(bitset.bits.data(), sizeof(bitset));
+    spec.Read(num_entries);
+    spec.Read(entries.data(), num_entries * sizeof(SpecializationEntry));
 
     return true;
 }

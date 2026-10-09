@@ -34,11 +34,6 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
     u32 binding{};
     boost::container::small_vector<vk::DescriptorSetLayoutBinding, 32> bindings;
     for (const auto& buffer : info->buffers) {
-        // During deserialization, we don't have access to the UD to fetch sharp data. To address
-        // this properly we need to track shaprs or portion of them in `sdata`, but since we're
-        // interested only in "is storage" flag (which is not even effective atm), we can take a
-        // shortcut there.
-        const auto sharp = preloading ? AmdGpu::Buffer{} : buffer.GetSharp(*info);
         bindings.push_back({
             .binding = binding++,
             .descriptorType = vk::DescriptorType::eStorageBuffer,
@@ -47,7 +42,8 @@ ComputePipeline::ComputePipeline(const Instance& instance, Scheduler& scheduler,
         });
     }
     for (const auto& image : info->images) {
-        const u32 num_bindings = image.NumBindings(*info);
+        const auto sharp = image.GetSharp(*info);
+        const u32 num_bindings = image.NumBindings(sharp);
         bindings.push_back({
             .binding = binding,
             .descriptorType = image.is_written ? vk::DescriptorType::eStorageImage

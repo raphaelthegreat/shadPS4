@@ -22,13 +22,10 @@ class Scheduler;
 class DescriptorHeap;
 
 struct ComputePipelineKey {
-    size_t value;
+    u64 value;
 
-    friend bool operator==(const ComputePipelineKey& lhs, const ComputePipelineKey& rhs) {
+    friend bool operator==(const ComputePipelineKey& lhs, const ComputePipelineKey& rhs) noexcept {
         return lhs.value == rhs.value;
-    }
-    friend bool operator!=(const ComputePipelineKey& lhs, const ComputePipelineKey& rhs) {
-        return !(lhs == rhs);
     }
 
     void Serialize(Serialization::Archive& ar) const;

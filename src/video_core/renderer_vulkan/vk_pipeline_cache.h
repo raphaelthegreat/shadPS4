@@ -4,14 +4,13 @@
 #pragma once
 
 #include <variant>
-#include <tsl/robin_map.h>
+#include <absl/container/flat_hash_map.h>
 #include "shader_recompiler/profile.h"
 #include "shader_recompiler/recompiler.h"
 #include "shader_recompiler/specialization.h"
 #include "video_core/renderer_vulkan/vk_compute_pipeline.h"
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
 #include "video_core/renderer_vulkan/vk_resource_pool.h"
-#include "vulkan/vulkan.hpp"
 
 template <>
 struct std::hash<vk::ShaderModule> {
@@ -39,29 +38,20 @@ class Scheduler;
 class ShaderCache;
 
 struct Program {
+    static constexpr size_t MAX_PERMUTATIONS = 8;
+
+    Shader::Info info;
+
     struct Module {
         vk::ShaderModule module;
         Shader::StageSpecialization spec;
     };
-    static constexpr size_t MaxPermutations = 8;
-    using ModuleList = boost::container::small_vector<Module, MaxPermutations>;
-
-    Shader::Info info;
-    ModuleList modules{};
+    std::array<Module, MAX_PERMUTATIONS> modules{};
+    u32 num_modules{};
 
     Program() = default;
     Program(Shader::HwStage stage, Shader::SwStage l_stage, Shader::ShaderParams params)
         : info{stage, l_stage, params} {}
-
-    void AddPermut(vk::ShaderModule module, Shader::StageSpecialization&& spec) {
-        modules.emplace_back(module, std::move(spec));
-    }
-
-    void InsertPermut(vk::ShaderModule module, Shader::StageSpecialization&& spec,
-                      size_t perm_idx) {
-        modules.resize(std::max(modules.size(), perm_idx + 1)); // <-- beware of realloc
-        modules[perm_idx] = {module, std::move(spec)};
-    }
 };
 
 struct DrawIndirectParams {
@@ -110,7 +100,7 @@ private:
     std::optional<std::vector<u32>> GetShaderPatch(u64 hash, Shader::HwStage stage, size_t perm_idx,
                                                    std::string_view ext);
     vk::ShaderModule CompileModule(Shader::Info& info, Shader::RuntimeInfo& runtime_info,
-                                   const std::span<const u32>& code, size_t perm_idx,
+                                   const std::span<const u32> code, size_t perm_idx,
                                    Shader::Backend::Bindings& binding);
     const Shader::RuntimeInfo& BuildRuntimeInfo(Shader::HwStage stage, Shader::SwStage l_stage);
 
@@ -128,21 +118,16 @@ private:
     Shader::Profile profile{};
     Shader::Pools pools;
     DrawIndirectParams draw_indirect_params{};
-    tsl::robin_map<size_t, std::unique_ptr<Program>> program_cache;
-    tsl::robin_map<ComputePipelineKey, std::unique_ptr<ComputePipeline>> compute_pipelines;
-    tsl::robin_map<GraphicsPipelineKey, std::unique_ptr<GraphicsPipeline>> graphics_pipelines;
+    absl::flat_hash_map<u64, std::unique_ptr<Program>> program_cache;
+    absl::flat_hash_map<u64, std::unique_ptr<ComputePipeline>, std::identity> compute_pipelines;
+    absl::flat_hash_map<u64, std::unique_ptr<GraphicsPipeline>, std::identity> graphics_pipelines;
     std::array<Shader::RuntimeInfo, MaxShaderStages> runtime_infos{};
     std::array<const Shader::Info*, MaxShaderStages> infos{};
     std::array<vk::ShaderModule, MaxShaderStages> modules{};
-    Shader::Gcn::FetchShaderData* fetch_shader{};
+    Shader::Gcn::FetchShaderData fetch_shader{};
     GraphicsPipelineKey graphics_key{};
     ComputePipelineKey compute_key{};
-    u32 num_new_pipelines{}; // new pipelines added to the cache since the game start
-
-    // Only if Config::collectShadersForDebug()
-    tsl::robin_map<vk::ShaderModule,
-                   std::vector<std::variant<GraphicsPipelineKey, ComputePipelineKey>>>
-        module_related_pipelines;
+    u32 num_new_pipelines{};
 };
 
 } // namespace Vulkan

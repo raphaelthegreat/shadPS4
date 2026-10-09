@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <span>
+#include <type_traits>
 #include "common/types.h"
 #include "shader_recompiler/frontend/tessellation.h"
 #include "video_core/amdgpu/pixel_format.h"
@@ -71,9 +72,9 @@ using OutputMap = std::array<Output, 4>;
 struct SwVertexRuntimeInfo {
     u32 step_rate_0;
     u32 step_rate_1;
-    u16 vertex_sgpr_offset{};
-    u16 instance_sgpr_offset{};
-    bool tess_emulated_primitive{};
+    u16 vertex_sgpr_offset;
+    u16 instance_sgpr_offset;
+    bool tess_emulated_primitive;
 
     bool operator==(const SwVertexRuntimeInfo& other) const noexcept = default;
 };
@@ -93,9 +94,9 @@ struct HwExportRuntimeInfo {
 struct HwVertexRuntimeInfo {
     u32 num_outputs;
     std::array<OutputMap, 3> outputs;
-    bool emulate_depth_negative_one_to_one{};
-    bool clip_disable{};
-    u32 user_clip_plane_mask{};
+    bool emulate_depth_negative_one_to_one;
+    bool clip_disable;
+    u32 user_clip_plane_mask;
 
     bool operator==(const HwVertexRuntimeInfo& other) const noexcept = default;
 };
@@ -141,14 +142,15 @@ using GsOutputPrimTypes = std::array<AmdGpu::GsOutputPrimitiveType, GsMaxOutputS
 struct HwGeometryRuntimeInfo {
     u32 num_outputs;
     std::array<OutputMap, 3> outputs;
-    u32 num_invocations{};
-    u32 output_vertices{};
-    u32 in_vertex_data_size{};
-    u32 out_vertex_data_size{};
+    u32 num_invocations;
+    u32 output_vertices;
+    u32 in_vertex_data_size;
+    u32 out_vertex_data_size;
     AmdGpu::PrimitiveType in_primitive;
     GsOutputPrimTypes out_primitive;
     AmdGpu::GsScenario mode;
-    std::span<const u32> vs_copy;
+    const u32* vs_copy;
+    u32 vs_copy_dwords;
     u64 vs_copy_hash;
 
     bool operator==(const HwGeometryRuntimeInfo& other) const {
@@ -160,24 +162,22 @@ struct HwGeometryRuntimeInfo {
     }
 };
 
-enum class MrtSwizzle : u8 {
-    Identity = 0,
-    Alt = 1,
-    Reverse = 2,
-    ReverseAlt = 3,
-};
 static constexpr u32 MaxColorBuffers = 8;
 
 struct PsColorBuffer {
-    AmdGpu::DataFormat data_format : 6;
-    AmdGpu::NumberFormat num_format : 4;
+    AmdGpu::NumberClass num_class : 2;
     AmdGpu::NumberConversion num_conversion : 3;
     AmdGpu::ShaderExportFormat export_format : 4;
-    u32 blend_self_scale : 1;
+    u16 blend_self_scale : 1;
+    u16 needs_unorm_fixup : 1;
+    u16 reserved : 5;
     AmdGpu::CompMapping swizzle;
 
-    bool operator==(const PsColorBuffer& other) const = default;
+    bool operator==(const PsColorBuffer& other) const {
+        return std::memcmp(this, &other, sizeof(other)) == 0;
+    }
 };
+static_assert(std::has_unique_object_representations_v<PsColorBuffer>);
 
 struct HwFragmentRuntimeInfo {
     struct PsInput {
@@ -185,7 +185,7 @@ struct HwFragmentRuntimeInfo {
         u16 is_default : 1;
         u16 is_flat : 1;
         u16 default_value : 2;
-        u16 : 7;
+        u16 reserved : 7;
 
         bool IsDefault() const {
             return is_default && !is_flat;
@@ -195,7 +195,9 @@ struct HwFragmentRuntimeInfo {
             return is_default && is_flat;
         }
 
-        bool operator==(const PsInput&) const noexcept = default;
+        bool operator==(const PsInput& other) const noexcept {
+            return std::memcmp(this, &other, sizeof(other)) == 0;
+        }
     };
     AmdGpu::PsInput en_flags;
     AmdGpu::PsInput addr_flags;
@@ -209,7 +211,7 @@ struct HwFragmentRuntimeInfo {
     u32 dual_source_blending : 1;
     u32 clip_distance_emulation : 1;
     u32 depth_before_shader : 1;
-    u32 : 12;
+    u32 reserved : 12;
 
     bool operator==(const HwFragmentRuntimeInfo& other) const noexcept {
         return std::ranges::equal(color_buffers, other.color_buffers) &&
@@ -269,11 +271,11 @@ struct RuntimeInfo {
         HwComputeRuntimeInfo cs;
     } hw;
 
-    void Initialize(HwStage stage, SwStage l_stage) {
-        memset(this, 0, sizeof(*this));
-        this->hw_stage = stage;
-        this->sw_stage = l_stage;
-        if (stage == HwStage::Fragment) {
+    void Initialize(HwStage hw_stage, SwStage sw_stage) {
+        std::memset(this, 0, sizeof(*this));
+        this->hw_stage = hw_stage;
+        this->sw_stage = sw_stage;
+        if (hw_stage == HwStage::Fragment) {
             hw.fs.num_samples = 1;
         }
     }

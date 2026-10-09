@@ -7,8 +7,8 @@
 
 namespace Shader {
 
-CopyShaderData ParseCopyShader(std::span<const u32> code) {
-    Gcn::GcnCodeSlice code_slice{code.data(), code.data() + code.size()};
+CopyShaderData ParseCopyShader(const u32* code, u32 num_dwords) {
+    Gcn::GcnCodeSlice code_slice{code, code + num_dwords};
     Gcn::GcnDecodeContext decoder;
 
     constexpr u32 token_mov_vcchi = 0xBEEB03FF;

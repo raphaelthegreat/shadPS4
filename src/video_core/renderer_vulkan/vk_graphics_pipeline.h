@@ -7,6 +7,7 @@
 #include <xxhash.h>
 
 #include "shader_recompiler/frontend/fetch_shader.h"
+#include "video_core/amdgpu/pixel_format.h"
 #include "video_core/amdgpu/regs_color.h"
 #include "video_core/amdgpu/regs_depth.h"
 #include "video_core/amdgpu/regs_primitive.h"
@@ -29,12 +30,18 @@ class DescriptorHeap;
 template <typename T>
 using VertexInputs = boost::container::static_vector<T, MaxVertexBufferCount>;
 
+struct ColorBuffer {
+    AmdGpu::DataFormat data_format : 6;
+    AmdGpu::NumberFormat num_format : 4;
+    u32 blend_self_scale : 1;
+};
+
 struct GraphicsPipelineKey {
     std::array<size_t, MaxShaderStages> stage_hashes;
     std::array<vk::Format, MaxVertexBufferCount> vertex_buffer_formats;
     u32 patch_control_points;
     u32 num_color_attachments;
-    std::array<Shader::PsColorBuffer, AmdGpu::NUM_COLOR_BUFFERS> color_buffers;
+    std::array<ColorBuffer, AmdGpu::NUM_COLOR_BUFFERS> color_buffers;
     std::array<AmdGpu::BlendControl, AmdGpu::NUM_COLOR_BUFFERS> blend_controls;
     std::array<vk::ColorComponentFlags, AmdGpu::NUM_COLOR_BUFFERS> write_masks;
     AmdGpu::ColorBufferMask cb_shader_mask;
@@ -64,6 +71,11 @@ struct GraphicsPipelineKey {
         return std::memcmp(this, &key, sizeof(key)) == 0;
     }
 
+    template <typename H>
+    friend H AbslHashValue(H h, const GraphicsPipelineKey& k) {
+        return H::combine_contiguous(std::move(h), reinterpret_cast<const u8*>(&k), sizeof(k));
+    }
+
     void Serialize(Serialization::Archive& ar) const;
     bool Deserialize(Serialization::Archive& ar);
 };
@@ -88,7 +100,7 @@ public:
                      vk::PipelineCache pipeline_cache,
                      std::span<const Shader::Info*, MaxShaderStages> stages,
                      std::span<const Shader::RuntimeInfo, MaxShaderStages> runtime_infos,
-                     const Shader::Gcn::FetchShaderData* fetch_shader,
+                     const Shader::Gcn::FetchShaderData& fetch_shader,
                      std::span<const vk::ShaderModule> modules, SerializationSupport& sdata,
                      bool preloading);
     ~GraphicsPipeline();
@@ -116,26 +128,11 @@ private:
     Shader::Gcn::FetchShaderData fetch_shader{};
 };
 
-struct ClipDistanceShaderKey {
-    std::array<std::tuple<u8, u8>, 8> clip_locations;
-
-    bool operator==(const ClipDistanceShaderKey& key) const noexcept {
-        return std::memcmp(this, &key, sizeof(key)) == 0;
-    }
-};
-
 } // namespace Vulkan
 
 template <>
 struct std::hash<Vulkan::GraphicsPipelineKey> {
     std::size_t operator()(const Vulkan::GraphicsPipelineKey& key) const noexcept {
-        return XXH3_64bits(&key, sizeof(key));
-    }
-};
-
-template <>
-struct std::hash<Vulkan::ClipDistanceShaderKey> {
-    std::size_t operator()(const Vulkan::ClipDistanceShaderKey& key) const noexcept {
         return XXH3_64bits(&key, sizeof(key));
     }
 };

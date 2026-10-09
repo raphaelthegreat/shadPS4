@@ -62,6 +62,10 @@ struct InfoPersistent {
     InfoPersistent() = default;
     InfoPersistent(HwStage hw_stage_, SwStage sw_stage_, u64 pgm_hash_)
         : hw_stage{hw_stage_}, sw_stage{sw_stage_}, pgm_hash{pgm_hash_} {}
+
+    u32 NumBindings() const noexcept {
+        return buffers.size() + images.size() + samplers.size();
+    }
 };
 
 struct Info : InfoPersistent {
@@ -174,7 +178,6 @@ struct Info : InfoPersistent {
     }
 
     void ReadTessConstantBuffer(TessellationDataConstantBuffer& tess_constants) const {
-        ASSERT(tess_consts_dword_offset >= 0); // We've already tracked the V# UD
         auto buf = ReadUdReg<AmdGpu::Buffer>(static_cast<u32>(tess_consts_ptr_base),
                                              static_cast<u32>(tess_consts_dword_offset));
         VAddr tess_constants_addr = buf.base_address;

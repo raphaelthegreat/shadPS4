@@ -8,6 +8,7 @@
 #include "shader_recompiler/ir/attribute.h"
 #include "shader_recompiler/ir/microinstruction.h"
 #include "shader_recompiler/runtime_info.h"
+#include "video_core/amdgpu/pixel_format.h"
 
 #include <boost/container/static_vector.hpp>
 #include <fmt/format.h>
@@ -184,8 +185,8 @@ void EmitContext::DefineInterfaces() {
     DefineOutputs();
 }
 
-const VectorIds& GetAttributeType(EmitContext& ctx, AmdGpu::NumberFormat fmt) {
-    switch (GetNumberClass(fmt)) {
+const VectorIds& GetAttributeType(EmitContext& ctx, AmdGpu::NumberClass num_class) {
+    switch (num_class) {
     case AmdGpu::NumberClass::Float:
         return ctx.F32;
     case AmdGpu::NumberClass::Sint:
@@ -195,13 +196,13 @@ const VectorIds& GetAttributeType(EmitContext& ctx, AmdGpu::NumberFormat fmt) {
     default:
         break;
     }
-    UNREACHABLE_MSG("Invalid attribute type {}", fmt);
+    UNREACHABLE_MSG("Invalid attribute type {}", u32(num_class));
 }
 
-EmitContext::SpirvAttribute EmitContext::GetAttributeInfo(AmdGpu::NumberFormat fmt, Id id,
+EmitContext::SpirvAttribute EmitContext::GetAttributeInfo(AmdGpu::NumberClass num_class, Id id,
                                                           u32 num_components, bool output,
                                                           bool loaded, bool array) {
-    switch (GetNumberClass(fmt)) {
+    switch (num_class) {
     case AmdGpu::NumberClass::Float:
         return {id, output ? output_f32 : input_f32, F32[1], num_components, false, loaded, array};
     case AmdGpu::NumberClass::Uint:
@@ -211,7 +212,7 @@ EmitContext::SpirvAttribute EmitContext::GetAttributeInfo(AmdGpu::NumberFormat f
     default:
         break;
     }
-    UNREACHABLE_MSG("Invalid attribute type {}", fmt);
+    UNREACHABLE_MSG("Invalid attribute type {}", u32(num_class));
 }
 
 Id EmitContext::GetBufferSize(const u32 sharp_idx) {
@@ -343,14 +344,14 @@ void EmitContext::DefineInputs() {
         for (u32 semantic = 0; semantic < fetch_shader.attributes.size(); ++semantic) {
             const auto& attrib = fetch_shader.attributes[semantic];
             const auto sharp = attrib.GetSharp(info);
-            const Id type{GetAttributeType(*this, sharp.GetNumberFmt())[4]};
+            const Id type{GetAttributeType(*this, GetNumberClass(sharp.GetNumberFmt()))[4]};
             Id id{DefineInput(type, semantic)};
             if (attrib.GetStepRate() != Gcn::VertexAttribute::InstanceIdType::None) {
                 Name(id, fmt::format("vs_instance_attr{}", semantic));
             } else {
                 Name(id, fmt::format("vs_in_attr{}", semantic));
             }
-            input_params[semantic] = GetAttributeInfo(sharp.GetNumberFmt(), id, 4, false);
+            input_params[semantic] = GetAttributeInfo(GetNumberClass(sharp.GetNumberFmt()), id, 4, false);
         }
         break;
     }
@@ -478,14 +479,14 @@ void EmitContext::DefineInputs() {
                 Decorate(attr_id, auxiliary == Qualifier::Centroid ? spv::Decoration::Centroid
                                                                    : spv::Decoration::Sample);
             }
-            input_params[i] = GetAttributeInfo(AmdGpu::NumberFormat::Float, attr_id, num_components,
+            input_params[i] = GetAttributeInfo(AmdGpu::NumberClass::Float, attr_id, num_components,
                                                false, false, primary == Qualifier::PerVertex);
         }
 
         if (has_clip_distance_inputs) {
             const auto type = F32[MaxEmulatedClipDistances];
             const auto attr_id = Name(DefineInput(type, 0), fmt::format("cldist_attr{}", 0));
-            input_params[num_inputs] = GetAttributeInfo(AmdGpu::NumberFormat::Float, attr_id,
+            input_params[num_inputs] = GetAttributeInfo(AmdGpu::NumberClass::Float, attr_id,
                                                         MaxEmulatedClipDistances, false);
         }
         break;
@@ -534,7 +535,7 @@ void EmitContext::DefineInputs() {
             const Id id{DefineInput(type, param_id)};
             Name(id, fmt::format("gs_in_attr{}", param_id));
             input_params[param_id] =
-                GetAttributeInfo(AmdGpu::NumberFormat::Float, id, 4, false, false, true);
+                GetAttributeInfo(AmdGpu::NumberClass::Float, id, 4, false, false, true);
         }
         break;
     }
@@ -646,14 +647,14 @@ void EmitContext::DefineOutputs() {
                     DefineOutput(F32[num_components], i + (needs_clip_distance_emulation ? 1 : 0))};
                 Name(id, fmt::format("out_attr{}", i));
                 output_params[i] =
-                    GetAttributeInfo(AmdGpu::NumberFormat::Float, id, num_components, true);
+                    GetAttributeInfo(AmdGpu::NumberClass::Float, id, num_components, true);
                 ++num_attrs;
             }
 
             if (needs_clip_distance_emulation) {
                 clip_distances = Id{DefineOutput(F32[MaxEmulatedClipDistances], 0)};
                 output_params[num_attrs] = GetAttributeInfo(
-                    AmdGpu::NumberFormat::Float, clip_distances, MaxEmulatedClipDistances, true);
+                    AmdGpu::NumberClass::Float, clip_distances, MaxEmulatedClipDistances, true);
                 Name(clip_distances, fmt::format("cldist_attr{}", 0));
             }
         }
@@ -707,7 +708,7 @@ void EmitContext::DefineOutputs() {
             const Id id{DefineOutput(F32[num_components], i)};
             Name(id, fmt::format("out_attr{}", i));
             output_params[i] =
-                GetAttributeInfo(AmdGpu::NumberFormat::Float, id, num_components, true);
+                GetAttributeInfo(AmdGpu::NumberClass::Float, id, num_components, true);
         }
         break;
     }
@@ -730,8 +731,8 @@ void EmitContext::DefineOutputs() {
                 continue;
             }
             const u32 num_components = info.stores.NumComponents(mrt);
-            const AmdGpu::NumberFormat num_format{runtime_info.hw.fs.color_buffers[i].num_format};
-            const Id type{GetAttributeType(*this, num_format)[num_components]};
+            const auto num_class{runtime_info.hw.fs.color_buffers[i].num_class};
+            const Id type{GetAttributeType(*this, num_class)[num_components]};
             Id id;
             if (runtime_info.hw.fs.dual_source_blending) {
                 id = DefineOutput(type, 0);
@@ -740,7 +741,7 @@ void EmitContext::DefineOutputs() {
                 id = DefineOutput(type, i);
             }
             Name(id, fmt::format("frag_color{}", i));
-            frag_outputs[i] = GetAttributeInfo(num_format, id, num_components, true);
+            frag_outputs[i] = GetAttributeInfo(num_class, id, num_components, true);
             ++num_render_targets;
         }
         // Dual source blending allows at most 2 render targets, one for each source.
@@ -755,7 +756,7 @@ void EmitContext::DefineOutputs() {
         for (u32 attr_id = 0; attr_id < info.gs_copy_data.num_attrs; attr_id++) {
             const Id id{DefineOutput(F32[4], attr_id)};
             Name(id, fmt::format("out_attr{}", attr_id));
-            output_params[attr_id] = GetAttributeInfo(AmdGpu::NumberFormat::Float, id, 4, true);
+            output_params[attr_id] = GetAttributeInfo(AmdGpu::NumberClass::Float, id, 4, true);
         }
         break;
     }
@@ -992,14 +993,15 @@ void EmitContext::DefineImagesAndSamplers() {
     for (const auto& image_desc : info.images) {
         const auto sharp = image_desc.GetSharp(info);
         const auto nfmt = sharp.GetNumberFmt();
+        const auto num_class = AmdGpu::GetNumberClass(nfmt);
         const bool is_integer = AmdGpu::IsInteger(nfmt);
         const bool is_storage = image_desc.is_written;
         const MipStorageFallbackMode mip_fallback_mode = image_desc.mip_fallback_mode;
-        const VectorIds& data_types = GetAttributeType(*this, nfmt);
+        const VectorIds& data_types = GetAttributeType(*this, num_class);
         const Id sampled_type = data_types[1];
         const Id image_type{ImageType(*this, image_desc, sampled_type)};
 
-        const u32 num_bindings = image_desc.NumBindings(info);
+        const u32 num_bindings = image_desc.NumBindings(sharp);
         Id pointee_type = image_type;
         if (mip_fallback_mode == MipStorageFallbackMode::DynamicIndex) {
             pointee_type = TypeArray(pointee_type, ConstU32(num_bindings));

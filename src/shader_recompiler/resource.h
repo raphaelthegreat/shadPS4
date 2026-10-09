@@ -41,7 +41,7 @@ struct SharpFetch {
 
     template <u32 num_dwords = N>
         requires(num_dwords <= N)
-    constexpr bool Fetch(const u32* flatbuf, T* out) const {
+    [[gnu::always_inline]] constexpr bool Fetch(const u32* flatbuf, T* out) const {
         if (summary == Summary::SingleLoad) [[likely]] {
             std::memcpy(out, flatbuf + offsets[0], num_dwords * sizeof(u32));
             return true;
@@ -96,7 +96,7 @@ struct BufferResource {
         return buffer_type != BufferType::Guest;
     }
 
-    constexpr AmdGpu::Buffer GetSharp(const auto& info) const noexcept {
+    [[gnu::always_inline]] constexpr AmdGpu::Buffer GetSharp(const auto& info) const noexcept {
         AmdGpu::Buffer buffer;
         if (!sharp_fetch.Fetch(info.flattened_ud_buf.data(), &buffer)) {
             return AmdGpu::Buffer::Null();
@@ -131,7 +131,7 @@ struct ImageResource {
     MipStorageFallbackMode mip_fallback_mode{};
     SharpFetchPostOp post_op{};
 
-    constexpr AmdGpu::Image GetSharp(const auto& info) const noexcept {
+    [[gnu::always_inline]] constexpr AmdGpu::Image GetSharp(const auto& info) const noexcept {
         AmdGpu::Image image{};
         if (!Fetch(info.flattened_ud_buf.data(), &image)) {
             return AmdGpu::Image::Null(is_depth);
@@ -152,7 +152,7 @@ struct ImageResource {
         return image;
     }
 
-    constexpr bool Fetch(const u32* flatbuf, AmdGpu::Image* out) const {
+    [[gnu::always_inline]] constexpr bool Fetch(const u32* flatbuf, AmdGpu::Image* out) const {
         if (!is_r128) {
             // Fetch full 8 byte T#
             return sharp_fetch.Fetch(flatbuf, out);
@@ -165,8 +165,7 @@ struct ImageResource {
         return true;
     }
 
-    u32 NumBindings(const auto& info) const {
-        const AmdGpu::Image tsharp = GetSharp(info);
+    u32 NumBindings(const AmdGpu::Image& tsharp) const {
         return (mip_fallback_mode == MipStorageFallbackMode::DynamicIndex)
                    ? (tsharp.last_level - tsharp.base_level + 1)
                    : 1;
@@ -180,7 +179,7 @@ struct SamplerResource {
     SharpLocation post_op_tsharp_dw3_off{};
     bool is_depth{};
 
-    constexpr AmdGpu::Sampler GetSharp(const auto& info) const noexcept {
+    [[gnu::always_inline]] constexpr AmdGpu::Sampler GetSharp(const auto& info) const noexcept {
         AmdGpu::Sampler sampler{};
         sharp_fetch.Fetch(info.flattened_ud_buf.data(), &sampler);
         if (post_op == SharpFetchPostOp::DisableAnisoIfSingleLod) {
@@ -208,7 +207,7 @@ using SamplerResourceList = boost::container::static_vector<SamplerResource, NUM
 struct FMaskResource {
     SharpLocation sharp_idx;
 
-    constexpr AmdGpu::Image GetSharp(const auto& info) const noexcept {
+    [[gnu::always_inline]] constexpr AmdGpu::Image GetSharp(const auto& info) const noexcept {
         return info.template ReadUdSharp<AmdGpu::Image>(sharp_idx);
     }
 };

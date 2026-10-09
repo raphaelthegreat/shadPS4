@@ -4,6 +4,7 @@
 #pragma once
 
 #include <string_view>
+#include <utility>
 #include <fmt/format.h>
 #include "common/assert.h"
 #include "common/types.h"
@@ -90,7 +91,7 @@ enum class NumberClass : u8 {
     Uint = 2,
 };
 
-enum class CompSwizzle : u8 {
+enum class CompSwizzle : u16 {
     Zero = 0,
     One = 1,
     Red = 4,
@@ -109,18 +110,20 @@ enum class NumberConversion : u32 {
     Uint32ToUnorm = 6,
     SrgbToNorm = 7,
 };
+static_assert(std::bit_width(std::to_underlying(NumberConversion::SrgbToNorm)) <= 3);
 
 union CompMapping {
     struct {
-        CompSwizzle r;
-        CompSwizzle g;
-        CompSwizzle b;
-        CompSwizzle a;
+        CompSwizzle r : 3;
+        CompSwizzle g : 3;
+        CompSwizzle b : 3;
+        CompSwizzle a : 3;
+        u16 reserved : 4;
     };
-    std::array<CompSwizzle, 4> array;
+    u16 raw;
 
     bool operator==(const CompMapping& other) const {
-        return array == other.array;
+        return raw == other.raw;
     }
 
     template <typename T>
@@ -142,16 +145,16 @@ union CompMapping {
     }
 
     [[nodiscard]] CompMapping Inverse() const {
-        CompMapping result{};
-        InverseSingle(result.r, CompSwizzle::Red);
-        InverseSingle(result.g, CompSwizzle::Green);
-        InverseSingle(result.b, CompSwizzle::Blue);
-        InverseSingle(result.a, CompSwizzle::Alpha);
+        CompMapping result;
+        result.r = InverseSingle(CompSwizzle::Red);
+        result.g = InverseSingle(CompSwizzle::Green);
+        result.b = InverseSingle(CompSwizzle::Blue);
+        result.a = InverseSingle(CompSwizzle::Alpha);
         return result;
     }
 
     [[nodiscard]] u32 Map(u32 comp) const {
-        const u32 swizzled_comp = u32(array[comp]);
+        const u32 swizzled_comp = u32(raw >> (comp * 4)) & 0xfu;
         constexpr u32 min_comp = u32(AmdGpu::CompSwizzle::Red);
         return swizzled_comp >= min_comp ? swizzled_comp - min_comp : comp;
     }
@@ -177,20 +180,21 @@ private:
         }
     }
 
-    void InverseSingle(CompSwizzle& dst, const CompSwizzle target) const {
+    CompSwizzle InverseSingle(const CompSwizzle target) const {
         if (r == target) {
-            dst = CompSwizzle::Red;
+            return CompSwizzle::Red;
         } else if (g == target) {
-            dst = CompSwizzle::Green;
+            return CompSwizzle::Green;
         } else if (b == target) {
-            dst = CompSwizzle::Blue;
+            return CompSwizzle::Blue;
         } else if (a == target) {
-            dst = CompSwizzle::Alpha;
+            return CompSwizzle::Alpha;
         } else {
-            dst = CompSwizzle::Zero;
+            return CompSwizzle::Zero;
         }
     }
 };
+static_assert(std::has_unique_object_representations_v<CompMapping>);
 
 static constexpr CompMapping IdentityMapping = {
     .r = CompSwizzle::Red,
@@ -300,15 +304,10 @@ constexpr CompMapping RemapSwizzle(const DataFormat format, const CompMapping sw
         // but Vulkan single-channel formats expose it only via R. Redirect any selector
         // that points at Alpha to Red so the texel is read correctly.
         CompMapping result = swizzle;
-        const auto remap_alpha_to_red = [](CompSwizzle& c) {
-            if (c == CompSwizzle::Alpha) {
-                c = CompSwizzle::Red;
-            }
-        };
-        remap_alpha_to_red(result.r);
-        remap_alpha_to_red(result.g);
-        remap_alpha_to_red(result.b);
-        remap_alpha_to_red(result.a);
+        result.r = result.r == CompSwizzle::Alpha ? result.r = CompSwizzle::Red : result.r;
+        result.g = result.g == CompSwizzle::Alpha ? result.g = CompSwizzle::Red : result.g;
+        result.b = result.b == CompSwizzle::Alpha ? result.b = CompSwizzle::Red : result.b;
+        result.a = result.a == CompSwizzle::Alpha ? result.a = CompSwizzle::Red : result.a;
         return result;
     }
     default:

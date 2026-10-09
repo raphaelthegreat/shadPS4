@@ -53,9 +53,11 @@ struct FetchShaderData {
     s8 vertex_offset_sgpr = -1;   ///< SGPR of vertex offset from VADDR
     s8 instance_offset_sgpr = -1; ///< SGPR of instance offset from VADDR
 
-    bool operator==(const FetchShaderData& other) const {
-        return attributes == other.attributes && vertex_offset_sgpr == other.vertex_offset_sgpr &&
-               instance_offset_sgpr == other.instance_offset_sgpr;
+    void Reset() {
+        size = 0;
+        attributes.clear();
+        vertex_offset_sgpr = -1;
+        instance_offset_sgpr = -1;
     }
 
     bool Empty() const {

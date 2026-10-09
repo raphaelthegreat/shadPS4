@@ -12,9 +12,12 @@
 #include "shader_recompiler/info.h"
 #include "shader_recompiler/recompiler.h"
 #include "shader_recompiler/runtime_info.h"
+#include "shader_recompiler/specialization.h"
 #include "video_core/amdgpu/liverpool.h"
+#include "video_core/amdgpu/pixel_format.h"
 #include "video_core/cache_storage.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
+#include "video_core/renderer_vulkan/vk_compute_pipeline.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_pipeline_serialization.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -148,9 +151,10 @@ const Shader::RuntimeInfo& PipelineCache::BuildRuntimeInfo(HwStage stage, SwStag
         info.hw.gs.out_vertex_data_size = regs.vgt_gs_vert_itemsize[0];
         info.hw.gs.mode = regs.vgt_gs_mode.mode;
         const auto params_vc = AmdGpu::GetParams(regs.vs_program);
-        info.hw.gs.vs_copy = params_vc.code;
+        info.hw.gs.vs_copy = params_vc.code.data();
+        info.hw.gs.vs_copy_dwords = params_vc.code.size();
         info.hw.gs.vs_copy_hash = params_vc.hash;
-        DumpShader(info.hw.gs.vs_copy, info.hw.gs.vs_copy_hash, Shader::HwStage::Vertex, 0,
+        DumpShader(params_vc.code, params_vc.hash, Shader::HwStage::Vertex, 0,
                    "copy.bin");
         break;
     }
@@ -204,8 +208,42 @@ const Shader::RuntimeInfo& PipelineCache::BuildRuntimeInfo(HwStage stage, SwStag
                 .default_value = u16(ps_inputs[i].default_value),
             };
         }
-        for (u32 i = 0; i < Shader::MaxColorBuffers; i++) {
-            info.hw.fs.color_buffers[i] = graphics_key.color_buffers[i];
+        const bool skip_cb_binding =
+            regs.color_control.mode == AmdGpu::ColorControl::OperationMode::Disable;
+        for (s32 cb = 0; cb < AmdGpu::NUM_COLOR_BUFFERS && !skip_cb_binding; ++cb) {
+            const auto& col_buf = regs.color_buffers[cb];
+            if (!col_buf || !regs.color_target_mask.GetMask(cb)) {
+                // No attachment bound or writing to it is disabled.
+                continue;
+            }
+
+            const auto& bc = regs.blend_control[cb];
+            const auto data_fmt = col_buf.GetDataFmt();
+            const auto num_fmt = col_buf.GetNumberFmt();
+
+            // Fill color target information
+            auto& color_buffer = info.hw.fs.color_buffers[cb];
+            color_buffer.num_class = AmdGpu::GetNumberClass(num_fmt);
+            color_buffer.num_conversion = col_buf.GetNumberConversion();
+            color_buffer.export_format = regs.color_export_format.GetFormat(cb);
+            color_buffer.swizzle = col_buf.Swizzle();
+
+            color_buffer.blend_self_scale =
+                bc.enable && !col_buf.info.blend_bypass &&
+                (bc.color_func == AmdGpu::BlendControl::BlendFunc::Min ||
+                 bc.color_func == AmdGpu::BlendControl::BlendFunc::Max) &&
+                bc.color_src_factor == AmdGpu::BlendControl::BlendFactor::SrcColor &&
+                bc.color_dst_factor == AmdGpu::BlendControl::BlendFactor::DstColor;
+
+            // Metal seems to have an issue where 8-bit unorm/snorm/sRGB outputs to render target
+            // need a bias applied to round correctly; detect and set the flag for that here.
+            color_buffer.needs_unorm_fixup = instance.GetDriverID() == vk::DriverId::eMoltenvk &&
+                                           (num_fmt == AmdGpu::NumberFormat::Unorm ||
+                                            num_fmt == AmdGpu::NumberFormat::Snorm ||
+                                            num_fmt == AmdGpu::NumberFormat::Srgb) &&
+                                           (data_fmt == AmdGpu::DataFormat::Format8 ||
+                                            data_fmt == AmdGpu::DataFormat::Format8_8 ||
+                                            data_fmt == AmdGpu::DataFormat::Format8_8_8_8);
         }
         // Lowered user clip planes ride the same emulation path as guest-exported distances, so
         // the fragment side arms whenever the hardware vertex stage lowers them, keeping its input
@@ -342,27 +380,18 @@ const GraphicsPipeline* PipelineCache::GetGraphicsPipeline(const DrawIndirectPar
     if (!RefreshGraphicsKey()) {
         return nullptr;
     }
-    const auto [it, is_new] = graphics_pipelines.try_emplace(graphics_key);
+    const auto graphics_hash = absl::Hash<GraphicsPipelineKey>{}(graphics_key);
+    const auto [it, is_new] = graphics_pipelines.try_emplace(graphics_hash);
     if (is_new) {
-        const auto pipeline_hash = std::hash<GraphicsPipelineKey>{}(graphics_key);
-        LOG_INFO(Render_Vulkan, "Compiling graphics pipeline {:#x}", pipeline_hash);
+        LOG_INFO(Render_Vulkan, "Compiling graphics pipeline {:#x}", graphics_hash);
 
         GraphicsPipeline::SerializationSupport sdata{};
-        it.value() = std::make_unique<GraphicsPipeline>(
+        it->second = std::make_unique<GraphicsPipeline>(
             instance, scheduler, desc_heap, profile, graphics_key, *pipeline_cache, infos,
             runtime_infos, fetch_shader, modules, sdata, false);
 
-        RegisterPipelineData(graphics_key, pipeline_hash, sdata);
+        RegisterPipelineData(graphics_key, graphics_hash, sdata);
         ++num_new_pipelines;
-
-        if (EmulatorSettings.IsShaderCollect()) {
-            for (auto stage = 0; stage < MaxShaderStages; ++stage) {
-                if (infos[stage]) {
-                    auto& m = modules[stage];
-                    module_related_pipelines[m].emplace_back(graphics_key);
-                }
-            }
-        }
     }
     return it->second.get();
 }
@@ -371,27 +400,27 @@ const ComputePipeline* PipelineCache::GetComputePipeline() {
     if (!RefreshComputeKey()) {
         return nullptr;
     }
-    const auto [it, is_new] = compute_pipelines.try_emplace(compute_key);
+    const auto compute_hash = compute_key.value;
+    const auto [it, is_new] = compute_pipelines.try_emplace(compute_hash);
     if (is_new) {
-        const auto pipeline_hash = std::hash<ComputePipelineKey>{}(compute_key);
-        LOG_INFO(Render_Vulkan, "Compiling compute pipeline {:#x}", pipeline_hash);
+        LOG_INFO(Render_Vulkan, "Compiling compute pipeline {:#x}", compute_hash);
 
         ComputePipeline::SerializationSupport sdata{};
-        it.value() = std::make_unique<ComputePipeline>(instance, scheduler, desc_heap, profile,
+        it->second = std::make_unique<ComputePipeline>(instance, scheduler, desc_heap, profile,
                                                        *pipeline_cache, compute_key, *infos[0],
                                                        modules[0], sdata, false);
         RegisterPipelineData(compute_key, sdata);
         ++num_new_pipelines;
-
-        if (EmulatorSettings.IsShaderCollect()) {
-            auto& m = modules[0];
-            module_related_pipelines[m].emplace_back(compute_key);
-        }
     }
     return it->second.get();
 }
 
 bool PipelineCache::RefreshGraphicsKey() {
+    // Compile and bind shader stages
+    if (!RefreshGraphicsStages()) {
+        return false;
+    }
+
     std::memset(&graphics_key, 0, sizeof(GraphicsPipelineKey));
     const auto& regs = liverpool->regs;
     auto& key = graphics_key;
@@ -416,14 +445,20 @@ bool PipelineCache::RefreshGraphicsKey() {
     key.num_samples = key.depth_samples;
     key.cb_shader_mask = regs.color_shader_mask;
 
+    const auto* fs_info = infos[u32(SwStage::Fragment)];
+    key.mrt_mask = fs_info ? fs_info->mrt_mask : 0u;
+    key.num_color_attachments = std::bit_width(key.mrt_mask);
+
+    u8 color_samples = 0;
+    bool all_color_samples_same = true;
+
     const bool skip_cb_binding =
         regs.color_control.mode == AmdGpu::ColorControl::OperationMode::Disable;
-
-    // First pass to fill render target information needed by shader recompiler
-    for (s32 cb = 0; cb < AmdGpu::NUM_COLOR_BUFFERS && !skip_cb_binding; ++cb) {
+    for (s32 cb = 0; cb < key.num_color_attachments && !skip_cb_binding; ++cb) {
         const auto& col_buf = regs.color_buffers[cb];
-        if (!col_buf || !regs.color_target_mask.GetMask(cb)) {
-            // No attachment bound or writing to it is disabled.
+        const auto& bc = regs.blend_control[cb];
+        const u32 target_mask = regs.color_target_mask.GetMask(cb);
+        if (!col_buf || !target_mask || (key.mrt_mask & (1u << cb)) == 0) {
             continue;
         }
 
@@ -431,46 +466,22 @@ bool PipelineCache::RefreshGraphicsKey() {
         auto& color_buffer = key.color_buffers[cb];
         color_buffer.data_format = col_buf.GetDataFmt();
         color_buffer.num_format = col_buf.GetNumberFmt();
-        color_buffer.num_conversion = col_buf.GetNumberConversion();
-        color_buffer.export_format = regs.color_export_format.GetFormat(cb);
-        color_buffer.swizzle = col_buf.Swizzle();
-
-        const auto& bc = regs.blend_control[cb];
         color_buffer.blend_self_scale =
             bc.enable && !col_buf.info.blend_bypass &&
             (bc.color_func == AmdGpu::BlendControl::BlendFunc::Min ||
              bc.color_func == AmdGpu::BlendControl::BlendFunc::Max) &&
             bc.color_src_factor == AmdGpu::BlendControl::BlendFactor::SrcColor &&
             bc.color_dst_factor == AmdGpu::BlendControl::BlendFactor::DstColor;
-    }
-
-    // Compile and bind shader stages
-    if (!RefreshGraphicsStages()) {
-        return false;
-    }
-
-    // Second pass to mask out render targets not written by shader and fill remaining info
-    u8 color_samples = 0;
-    bool all_color_samples_same = true;
-    for (s32 cb = 0; cb < key.num_color_attachments && !skip_cb_binding; ++cb) {
-        const auto& col_buf = regs.color_buffers[cb];
-        const u32 target_mask = regs.color_target_mask.GetMask(cb);
-        if (!col_buf || !target_mask) {
-            continue;
-        }
-        if ((key.mrt_mask & (1u << cb)) == 0) {
-            std::memset(&key.color_buffers[cb], 0, sizeof(Shader::PsColorBuffer));
-            continue;
-        }
 
         // Fill color blending information
-        if (regs.blend_control[cb].enable && !col_buf.info.blend_bypass) {
-            key.blend_controls[cb] = regs.blend_control[cb];
+        if (bc.enable && !col_buf.info.blend_bypass) {
+            key.blend_controls[cb] = bc;
         }
 
         // Apply swizzle to target mask
+        const auto& fs_runtime_info = runtime_infos[u32(SwStage::Fragment)];
         key.write_masks[cb] =
-            vk::ColorComponentFlags{key.color_buffers[cb].swizzle.ApplyMask(target_mask)};
+            vk::ColorComponentFlags{fs_runtime_info.hw.fs.color_buffers[cb].swizzle.ApplyMask(target_mask)};
 
         // Fill color samples
         const u8 prev_color_samples = std::exchange(color_samples, col_buf.NumSamples());
@@ -489,13 +500,27 @@ bool PipelineCache::RefreshGraphicsKey() {
         }
     }
 
+    const auto* vs_info = infos[u32(SwStage::Vertex)];
+    if (vs_info && !fetch_shader.Empty() && !instance.IsVertexInputDynamicState()) {
+        // Without vertex input dynamic state, the pipeline needs to specialize on format.
+        // Stride will still be handled outside the pipeline using dynamic state.
+        u32 vertex_binding = 0;
+        for (const auto& attrib : fetch_shader.attributes) {
+            const auto& buffer = attrib.GetSharp(*vs_info);
+            ASSERT_MSG(vertex_binding < MaxVertexBufferCount,
+                       "Vertex attribute binding count exceeded limit: {} >= {}", vertex_binding,
+                       MaxVertexBufferCount);
+            key.vertex_buffer_formats[vertex_binding++] =
+                Vulkan::LiverpoolToVK::SurfaceFormat(buffer.GetDataFmt(), buffer.GetNumberFmt());
+        }
+    }
+
     return true;
 }
 
 bool PipelineCache::RefreshGraphicsStages() {
     const auto& regs = liverpool->regs;
     auto& key = graphics_key;
-    fetch_shader = nullptr;
 
     Shader::Backend::Bindings binding{};
     const auto bind_stage = [&](HwStage stage_in, SwStage stage_out) -> bool {
@@ -522,12 +547,9 @@ bool PipelineCache::RefreshGraphicsStages() {
 
     infos.fill(nullptr);
     modules.fill(nullptr);
+    fetch_shader.Reset();
 
     bind_stage(HwStage::Fragment, SwStage::Fragment);
-
-    const auto* fs_info = infos[static_cast<u32>(SwStage::Fragment)];
-    key.mrt_mask = fs_info ? fs_info->mrt_mask : 0u;
-    key.num_color_attachments = std::bit_width(key.mrt_mask);
 
     switch (regs.stage_enable.raw) {
     case AmdGpu::ShaderStageEnable::VgtStages::EsGs:
@@ -593,21 +615,6 @@ bool PipelineCache::RefreshGraphicsStages() {
         return false;
     }
 
-    const auto* vs_info = infos[static_cast<u32>(SwStage::Vertex)];
-    if (vs_info && fetch_shader && !instance.IsVertexInputDynamicState()) {
-        // Without vertex input dynamic state, the pipeline needs to specialize on format.
-        // Stride will still be handled outside the pipeline using dynamic state.
-        u32 vertex_binding = 0;
-        for (const auto& attrib : fetch_shader->attributes) {
-            const auto& buffer = attrib.GetSharp(*vs_info);
-            ASSERT_MSG(vertex_binding < MaxVertexBufferCount,
-                       "Vertex attribute binding count exceeded limit: {} >= {}", vertex_binding,
-                       MaxVertexBufferCount);
-            key.vertex_buffer_formats[vertex_binding++] =
-                Vulkan::LiverpoolToVK::SurfaceFormat(buffer.GetDataFmt(), buffer.GetNumberFmt());
-        }
-    }
-
     return true;
 }
 
@@ -621,7 +628,7 @@ bool PipelineCache::RefreshComputeKey() {
 }
 
 vk::ShaderModule PipelineCache::CompileModule(Shader::Info& info, Shader::RuntimeInfo& runtime_info,
-                                              const std::span<const u32>& code, size_t perm_idx,
+                                              const std::span<const u32> code, size_t perm_idx,
                                               Shader::Backend::Bindings& binding) {
     LOG_INFO(Render_Vulkan, "Compiling {} shader {:#x} {}", info.hw_stage, info.pgm_hash,
              perm_idx != 0 ? "(permutation)" : "");
@@ -659,28 +666,32 @@ PipelineCache::Result PipelineCache::GetProgram(HwStage hw_stage, SwStage sw_sta
     auto runtime_info = BuildRuntimeInfo(hw_stage, sw_stage);
     auto [it_pgm, new_program] = program_cache.try_emplace(params.hash);
     if (new_program) {
-        it_pgm.value() = std::make_unique<Program>(hw_stage, sw_stage, params);
-        auto& program = it_pgm.value();
-        auto start = binding;
-        const auto module = CompileModule(program->info, runtime_info, params.code, 0, binding);
-        auto spec = Shader::StageSpecialization(program->info, runtime_info, profile, start);
-        const auto perm_hash = HashCombine(params.hash, 0);
-
-        RegisterShaderMeta(program->info, spec.fetch_shader_data, spec, perm_hash, 0);
-        program->AddPermut(module, std::move(spec));
-        if (auto& fetch = program->modules[0].spec.fetch_shader_data; !fetch.Empty()) {
-            fetch_shader = &fetch;
+        it_pgm->second = std::make_unique<Program>(hw_stage, sw_stage, params);
+        auto& program = it_pgm->second;
+        auto& permutation = program->modules[program->num_modules++];
+        if (program->info.has_fetch_shader) {
+            Shader::Gcn::ParseFetchShader(program->info, fetch_shader);
         }
-        return std::make_tuple(&program->info, module, perm_hash);
+
+        auto start = binding;
+        permutation.module = CompileModule(program->info, runtime_info, params.code, 0, binding);
+        std::construct_at(&permutation.spec, program->info, runtime_info, fetch_shader, start.unified);
+
+        const auto perm_hash = HashCombine(params.hash, 0);
+        RegisterShaderMeta(program->info, permutation.spec, perm_hash, 0);
+        return std::make_tuple(&program->info, permutation.module, perm_hash);
     }
 
-    auto& program = it_pgm.value();
+    auto& program = it_pgm->second;
     auto& info = program->info;
-    info.pgm_base = params.Base(); // Needs to be actualized for inline cbuffer address fixup
+    info.pgm_base = params.Base();
     info.user_data = params.user_data;
+    if (info.has_fetch_shader) {
+        Shader::Gcn::ParseFetchShader(info, fetch_shader);
+    }
     info.RefreshFlatBuf();
-    auto spec = Shader::StageSpecialization(info, runtime_info, profile, binding);
 
+    auto spec = Shader::StageSpecialization(info, runtime_info, fetch_shader, binding.unified);
     size_t perm_idx = program->modules.size();
     u64 perm_hash = HashCombine(params.hash, perm_idx);
 
@@ -690,17 +701,15 @@ PipelineCache::Result PipelineCache::GetProgram(HwStage hw_stage, SwStage sw_sta
     if (it == program->modules.end()) {
         auto new_info = Shader::Info(hw_stage, sw_stage, params);
         module = CompileModule(new_info, runtime_info, params.code, perm_idx, binding);
-
-        RegisterShaderMeta(info, spec.fetch_shader_data, spec, perm_hash, perm_idx);
-        program->AddPermut(module, std::move(spec));
+        RegisterShaderMeta(info, spec, perm_hash, perm_idx);
+        auto& permutation = program->modules[program->num_modules++];
+        permutation.module = module;
+        permutation.spec = spec;
     } else {
         info.AddBindings(binding);
         module = it->module;
         perm_idx = std::distance(program->modules.begin(), it);
         perm_hash = HashCombine(params.hash, perm_idx);
-    }
-    if (auto& fetch = program->modules[perm_idx].spec.fetch_shader_data; !fetch.Empty()) {
-        fetch_shader = &fetch;
     }
     return std::make_tuple(&program->info, module, perm_hash);
 }
@@ -715,18 +724,6 @@ std::optional<vk::ShaderModule> PipelineCache::ReplaceShader(vk::ShaderModule mo
                 d.destroyShaderModule(m.module);
                 m.module = CompileSPV(spv_code, d);
                 new_module = m.module;
-            }
-        }
-    }
-    if (module_related_pipelines.contains(module)) {
-        auto& pipeline_keys = module_related_pipelines[module];
-        for (auto& key : pipeline_keys) {
-            if (std::holds_alternative<GraphicsPipelineKey>(key)) {
-                auto& graphics_key = std::get<GraphicsPipelineKey>(key);
-                graphics_pipelines.erase(graphics_key);
-            } else if (std::holds_alternative<ComputePipelineKey>(key)) {
-                auto& compute_key = std::get<ComputePipelineKey>(key);
-                compute_pipelines.erase(compute_key);
             }
         }
     }

@@ -90,7 +90,7 @@ void RingAccessElimination(const IR::Program& program, const RuntimeInfo& runtim
     }
     case HwStage::Geometry: {
         const auto& gs_info = runtime_info.hw.gs;
-        info.gs_copy_data = Shader::ParseCopyShader(gs_info.vs_copy);
+        info.gs_copy_data = Shader::ParseCopyShader(gs_info.vs_copy, gs_info.vs_copy_dwords);
 
         u32 dwords_per_vertex = gs_info.out_vertex_data_size;
         if (info.gs_copy_data.num_comps && info.gs_copy_data.num_comps > dwords_per_vertex) {
