@@ -190,10 +190,14 @@ void TextureCache::ClaimOwnership(ImageId image_id, bool assume_locked) {
         return;
     }
     image.flags |= ImageFlagBits::Owned;
-    gpu_memory.UpdatePageWatchers(image.info.guest_address, image.info.guest_size, PageOp::None,
-                                  PageOp::Track);
     gpu_memory.AssignOwner(image.info.guest_address, image.info.guest_size,
                            Owner{OwnerKind::Image, image_id.index});
+    if (lk.owns_lock()) {
+        lk.unlock();
+    }
+    // An owner has to be watched for writes as well, so this also starts tracking the image if
+    // something dropped it in the meantime.
+    TrackImage(image_id, true, assume_locked);
 }
 
 void TextureCache::ReleaseOwnership(ImageId image_id, bool assume_locked) {
@@ -206,10 +210,15 @@ void TextureCache::ReleaseOwnership(ImageId image_id, bool assume_locked) {
         return;
     }
     image.flags &= ~ImageFlagBits::Owned;
-    gpu_memory.UpdatePageWatchers(image.info.guest_address, image.info.guest_size, PageOp::None,
-                                  PageOp::Untrack);
     gpu_memory.ReleaseOwner(image.info.guest_address, image.info.guest_size,
                             Owner{OwnerKind::Image, image_id.index});
+    const bool tracked = True(image.flags & ImageFlagBits::Tracked);
+    if (lk.owns_lock()) {
+        lk.unlock();
+    }
+    if (tracked) {
+        TrackImage(image_id, false, assume_locked);
+    }
 }
 
 void TextureCache::MarkAsMaybeDirty(ImageId image_id, Image& image) {
@@ -479,10 +488,7 @@ ImageView& TextureCache::FindTexture(ImageId image_id, const ImageDesc& desc) {
             download_images.emplace(image_id);
         }
     }
-    UpdateImage(image_id);
-    if (is_storage) {
-        ClaimOwnership(image_id);
-    }
+    UpdateImage(image_id, is_storage);
     return image.FindView(desc.view_info);
 }
 
@@ -519,10 +525,7 @@ ImageView& TextureCache::FindRenderTarget(ImageId image_id, const ImageDesc& des
         download_images.emplace(image_id);
     }
     image.usage.render_target = 1u;
-    // Ownership is taken only once the image holds everything the guest would see, since claiming
-    // it takes the overlapping range away from whoever the contents would have come from.
-    UpdateImage(image_id);
-    ClaimOwnership(image_id);
+    UpdateImage(image_id, true);
 
     // Register meta data for this color buffer
     const VAddr cmask_addr = desc.info.meta_info.cmask_addr;
@@ -560,8 +563,7 @@ ImageView& TextureCache::FindDepthTarget(ImageId image_id, const ImageDesc& desc
     Image& image = slot_images[image_id];
     image.flags |= ImageFlagBits::GpuModified;
     image.usage.depth_target = 1u;
-    UpdateImage(image_id);
-    ClaimOwnership(image_id);
+    UpdateImage(image_id, true);
 
     // Register meta data for this depth buffer
     const VAddr htile_addr = desc.info.meta_info.htile_addr;
@@ -781,32 +783,51 @@ void TextureCache::UnregisterImage(ImageId image_id) {
     });
 }
 
-void TextureCache::TrackImage(ImageId image_id) {
+void TextureCache::TrackImage(ImageId image_id, bool owner, bool assume_locked) {
     auto& image = slot_images[image_id];
     if (False(image.flags & ImageFlagBits::Registered)) {
         return;
     }
     constexpr auto dropped = ImageFlagBits::HeadUntracked | ImageFlagBits::TailUntracked;
-    if (True(image.flags & ImageFlagBits::Tracked) && False(image.flags & dropped)) {
+    const bool was_owner = True(image.flags & ImageFlagBits::ReadTracked);
+    const bool tracked = True(image.flags & ImageFlagBits::Tracked);
+    if (tracked && was_owner == owner && False(image.flags & dropped)) {
         return;
     }
 
-    std::scoped_lock lk{image.mutex};
+    std::unique_lock lk{image.mutex, std::defer_lock};
+    if (!assume_locked) {
+        lk.lock();
+    }
+    // Pages the image does not watch yet take both watchers at once, while the ones it already
+    // watches only need their read watcher brought in line with the ownership claim.
+    const auto read_op = owner ? PageOp::Track : PageOp::None;
     const auto [tracked_begin, tracked_end] = image.TrackedRange();
     const auto image_begin = image.info.guest_address;
     const auto image_end = image_begin + image.info.guest_size;
-    if (False(image.flags & ImageFlagBits::Tracked)) {
-        gpu_memory.UpdatePageWatchers(image_begin, image.info.guest_size, PageOp::Track);
+    if (!tracked) {
+        gpu_memory.UpdatePageWatchers(image_begin, image.info.guest_size, PageOp::Track, read_op);
     } else {
+        if (was_owner != owner && tracked_begin < tracked_end) {
+            gpu_memory.UpdatePageWatchers(tracked_begin, tracked_end - tracked_begin, PageOp::None,
+                                          owner ? PageOp::Track : PageOp::Untrack);
+        }
         if (image_begin < tracked_begin) {
-            gpu_memory.UpdatePageWatchers(image_begin, tracked_begin - image_begin, PageOp::Track);
+            gpu_memory.UpdatePageWatchers(image_begin, tracked_begin - image_begin, PageOp::Track,
+                                          read_op);
         }
         if (tracked_end < image_end) {
-            gpu_memory.UpdatePageWatchers(tracked_end, image_end - tracked_end, PageOp::Track);
+            gpu_memory.UpdatePageWatchers(tracked_end, image_end - tracked_end, PageOp::Track,
+                                          read_op);
         }
     }
     image.flags |= ImageFlagBits::Tracked;
     image.flags &= ~dropped;
+    if (owner) {
+        image.flags |= ImageFlagBits::ReadTracked;
+    } else {
+        image.flags &= ~ImageFlagBits::ReadTracked;
+    }
     MarkDirtyIfEdgesModified(image);
     image.head_hash = 0;
     image.tail_hash = 0;
@@ -818,11 +839,14 @@ void TextureCache::UntrackImage(ImageId image_id) {
     if (False(image.flags & ImageFlagBits::Tracked)) {
         return;
     }
+    const auto read_op =
+        True(image.flags & ImageFlagBits::ReadTracked) ? PageOp::Untrack : PageOp::None;
     if (tracked_begin < tracked_end) {
-        gpu_memory.UpdatePageWatchers(tracked_begin, tracked_end - tracked_begin, PageOp::Untrack);
+        gpu_memory.UpdatePageWatchers(tracked_begin, tracked_end - tracked_begin, PageOp::Untrack,
+                                      read_op);
     }
-    image.flags &=
-        ~(ImageFlagBits::Tracked | ImageFlagBits::HeadUntracked | ImageFlagBits::TailUntracked);
+    image.flags &= ~(ImageFlagBits::Tracked | ImageFlagBits::HeadUntracked |
+                     ImageFlagBits::TailUntracked | ImageFlagBits::ReadTracked);
 }
 
 void TextureCache::UntrackImageHead(ImageId image_id) {
@@ -834,7 +858,9 @@ void TextureCache::UntrackImageHead(ImageId image_id) {
     const auto image_begin = image.info.guest_address;
     const auto head_end = GetNextPageAddr(image_begin);
     image.head_hash = HashBackingMemory(image_begin, head_end - image_begin);
-    gpu_memory.UpdatePageWatchers(image_begin, head_end - image_begin, PageOp::Untrack);
+    gpu_memory.UpdatePageWatchers(image_begin, head_end - image_begin, PageOp::Untrack,
+                                  True(image.flags & ImageFlagBits::ReadTracked) ? PageOp::Untrack
+                                                                                 : PageOp::None);
 
     image.flags |= ImageFlagBits::HeadUntracked;
     const auto [tracked_begin, tracked_end] = image.TrackedRange();
@@ -854,7 +880,9 @@ void TextureCache::UntrackImageTail(ImageId image_id) {
     const auto image_end = image.info.guest_address + image.info.guest_size;
     const auto tail_begin = GetPageAddr(image_end);
     image.tail_hash = HashBackingMemory(tail_begin, image_end - tail_begin);
-    gpu_memory.UpdatePageWatchers(tail_begin, image_end - tail_begin, PageOp::Untrack);
+    gpu_memory.UpdatePageWatchers(tail_begin, image_end - tail_begin, PageOp::Untrack,
+                                  True(image.flags & ImageFlagBits::ReadTracked) ? PageOp::Untrack
+                                                                                 : PageOp::None);
 
     image.flags |= ImageFlagBits::TailUntracked;
     const auto [tracked_begin, tracked_end] = image.TrackedRange();

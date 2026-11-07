@@ -163,13 +163,19 @@ public:
     /// Drops the ownership claim of an image over its guest range.
     void ReleaseOwnership(ImageId image_id, bool assume_locked = false);
 
-    /// Updates image contents if it was modified by CPU.
-    void UpdateImage(ImageId image_id) {
+    /// Updates image contents if it was modified by CPU, claiming the memory it covers when the
+    /// image is about to be written to. The claim is only recorded once the image holds
+    /// everything the guest would see, since it takes the range away from whoever the contents
+    /// would otherwise have come from.
+    void UpdateImage(ImageId image_id, bool claim = false) {
         Image& image = slot_images[image_id];
         TouchImage(image);
-        TrackImage(image_id);
+        TrackImage(image_id, True(image.flags & ImageFlagBits::Owned));
         RefreshImage(image);
         ValidateFromOwners(image_id);
+        if (claim) {
+            ClaimOwnership(image_id);
+        }
     }
 
     /// Reuploads image contents.
@@ -368,7 +374,7 @@ private:
     void UnregisterImage(ImageId image);
 
     /// Track CPU reads and writes for image
-    void TrackImage(ImageId image_id);
+    void TrackImage(ImageId image_id, bool owner, bool assume_locked = false);
 
     /// Stop tracking CPU reads and writes for image
     void UntrackImage(ImageId image_id);

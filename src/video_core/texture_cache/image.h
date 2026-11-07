@@ -36,6 +36,7 @@ enum ImageFlagBits : u32 {
     Dirty = MaybeCpuDirty | CpuDirty | GpuDirty,
     GpuModified = 1 << 3,   ///< Contents have been modified from the GPU
     Owned = 1 << 4,         ///< Image holds data newer than guest memory over its guest range
+    ReadTracked = 1 << 5,   ///< Read watchers were taken alongside the write ones
     Registered = 1 << 6,    ///< True when the image is registered
     Tracked = 1 << 7,       ///< Write watchers are held over the image range
     HeadUntracked = 1 << 8, ///< The watcher on the partly occupied first page was dropped
