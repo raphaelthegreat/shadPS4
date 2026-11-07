@@ -1015,27 +1015,27 @@ void TextureCache::TrackImage(ImageId image_id) {
     if (False(image.flags & ImageFlagBits::Registered)) {
         return;
     }
-    const auto image_begin = image.info.guest_address;
-    const auto image_end = image.info.guest_address + image.info.guest_size;
-    if (image_begin == image.track_addr && image_end == image.track_addr_end) {
+    constexpr auto dropped = ImageFlagBits::HeadUntracked | ImageFlagBits::TailUntracked;
+    if (True(image.flags & ImageFlagBits::Tracked) && False(image.flags & dropped)) {
         return;
     }
 
     std::scoped_lock lk{image.mutex};
-    if (image.IsUntracked()) {
+    const auto [tracked_begin, tracked_end] = image.TrackedRange();
+    const auto image_begin = image.info.guest_address;
+    const auto image_end = image_begin + image.info.guest_size;
+    if (False(image.flags & ImageFlagBits::Tracked)) {
         gpu_memory.UpdatePageWatchers(image_begin, image.info.guest_size, PageOp::Track);
     } else {
-        if (image_begin < image.track_addr) {
-            gpu_memory.UpdatePageWatchers(image_begin, image.track_addr - image_begin,
-                                          PageOp::Track);
+        if (image_begin < tracked_begin) {
+            gpu_memory.UpdatePageWatchers(image_begin, tracked_begin - image_begin, PageOp::Track);
         }
-        if (image.track_addr_end < image_end) {
-            gpu_memory.UpdatePageWatchers(image.track_addr_end, image_end - image.track_addr_end,
-                                          PageOp::Track);
+        if (tracked_end < image_end) {
+            gpu_memory.UpdatePageWatchers(tracked_end, image_end - tracked_end, PageOp::Track);
         }
     }
-    image.track_addr = image_begin;
-    image.track_addr_end = image_end;
+    image.flags |= ImageFlagBits::Tracked;
+    image.flags &= ~dropped;
     MarkDirtyIfEdgesModified(image);
     image.head_hash = 0;
     image.tail_hash = 0;
@@ -1043,56 +1043,53 @@ void TextureCache::TrackImage(ImageId image_id) {
 
 void TextureCache::UntrackImage(ImageId image_id) {
     auto& image = slot_images[image_id];
-    if (image.IsUntracked()) {
+    const auto [tracked_begin, tracked_end] = image.TrackedRange();
+    if (False(image.flags & ImageFlagBits::Tracked)) {
         return;
     }
-    const auto addr = image.track_addr;
-    const auto size = image.track_addr_end - image.track_addr;
-    if (size != 0) {
-        gpu_memory.UpdatePageWatchers(addr, size, PageOp::Untrack);
+    if (tracked_begin < tracked_end) {
+        gpu_memory.UpdatePageWatchers(tracked_begin, tracked_end - tracked_begin, PageOp::Untrack);
     }
-    image.track_addr = 0;
-    image.track_addr_end = 0;
+    image.flags &=
+        ~(ImageFlagBits::Tracked | ImageFlagBits::HeadUntracked | ImageFlagBits::TailUntracked);
 }
 
 void TextureCache::UntrackImageHead(ImageId image_id) {
     auto& image = slot_images[image_id];
-    const auto image_begin = image.info.guest_address;
-    if (image.IsUntracked() || image_begin < image.track_addr) {
+    if (False(image.flags & ImageFlagBits::Tracked) ||
+        True(image.flags & ImageFlagBits::HeadUntracked)) {
         return;
     }
-    const auto addr = GetNextPageAddr(image_begin);
-    const auto size = addr - image_begin;
-    image.head_hash = HashBackingMemory(image_begin, size);
-    gpu_memory.UpdatePageWatchers(image_begin, size, PageOp::Untrack);
+    const auto image_begin = image.info.guest_address;
+    const auto head_end = GetNextPageAddr(image_begin);
+    image.head_hash = HashBackingMemory(image_begin, head_end - image_begin);
+    gpu_memory.UpdatePageWatchers(image_begin, head_end - image_begin, PageOp::Untrack);
 
-    image.track_addr = addr;
-    if (image.track_addr == image.track_addr_end) {
-        // This image spans only 2 pages and both are modified,
-        // but the image itself was not directly affected.
-        // Cehck its hash later.
+    image.flags |= ImageFlagBits::HeadUntracked;
+    const auto [tracked_begin, tracked_end] = image.TrackedRange();
+    if (tracked_begin == tracked_end) {
+        // This image spans only 2 pages and both are modified, but the image itself was not
+        // directly affected. Check its hash later.
         MarkAsMaybeDirty(image_id, image);
     }
 }
 
 void TextureCache::UntrackImageTail(ImageId image_id) {
     auto& image = slot_images[image_id];
-    const auto image_end = image.info.guest_address + image.info.guest_size;
-    if (image.IsUntracked() || image.track_addr_end < image_end) {
+    if (False(image.flags & ImageFlagBits::Tracked) ||
+        True(image.flags & ImageFlagBits::TailUntracked)) {
         return;
     }
-    ASSERT(image.track_addr_end != 0);
-    const auto addr = GetPageAddr(image_end);
-    const auto size = image_end - addr;
-    image.tail_hash = HashBackingMemory(addr, size);
-    image.track_addr_end = addr;
-    if (image.track_addr == image.track_addr_end) {
-        // This image spans only 2 pages and both are modified,
-        // but the image itself was not directly affected.
-        // Cehck its hash later.
+    const auto image_end = image.info.guest_address + image.info.guest_size;
+    const auto tail_begin = GetPageAddr(image_end);
+    image.tail_hash = HashBackingMemory(tail_begin, image_end - tail_begin);
+    gpu_memory.UpdatePageWatchers(tail_begin, image_end - tail_begin, PageOp::Untrack);
+
+    image.flags |= ImageFlagBits::TailUntracked;
+    const auto [tracked_begin, tracked_end] = image.TrackedRange();
+    if (tracked_begin == tracked_end) {
         MarkAsMaybeDirty(image_id, image);
     }
-    gpu_memory.UpdatePageWatchers(addr, size, PageOp::Untrack);
 }
 
 void TextureCache::MarkDirtyIfEdgesModified(Image& image) {
@@ -1270,7 +1267,7 @@ void TextureCache::TouchImage(Image& image) {
 
 void TextureCache::DeleteImage(ImageId image_id) {
     Image& image = slot_images[image_id];
-    ASSERT_MSG(image.IsUntracked(), "Image was not untracked");
+    ASSERT_MSG(False(image.flags & ImageFlagBits::Tracked), "Image was not untracked");
     ASSERT_MSG(False(image.flags & ImageFlagBits::Registered), "Image was not unregistered");
 
     // Remove any registered meta areas.

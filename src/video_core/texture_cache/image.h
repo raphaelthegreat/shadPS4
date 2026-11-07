@@ -33,9 +33,12 @@ enum ImageFlagBits : u32 {
     GpuDirty = 1 << 2, ///< Image contents have been modified from the GPU (valid data in buffer
                        ///< cache)
     Dirty = MaybeCpuDirty | CpuDirty | GpuDirty,
-    GpuModified = 1 << 3, ///< Contents have been modified from the GPU
-    Owned = 1 << 4,       ///< Image holds data newer than guest memory over its guest range
-    Registered = 1 << 6,  ///< True when the image is registered
+    GpuModified = 1 << 3,   ///< Contents have been modified from the GPU
+    Owned = 1 << 4,         ///< Image holds data newer than guest memory over its guest range
+    Registered = 1 << 6,    ///< True when the image is registered
+    Tracked = 1 << 7,       ///< Write watchers are held over the image range
+    HeadUntracked = 1 << 8, ///< The watcher on the partly occupied first page was dropped
+    TailUntracked = 1 << 9, ///< The watcher on the partly occupied last page was dropped
 };
 DECLARE_ENUM_FLAG_OPERATORS(ImageFlagBits)
 
@@ -106,9 +109,10 @@ struct Image : public Common::LRUNode<> {
         return backing->image.image;
     }
 
-    bool IsUntracked() {
-        return track_addr == 0 || track_addr_end == 0;
-    }
+    /// Range of guest memory the image currently holds write watchers over. The edges are given
+    /// up once a neighbouring resource faults on a page the image only partly occupies, so that
+    /// its writes stop faulting; the hash of the image bytes in there is what recovers from it.
+    std::pair<VAddr, VAddr> TrackedRange() const noexcept;
 
     bool HasGpuValidData() const {
         return True(flags & ImageFlagBits::GpuModified) && False(flags & ImageFlagBits::Dirty);
@@ -154,8 +158,6 @@ public:
     vk::ImageAspectFlags aspect_mask = vk::ImageAspectFlagBits::eColor;
     vk::SampleCountFlags supported_samples = vk::SampleCountFlagBits::e1;
     ImageFlagBits flags = ImageFlagBits::Dirty;
-    VAddr track_addr = 0;
-    VAddr track_addr_end = 0;
     ImageId depth_id{};
     u64 depth_uid{};
 

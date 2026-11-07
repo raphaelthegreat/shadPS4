@@ -3,6 +3,7 @@
 
 #include <memory>
 #include "common/assert.h"
+#include "video_core/page_bits.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
@@ -130,6 +131,16 @@ void UniqueImage::Create(const vk::ImageCreateInfo& image_ci) {
                vk::to_string(vk::Result{result}));
     image = vk::Image{unsafe_image};
     size_bytes = alloc_info.size;
+}
+
+std::pair<VAddr, VAddr> Image::TrackedRange() const noexcept {
+    if (False(flags & ImageFlagBits::Tracked)) {
+        return {0, 0};
+    }
+    const VAddr image_begin = info.guest_address;
+    const VAddr image_end = image_begin + info.guest_size;
+    return {True(flags & ImageFlagBits::HeadUntracked) ? GetNextPageAddr(image_begin) : image_begin,
+            True(flags & ImageFlagBits::TailUntracked) ? GetPageAddr(image_end) : image_end};
 }
 
 Image::Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime_,
