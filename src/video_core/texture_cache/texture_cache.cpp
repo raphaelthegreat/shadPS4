@@ -183,20 +183,25 @@ void TextureCache::ClaimOwnership(ImageId image_id, bool assume_locked) {
     Image& image = slot_images[image_id];
     // The flag is only raised once the claim is recorded, so finding it already raised means
     // there is nothing left to do and the image does not have to be locked to find that out.
-    if (True(image.flags & ImageFlagBits::Owned)) {
+    // A buffer that took over part of the range clears it again, since the claim is no longer
+    // whole and has to be written back over the whole range.
+    constexpr ImageFlagBits Claimed =
+        ImageFlagBits(ImageFlagBits::Owned | ImageFlagBits::Displaced);
+    if ((image.flags & Claimed) == ImageFlagBits::Owned) {
         return;
     }
     std::unique_lock lk{image.mutex, std::defer_lock};
     if (!assume_locked) {
         lk.lock();
     }
-    if (True(image.flags & ImageFlagBits::Owned) ||
+    if ((image.flags & Claimed) == ImageFlagBits::Owned ||
         False(image.flags & ImageFlagBits::Registered)) {
         return;
     }
     gpu_memory.AssignOwner(image.info.guest_address, image.info.guest_size,
                            Owner{OwnerKind::Image, image_id.index});
     image.flags |= ImageFlagBits::Owned;
+    image.flags &= ~ImageFlagBits::Displaced;
     if (lk.owns_lock()) {
         lk.unlock();
     }
@@ -335,6 +340,9 @@ void TextureCache::MarkAsMaybeGpuDirty(VAddr addr, size_t size) {
             // Read backing pages directly, without faulting through the guest readback path.
             image.gpu_hash = HashBackingMemory(image.info.guest_address, image.info.guest_size);
         }
+        // The buffer is about to claim this range, which leaves whatever the image still owns
+        // around it intact but means the claim no longer covers the whole image.
+        image.flags |= ImageFlagBits::Displaced;
     });
 }
 
@@ -612,20 +620,29 @@ void TextureCache::AssociateStencil(ImageId depth_id, const ImageInfo& depth_inf
     stencil_image.AssociateDepth(depth_id, slot_images[depth_id].image_uid);
 }
 
-void TextureCache::ValidateFromOwners(ImageId image_id) {
+void TextureCache::GatherOwners(ImageId image_id, OwnerRuns& runs) {
     Image& image = slot_images[image_id];
     const VAddr addr = image.info.guest_address;
     const u64 size = image.info.guest_size;
     if (size == 0 || !gpu_memory.IsRegionOwned(addr, size)) {
         return;
     }
-    // The owner lock is held while walking, so the runs are gathered before anything is copied.
-    boost::container::small_vector<std::tuple<ImageId, VAddr, VAddr>, 8> runs;
+    // The owner lock is held while walking, so nothing is touched until it is gone.
+    boost::container::small_vector<std::pair<VAddr, VAddr>, 4> buffer_runs;
     gpu_memory.ForEachOwner(addr, size, [&](VAddr run_addr, u64 run_size, Owner owner) {
         if (owner.kind == OwnerKind::Image && ImageId{owner.index} != image_id) {
             runs.emplace_back(ImageId{owner.index}, run_addr, run_addr + run_size);
+        } else if (owner.kind == OwnerKind::Buffer) {
+            buffer_runs.emplace_back(run_addr, run_addr + run_size);
         }
     });
+    for (const auto& [begin, end] : buffer_runs) {
+        image.MarkDirty(ImageFlagBits::GpuDirty, begin, end);
+    }
+}
+
+void TextureCache::ValidateFromOwners(ImageId image_id, const OwnerRuns& runs) {
+    Image& image = slot_images[image_id];
     for (const auto& [src_id, begin, end] : runs) {
         Image& src_image = slot_images[src_id];
         if (False(src_image.flags & ImageFlagBits::Registered) || !src_image.HasGpuValidData()) {

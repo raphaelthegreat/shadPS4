@@ -41,6 +41,7 @@ enum ImageFlagBits : u32 {
     Tracked = 1 << 7,       ///< Write watchers are held over the image range
     HeadUntracked = 1 << 8, ///< The watcher on the partly occupied first page was dropped
     TailUntracked = 1 << 9, ///< The watcher on the partly occupied last page was dropped
+    Displaced = 1 << 10,    ///< A buffer took over part of the range this image had claimed
 };
 DECLARE_ENUM_FLAG_OPERATORS(ImageFlagBits)
 

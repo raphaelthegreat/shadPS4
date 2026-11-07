@@ -171,8 +171,12 @@ public:
         Image& image = slot_images[image_id];
         TouchImage(image);
         TrackImage(image_id, claim || True(image.flags & ImageFlagBits::Owned));
+        OwnerRuns runs;
+        GatherOwners(image_id, runs);
+        // Ranges a buffer owns were marked dirty above, and the upload reads through that same
+        // buffer, so pulling the guest range is what brings their contents back in.
         RefreshImage(image);
-        ValidateFromOwners(image_id);
+        ValidateFromOwners(image_id, runs);
         if (claim) {
             ClaimOwnership(image_id);
         }
@@ -181,9 +185,15 @@ public:
     /// Reuploads image contents.
     void RefreshImage(Image& image);
 
+    using OwnerRuns = boost::container::small_vector<std::tuple<ImageId, VAddr, VAddr>, 8>;
+
+    /// Collects the parts of an image's guest range another image holds a newer copy of, and
+    /// marks dirty the parts a buffer took over so the upload below fetches them back.
+    void GatherOwners(ImageId image_id, OwnerRuns& runs);
+
     /// Copies into the image the parts of its guest range that another image holds a newer copy
     /// of, so that it ends up with the contents the guest would see.
-    void ValidateFromOwners(ImageId image_id);
+    void ValidateFromOwners(ImageId image_id, const OwnerRuns& runs);
 
     /// Retrieves the sampler that matches the provided S# descriptor.
     [[nodiscard]] vk::Sampler GetSampler(const AmdGpu::Sampler& sampler,
