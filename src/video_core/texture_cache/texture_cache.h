@@ -164,13 +164,13 @@ public:
     void ReleaseOwnership(ImageId image_id, bool assume_locked = false);
 
     /// Updates image contents if it was modified by CPU, claiming the memory it covers when the
-    /// image is about to be written to. The claim is only recorded once the image holds
-    /// everything the guest would see, since it takes the range away from whoever the contents
-    /// would otherwise have come from.
+    /// image is about to be written to. Tracking already takes the watchers the claim needs, but
+    /// the claim itself is only recorded once the image holds everything the guest would see,
+    /// since it takes the range away from whoever the contents have to come from.
     void UpdateImage(ImageId image_id, bool claim = false) {
         Image& image = slot_images[image_id];
         TouchImage(image);
-        TrackImage(image_id, True(image.flags & ImageFlagBits::Owned));
+        TrackImage(image_id, claim || True(image.flags & ImageFlagBits::Owned));
         RefreshImage(image);
         ValidateFromOwners(image_id);
         if (claim) {
