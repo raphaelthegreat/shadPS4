@@ -52,18 +52,20 @@ void GpuMemory::OnGpuUnmap(VAddr address, size_t size) {
 
 void GpuMemory::EnsurePages(VAddr begin, VAddr end) {
     end = std::min(end, VAddr{1} << ADDRESS_BITS) - 1;
-    const size_t start_page = begin >> PAGE_BITS;
-    const size_t end_page = end >> PAGE_BITS;
 
     std::scoped_lock lk{ensure_mutex};
-    cached_pages.reserve(start_page, end_page);
-    locks.reserve(start_page, end_page);
-    for (size_t region = begin >> HIGHER_PAGE_BITS; region <= (end >> HIGHER_PAGE_BITS); ++region) {
-        if (owned_regions[region].load(std::memory_order_relaxed) == nullptr) {
-            auto& bits = owned_pool.emplace_back();
-            bits.base_addr = region << HIGHER_PAGE_BITS;
-            owned_regions[region].store(&bits, std::memory_order_release);
+    for (VAddr addr = begin; addr <= end;) {
+        const VAddr region_end = std::min((addr | HIGHER_PAGE_MASK), end);
+        auto& slot = owned_regions[addr >> HIGHER_PAGE_BITS];
+        auto* state = slot.load(std::memory_order_relaxed);
+        if (state == nullptr) {
+            state = &owned_pool.emplace_back();
+            state->base_addr = addr & ~HIGHER_PAGE_MASK;
         }
+        state->present.UpdateRange<StateOp::Set>(
+            GetBounds(addr & HIGHER_PAGE_MASK, region_end - addr + 1));
+        slot.store(state, std::memory_order_release);
+        addr = region_end + 1;
     }
 }
 
@@ -74,12 +76,11 @@ void GpuMemory::ApplyOwnedUpdates(const OwnedUpdates& updates) {
         while (addr < end) {
             const VAddr region_end = std::min((addr | HIGHER_PAGE_MASK) + 1, end);
             const auto bounds = GetBounds(addr & HIGHER_PAGE_MASK, region_end - addr);
-            auto* bits = owned_regions[addr >> HIGHER_PAGE_BITS].load(std::memory_order_acquire);
-            if (bits != nullptr) {
+            if (auto* state = RegionOfPage(addr >> PAGE_BITS)) {
                 if (run.set) {
-                    bits->UpdateRange<StateOp::Set>(bounds);
+                    state->owned.UpdateRange<StateOp::Set>(bounds);
                 } else {
-                    bits->UpdateRange<StateOp::Clear>(bounds);
+                    state->owned.UpdateRange<StateOp::Clear>(bounds);
                 }
             }
             addr = region_end;
@@ -89,6 +90,21 @@ void GpuMemory::ApplyOwnedUpdates(const OwnedUpdates& updates) {
 
 template <typename PageOps>
 void GpuMemory::UpdateWatchers(u64 page_start, u64 page_end, PageOps&& page_ops) {
+    if (page_start == page_end) {
+        return;
+    }
+
+    // Regions are locked up front and in ascending order, so that two updates of overlapping
+    // ranges can never deadlock, and stay locked until the summary bits have been published.
+    boost::container::small_vector<RegionState*, 4> locked;
+    for (u64 region = page_start >> PAGES_PER_REGION_SHIFT;
+         region <= (page_end - 1) >> PAGES_PER_REGION_SHIFT; ++region) {
+        if (auto* state = owned_regions[region].load(std::memory_order_acquire)) {
+            state->mutex.lock();
+            locked.push_back(state);
+        }
+    }
+
     Core::MemoryPermission perms{};
     u64 range_begin = page_start;
     u64 range_pages = 0;
@@ -104,12 +120,12 @@ void GpuMemory::UpdateWatchers(u64 page_start, u64 page_end, PageOps&& page_ops)
     };
 
     for (u64 page = page_start; page != page_end; ++page) {
-        PageState* state = cached_pages.find(page);
-        if (!state) {
+        auto* region = RegionOfPage(page);
+        const u64 local_page = page & (NUM_REGION_PAGES - 1);
+        if (!region || !region->present.GetPage(local_page)) {
             continue;
         }
-
-        locks[page].lock();
+        PageState* state = &region->pages[local_page];
 
         const auto old_perms = state->Perms();
         if (page == page_start) {
@@ -152,10 +168,8 @@ void GpuMemory::UpdateWatchers(u64 page_start, u64 page_end, PageOps&& page_ops)
     // consulted without holding the page locks.
     ApplyOwnedUpdates(owned_updates);
 
-    for (u64 page = page_start; page != page_end; ++page) {
-        if (auto* lock = locks.find(page)) {
-            lock->unlock();
-        }
+    for (auto* state : locked) {
+        state->mutex.unlock();
     }
 }
 

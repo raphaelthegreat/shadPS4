@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <deque>
 #include <memory>
@@ -11,7 +12,6 @@
 
 #include "common/adaptive_mutex.h"
 #include "common/assert.h"
-#include "common/multi_level_page_table.h"
 #include "common/types.h"
 #include "video_core/owner_map.h"
 #include "video_core/page_bits.h"
@@ -36,6 +36,9 @@ enum class PageOp : s8 {
  *
  * Ownership is summarized in a page granular bitset so that it can be queried over large
  * ranges without walking the watcher table.
+ *
+ * All of this is kept per 16MB region, so that locating the state of a page is a pair of shifts
+ * into a flat table of region pointers rather than a walk of a multi level one.
  */
 class GpuMemory {
 public:
@@ -58,27 +61,81 @@ public:
 
 private:
     static constexpr size_t ADDRESS_BITS = 40;
+    static constexpr u64 PAGES_PER_REGION_SHIFT = HIGHER_PAGE_BITS - PAGE_BITS;
     static constexpr size_t NUM_REGIONS = 1ULL << (ADDRESS_BITS - HIGHER_PAGE_BITS);
 
-    /// State of one region, tagged with the address its first page maps to. The bits summarize
-    /// at page granularity which parts of the region some resource holds a newer copy of, and are
-    /// published after host protection so they can be read without any lock. The owner map records
-    /// the same thing exactly, at the cost of needing its own lock to be read.
-    struct RegionState : RegionBits {
+#ifdef PTHREAD_ADAPTIVE_MUTEX_INITIALIZER_NP
+    using RegionMutex = Common::AdaptiveMutex;
+#else
+    using RegionMutex = std::mutex;
+#endif
+
+    struct PageState {
+        u8 num_write_watchers;
+        u8 num_read_watchers;
+
+        Core::MemoryPermission WritePerm() const noexcept {
+            return num_write_watchers == 0 ? Core::MemoryPermission::Write
+                                           : Core::MemoryPermission::None;
+        }
+
+        /// Read watchers are always refcounted so ownership of a page can be queried, but
+        /// faulting on reads is only worth the cost when readbacks must be exact.
+        Core::MemoryPermission ReadPerm() const noexcept {
+            return num_read_watchers == 0 || !precise_readbacks ? Core::MemoryPermission::Read
+                                                                : Core::MemoryPermission::None;
+        }
+
+        Core::MemoryPermission Perms() const noexcept {
+            return ReadPerm() | WritePerm();
+        }
+
+        constexpr Core::MemoryPermission Update(PageOp write_op, PageOp read_op) {
+            if (read_op == PageOp::Track) {
+                ASSERT_MSG(num_read_watchers < 255, "Too many watchers");
+            } else if (read_op == PageOp::Untrack) {
+                ASSERT_MSG(num_read_watchers > 0, "Not enough watchers");
+            }
+            num_read_watchers += std::to_underlying(read_op);
+            if (write_op == PageOp::Track) {
+                ASSERT_MSG(num_write_watchers < 255, "Too many watchers");
+            } else if (write_op == PageOp::Untrack) {
+                ASSERT_MSG(num_write_watchers > 0, "Not enough watchers");
+            }
+            num_write_watchers += std::to_underlying(write_op);
+            return Perms();
+        }
+    };
+
+    /// Everything known about one 16MB region, tagged with the address its first page maps to.
+    /// The owned bits summarize at page granularity which parts of the region some resource holds
+    /// a newer copy of, and are published after host protection so they can be read without any
+    /// lock. The owner map records the same thing exactly, at the cost of needing the lock to be
+    /// read. The present bits mark which pages were ever mapped, as the rest have no state worth
+    /// touching even though the region they fall in exists.
+    struct RegionState {
         VAddr base_addr;
-        mutable std::mutex owner_mutex;
+        mutable RegionMutex mutex;
+        RegionBits owned;
+        RegionBits present;
         OwnerMap owners;
+        std::array<PageState, NUM_REGION_PAGES> pages;
     };
     static_assert(OwnerMap::MAX_REGION_SIZE >= HIGHER_PAGE_SIZE);
 
     struct OwnedUpdates;
 
+    /// Returns the region a page falls in, or null if nothing ever mapped it.
+    RegionState* RegionOfPage(u64 page) const {
+        return owned_regions[page >> PAGES_PER_REGION_SHIFT].load(std::memory_order_acquire);
+    }
+
 public:
     /// Returns true if any page in the range holds data newer than guest memory.
     [[nodiscard]] bool IsRegionOwned(VAddr addr, u64 size) const {
         bool owned = false;
-        ForEachRegion(addr, size, [&](const RegionState* bits, const Bounds& bounds) {
-            owned = bits != nullptr && bits->AnySet(bounds);
+        ForEachRegion(addr, size, [&](const RegionState* state, const Bounds& bounds) {
+            owned = state != nullptr && state->owned.AnySet(bounds);
             return !owned;
         });
         return owned;
@@ -86,10 +143,10 @@ public:
 
     /// Calls 'func' with the address and size of each owned run of pages in the range.
     void ForEachOwnedRange(VAddr addr, u64 size, auto&& func) const {
-        ForEachRegion(addr, size, [&](const RegionState* bits, const Bounds& bounds) {
-            if (bits != nullptr) {
-                const VAddr base = bits->base_addr;
-                bits->ForEachSetRange(
+        ForEachRegion(addr, size, [&](const RegionState* state, const Bounds& bounds) {
+            if (state != nullptr) {
+                const VAddr base = state->base_addr;
+                state->owned.ForEachSetRange(
                     bounds, [&](u64 offset, u64 range_size) { func(base + offset, range_size); });
             }
             return true;
@@ -130,9 +187,8 @@ private:
         while (addr < end_addr) {
             const VAddr region_base = addr & ~HIGHER_PAGE_MASK;
             const VAddr region_end = std::min(region_base + HIGHER_PAGE_SIZE, end_addr);
-            if (auto* state =
-                    owned_regions[addr >> HIGHER_PAGE_BITS].load(std::memory_order_acquire)) {
-                std::scoped_lock lk{state->owner_mutex};
+            if (auto* state = RegionOfPage(addr >> PAGE_BITS)) {
+                std::scoped_lock lk{state->mutex};
                 func(*state, static_cast<u32>(addr - region_base),
                      static_cast<u32>(region_end - region_base));
             }
@@ -140,73 +196,14 @@ private:
         }
     }
 
-    struct PageState {
-        u8 num_write_watchers;
-        u8 num_read_watchers;
-
-        Core::MemoryPermission WritePerm() const noexcept {
-            return num_write_watchers == 0 ? Core::MemoryPermission::Write
-                                           : Core::MemoryPermission::None;
-        }
-
-        /// Read watchers are always refcounted so ownership of a page can be queried, but
-        /// faulting on reads is only worth the cost when readbacks must be exact.
-        Core::MemoryPermission ReadPerm() const noexcept {
-            return num_read_watchers == 0 || !precise_readbacks ? Core::MemoryPermission::Read
-                                                                : Core::MemoryPermission::None;
-        }
-
-        Core::MemoryPermission Perms() const noexcept {
-            return ReadPerm() | WritePerm();
-        }
-
-        constexpr Core::MemoryPermission Update(PageOp write_op, PageOp read_op) {
-            if (read_op == PageOp::Track) {
-                ASSERT_MSG(num_read_watchers < 255, "Too many watchers");
-            } else if (read_op == PageOp::Untrack) {
-                ASSERT_MSG(num_read_watchers > 0, "Not enough watchers");
-            }
-            num_read_watchers += std::to_underlying(read_op);
-            if (write_op == PageOp::Track) {
-                ASSERT_MSG(num_write_watchers < 255, "Too many watchers");
-            } else if (write_op == PageOp::Untrack) {
-                ASSERT_MSG(num_write_watchers > 0, "Not enough watchers");
-            }
-            num_write_watchers += std::to_underlying(write_op);
-            return Perms();
-        }
-    };
-
-    struct PageTraits {
-        using Entry = PageState;
-        static constexpr size_t ADDRESS_SPACE_BITS = ADDRESS_BITS;
-        static constexpr size_t L1_BITS = 16;
-        static constexpr size_t PAGE_BITS = VideoCore::PAGE_BITS;
-        static constexpr bool NULL_CHECK = false;
-    };
-
-    struct MutexTraits {
-#ifdef PTHREAD_ADAPTIVE_MUTEX_INITIALIZER_NP
-        using Entry = Common::AdaptiveMutex;
-#else
-        using Entry = std::mutex;
-#endif
-        static constexpr size_t ADDRESS_SPACE_BITS = ADDRESS_BITS;
-        static constexpr size_t L1_BITS = 16;
-        static constexpr size_t PAGE_BITS = VideoCore::PAGE_BITS;
-        static constexpr bool NULL_CHECK = false;
-    };
-
-    /// Calls 'func' with the ownership bits and local bounds of each region the range touches,
-    /// stopping early if it returns false. The bits are null for regions never claimed.
+    /// Calls 'func' with the state and local bounds of each region the range touches, stopping
+    /// early if it returns false. The state is null for regions nothing ever mapped.
     void ForEachRegion(VAddr addr, u64 size, auto&& func) const {
         const VAddr end_addr = addr + size;
         while (addr < end_addr) {
             const VAddr region_end = std::min((addr | HIGHER_PAGE_MASK) + 1, end_addr);
             const auto bounds = GetBounds(addr & HIGHER_PAGE_MASK, region_end - addr);
-            const auto* bits =
-                owned_regions[addr >> HIGHER_PAGE_BITS].load(std::memory_order_acquire);
-            if (!func(bits, bounds)) {
+            if (!func(RegionOfPage(addr >> PAGE_BITS), bounds)) {
                 return;
             }
             addr = region_end;
@@ -227,8 +224,6 @@ private:
 
     Vulkan::Rasterizer* rasterizer;
     std::unique_ptr<PageProtector> protector;
-    Common::MultiLevelPageTable<PageTraits> cached_pages;
-    Common::MultiLevelPageTable<MutexTraits> locks;
     std::mutex ensure_mutex;
     std::deque<RegionState> owned_pool;
     std::vector<std::atomic<RegionState*>> owned_regions;
