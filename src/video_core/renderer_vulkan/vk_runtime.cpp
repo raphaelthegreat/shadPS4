@@ -461,6 +461,21 @@ void Runtime::CopySubresources(VideoCore::Image* src, VideoCore::Image* dst,
         return;
     }
 
+    // A plain image copy requires depth and colour formats to match exactly, so an aliasing pair
+    // has to go through a buffer instead. That conversion is only expressible for an image as a
+    // whole, which is what the two are when they describe the same allocation the same way.
+    if (src->info.props.is_depth != dst->info.props.is_depth) {
+        if (src->info.guest_address == dst->info.guest_address &&
+            src->info.size == dst->info.size &&
+            src->info.resources.levels == dst->info.resources.levels &&
+            src->info.resources.layers == dst->info.resources.layers) {
+            CopyColorAndDepth(src, dst);
+        } else {
+            LOG_WARNING(Render_Vulkan, "Skipping partial copy between a depth and colour image");
+        }
+        return;
+    }
+
     SetBackingSamples(dst, dst->info.num_samples);
     SetBackingSamples(src, src->info.num_samples);
 

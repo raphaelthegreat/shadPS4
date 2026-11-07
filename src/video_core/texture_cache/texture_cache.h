@@ -172,22 +172,6 @@ public:
         ValidateFromOwners(image_id);
     }
 
-    /// Resolves overlap between existing cache image and pending merged image
-    [[nodiscard]] std::tuple<ImageId, int, int> ResolveOverlap(const ImageInfo& info,
-                                                               BindingType binding,
-                                                               ImageId cache_img_id,
-                                                               ImageId merged_image_id);
-
-    /// Resolves depth overlap and either re-creates the image or returns existing one
-    [[nodiscard]] ImageId ResolveDepthOverlap(const ImageInfo& requested_info, BindingType binding,
-                                              ImageId cache_img_id);
-
-    /// Creates a new image with provided image info and copies subresources from image_id
-    [[nodiscard]] ImageId ExpandImage(const ImageInfo& info, ImageId image_id);
-
-    /// Returns the image an overlap is being merged into, creating it if needed.
-    [[nodiscard]] ImageId ObtainMergedImage(const ImageInfo& info, ImageId merged_image_id);
-
     /// Reuploads image contents.
     void RefreshImage(Image& image);
 

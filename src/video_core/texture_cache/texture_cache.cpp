@@ -328,255 +328,33 @@ void TextureCache::UnmapMemory(VAddr cpu_addr, size_t size) {
     }
 }
 
-ImageId TextureCache::ResolveDepthOverlap(const ImageInfo& requested_info, BindingType binding,
-                                          ImageId cache_image_id) {
-    auto& cache_image = slot_images[cache_image_id];
+namespace {
 
-    if (!cache_image.info.props.is_depth && !requested_info.props.is_depth) {
-        return {};
+/// Whether a cached image can be handed to a request as it stands. Only the properties a view
+/// cannot paper over are consulted: everything else about reconciling two images that share an
+/// allocation is settled afterwards, by copying from whichever of them owns the memory.
+bool CanServeRequest(const ImageInfo& cache_info, const ImageInfo& info, bool exact_fmt) {
+    // Guest size is not part of the identity of an image. It follows the height the guest
+    // declared for the allocation, which is padded inconsistently and sometimes outright wrong,
+    // while the layout the texels actually sit in is what decides reusability.
+    if (!IsLayoutCompatible(cache_info, info) || cache_info.pitch != info.pitch) {
+        return false;
     }
-
-    const bool stencil_match =
-        requested_info.props.has_stencil == cache_image.info.props.has_stencil;
-    const bool bpp_match = requested_info.num_bits == cache_image.info.num_bits;
-
-    // If an image in the cache has less slices we need to expand it
-    bool recreate = !cache_image.info.resources.Contains(requested_info.resources);
-
-    switch (binding) {
-    case BindingType::Texture:
-        // The guest requires a depth sampled texture, but cache can offer only Rxf. Need to
-        // recreate the image.
-        recreate |= requested_info.props.is_depth && !cache_image.info.props.is_depth;
-        break;
-    case BindingType::Storage:
-        // If the guest is going to use previously created depth as storage, the image needs to be
-        // recreated. (TODO: Probably a case with linear rgba8 aliasing is legit)
-        recreate |= cache_image.info.props.is_depth;
-        break;
-    case BindingType::RenderTarget:
-        // Render target can have only Rxf format. If the cache contains only Dx[S8] we need to
-        // re-create the image.
-        ASSERT(!requested_info.props.is_depth);
-        recreate |= cache_image.info.props.is_depth;
-        break;
-    case BindingType::DepthTarget:
-        // The guest has requested previously allocated texture to be bound as a depth target.
-        // In this case we need to convert Rx float to a Dx[S8] as requested
-        recreate |= !cache_image.info.props.is_depth;
-
-        // The guest is trying to bind a depth target and cache has it. Need to be sure that aspects
-        // and bpp match
-        recreate |= cache_image.info.props.is_depth && !(stencil_match && bpp_match);
-        break;
-    default:
-        break;
+    // A volume and an array over the same memory are laid out alike but cannot be views of one
+    // another, so the requested interpretation has to be materialised separately.
+    if (cache_info.type != info.type && info.size != Extent3D{1, 1, 1}) {
+        return false;
     }
-
-    if (recreate) {
-        auto new_info = requested_info;
-        new_info.resources = std::max(requested_info.resources, cache_image.info.resources);
-        new_info.UpdateSize();
-        const auto new_image_id = slot_images.Insert(instance, runtime, slot_image_views, new_info);
-        RegisterImage(new_image_id);
-
-        // Inherit image usage
-        auto& new_image = slot_images[new_image_id];
-        new_image.usage = cache_image.usage;
-        if (new_info.num_samples == 1 &&
-            (new_info.resources.layers > cache_image.info.resources.layers ||
-             new_info.resources.levels > cache_image.info.resources.levels)) {
-            RefreshImage(new_image);
-        }
-        new_image.ClearDirty();
-        // When creating a depth buffer through overlap resolution don't clear it on first use.
-        new_image.info.meta_info.htile_clear_mask = 0;
-        runtime.CopyColorAndDepth(&cache_image, &new_image);
-
-        // Free the cache image.
-        FreeImage(cache_image_id);
-        return new_image_id;
+    // Depth and colour are distinct kinds of image to the host even when they alias the same
+    // texels, which the format classes already say, so an aliasing pair ends up as two images
+    // and the contents are carried between them by the owner driven validation.
+    if (exact_fmt) {
+        return cache_info.pixel_format == info.pixel_format;
     }
-
-    // Will be handled by view
-    return cache_image_id;
+    return IsVulkanFormatCompatible(cache_info.pixel_format, info.pixel_format);
 }
 
-std::tuple<ImageId, int, int> TextureCache::ResolveOverlap(const ImageInfo& image_info,
-                                                           BindingType binding,
-                                                           ImageId cache_image_id,
-                                                           ImageId merged_image_id) {
-    static constexpr u64 NUM_FRAMES_BEFORE_REMOVAL = 32;
-
-    auto& cache_image = slot_images[cache_image_id];
-    const bool safe_to_delete =
-        scheduler.CurrentTick() - cache_image.tick_accessed_last > NUM_FRAMES_BEFORE_REMOVAL;
-
-    // Equal address, the two images are different interpretations of the same allocation.
-    if (image_info.guest_address == cache_image.info.guest_address) {
-        if (const auto depth_image_id = ResolveDepthOverlap(image_info, binding, cache_image_id)) {
-            return {depth_image_id, -1, -1};
-        }
-
-        // A compressed view of an uncompressed image with the same element size. Both tile the
-        // very same elements, only the interpretation placed on them differs.
-        if (image_info.props.is_block && !cache_image.info.props.is_block &&
-            image_info.num_bits == cache_image.info.num_bits &&
-            image_info.array_mode == cache_image.info.array_mode) {
-            return {ExpandImage(image_info, cache_image_id), -1, -1};
-        }
-
-        // Images that disagree on how elements are placed in memory cannot stand in for each
-        // other. The guest has most likely recycled the allocation for something unrelated.
-        if (!IsLayoutCompatible(image_info, cache_image.info)) {
-            if (safe_to_delete) {
-                FreeImage(cache_image_id);
-            }
-            return {merged_image_id, -1, -1};
-        }
-
-        // A volume and an array over the same memory are laid out alike but cannot be views of
-        // one another, so the requested interpretation has to be materialised separately.
-        if (image_info.type != cache_image.info.type &&
-            (image_info.type == AmdGpu::ImageType::Color3D ||
-             cache_image.info.type == AmdGpu::ImageType::Color3D)) {
-            return {ExpandImage(image_info, cache_image_id), -1, -1};
-        }
-
-        const auto result_id = merged_image_id ? merged_image_id : cache_image_id;
-        const auto& result_info = slot_images[result_id].info;
-
-        // Every subresource asked for is already present and large enough, so the request can
-        // be served through a view. The guest size is deliberately not consulted; guests pad the
-        // height of an allocation inconsistently between the views they take of it, while the
-        // extent is what decides whether the data is actually there.
-        const bool covers_extent = result_info.size.width >= image_info.size.width &&
-                                   result_info.size.height >= image_info.size.height &&
-                                   result_info.size.depth >= image_info.size.depth;
-        if (covers_extent && result_info.resources.Contains(image_info.resources)) {
-            const bool is_compatible =
-                IsVulkanFormatCompatible(result_info.pixel_format, image_info.pixel_format);
-            return {is_compatible ? result_id : ImageId{}, -1, -1};
-        }
-
-        // More subresources are needed than the cache holds, recreate it covering both.
-        return {ExpandImage(image_info, cache_image_id), -1, -1};
-    }
-
-    // Right overlap, the image requested starts inside the image from cache and may be a plain
-    // subresource range of it.
-    if (image_info.guest_address > cache_image.info.guest_address) {
-        SubresourceRange range;
-        if (IsViewOf(cache_image.info, image_info, range)) {
-            return {cache_image_id, range.base.level, range.base.layer};
-        }
-
-        // The request covers a subrect of the cached image rather than whole subresources of it,
-        // so it needs an image of its own. Both stay in the cache, and the one the guest renders
-        // through takes ownership of the pages they have in common.
-        SubresourceCopies copies;
-        CollectOverlapCopies(cache_image.info, image_info, copies);
-        if (copies.empty() || !cache_image.HasGpuValidData()) {
-            return {merged_image_id, -1, -1};
-        }
-        merged_image_id = ObtainMergedImage(image_info, merged_image_id);
-        runtime.CopySubresources(&slot_images[cache_image_id], &slot_images[merged_image_id],
-                                 copies);
-        return {merged_image_id, -1, -1};
-    }
-
-    // Left overlap, the image from cache starts inside the image requested, so whatever it holds
-    // belongs somewhere in the middle of the new image.
-    SubresourceCopies copies;
-    CollectOverlapCopies(cache_image.info, image_info, copies);
-    if (copies.empty()) {
-        return {merged_image_id, -1, -1};
-    }
-
-    // When the cached image only covers a subrect of the request the two remain distinct views of
-    // the allocation, so it is kept. Whole subresources on the other hand are now held by the
-    // merged image and keeping a second copy of them would only let the two drift apart.
-    const bool absorbed = std::ranges::all_of(copies, [](const SubresourceCopy& copy) {
-        return copy.src_offset_y == 0 && copy.dst_offset_y == 0;
-    });
-
-    // A render target bound through the cached image has to be redirected to the merged one,
-    // otherwise rendering would keep landing in an image nothing samples from anymore.
-    if (absorbed && cache_image.binding.is_target) {
-        cache_image.binding.needs_rebind = 1u;
-        if (merged_image_id) {
-            GetImage(merged_image_id).binding.is_target = 1u;
-        }
-        FreeImage(cache_image_id);
-        return {merged_image_id, -1, -1};
-    }
-
-    // Only carry the contents over when the GPU produced them. A cache image whose memory the
-    // CPU has since rewritten is stale, and copying it would undo the fresh guest upload.
-    if (slot_images[cache_image_id].HasGpuValidData()) {
-        merged_image_id = ObtainMergedImage(image_info, merged_image_id);
-        runtime.CopySubresources(&slot_images[cache_image_id], &slot_images[merged_image_id],
-                                 copies);
-    }
-    if (absorbed) {
-        FreeImage(cache_image_id);
-    }
-
-    return {merged_image_id, -1, -1};
-}
-
-ImageId TextureCache::ObtainMergedImage(const ImageInfo& info, ImageId merged_image_id) {
-    // The merged image has to exist before anything is copied into it, otherwise it would later
-    // be filled from guest memory and the contents the GPU produced would be lost.
-    if (merged_image_id) {
-        return merged_image_id;
-    }
-    merged_image_id = slot_images.Insert(instance, runtime, slot_image_views, info);
-    RegisterImage(merged_image_id);
-    RefreshImage(slot_images[merged_image_id]);
-    TrackImage(merged_image_id);
-    return merged_image_id;
-}
-
-ImageId TextureCache::ExpandImage(const ImageInfo& info, ImageId image_id) {
-    const bool needs_storage = slot_images[image_id].usage.storage;
-
-    // The new image has to cover every subresource either side already had. Creating it from the
-    // request alone would drop the ones only the cache holds, and they would then be filled from
-    // guest memory that never received them.
-    ImageInfo new_info = info;
-    new_info.resources = std::max(info.resources, slot_images[image_id].info.resources);
-    if (new_info.resources != info.resources) {
-        new_info.UpdateSize();
-    }
-
-    const auto new_image_id =
-        slot_images.Insert(instance, runtime, slot_image_views, new_info, needs_storage);
-    RegisterImage(new_image_id);
-
-    auto& src_image = slot_images[image_id];
-    auto& new_image = slot_images[new_image_id];
-
-    // Only carry over the old contents when they hold GPU-written data that guest memory lacks.
-    // A CPU-dirty source is stale (e.g. a streamed texture rewritten in a reused pool slot);
-    // copying it would overwrite the fresh upload with old data.
-    const bool src_has_gpu_data = src_image.HasGpuValidData();
-
-    RefreshImage(new_image);
-
-    if (src_image.binding.is_bound || src_image.binding.is_target) {
-        src_image.binding.needs_rebind = 1u;
-    }
-
-    TrackImage(new_image_id);
-    new_image.ClearDirty();
-    if (src_has_gpu_data) {
-        runtime.CopyImage(&src_image, &new_image);
-    }
-    FreeImage(image_id);
-
-    return new_image_id;
-}
+} // Anonymous namespace
 
 ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
     const auto& info = desc.info;
@@ -592,72 +370,45 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
         }
     });
 
-    SmallVector<ImageId, 8> image_ids;
+    // Otherwise look for one the request is a plain view of. Nothing else in the cache can serve
+    // it, so anything short of that means a new image, which the contents of the old ones are
+    // then copied into according to who owns the memory they share.
+    SubresourceBase view_base;
     if (!image_id) {
+        SmallVector<ImageId, 8> image_ids;
         ForEachImageInRegion(info.guest_address, info.guest_size,
                              [&](ImageId id, Image&) { image_ids.push_back(id); });
-    }
-
-    // Check for a perfect match first
-    for (const auto& cache_id : image_ids) {
-        auto& cache_image = slot_images[cache_id];
-        if (cache_image.info.guest_address != info.guest_address) {
-            continue;
-        }
-        // Guest size is not part of the identity of an image. It follows the height the guest
-        // declared for the allocation, which is padded inconsistently and sometimes outright
-        // wrong, while the layout the texels actually sit in is what decides reusability.
-        if (!IsLayoutCompatible(cache_image.info, info) || cache_image.info.pitch != info.pitch) {
-            continue;
-        }
-        if (cache_image.info.size != info.size) {
-            continue;
-        }
-        if (!cache_image.info.resources.Contains(info.resources)) {
-            continue;
-        }
-        if (!IsVulkanFormatCompatible(cache_image.info.pixel_format, info.pixel_format) ||
-            (cache_image.info.type != info.type && info.size != Extent3D{1, 1, 1})) {
-            continue;
-        }
-        if (exact_fmt && info.pixel_format != cache_image.info.pixel_format) {
-            continue;
-        }
-        image_id = cache_id;
-    }
-
-    // Try to resolve overlaps (if any)
-    int view_mip{-1};
-    int view_slice{-1};
-    if (!image_id) {
-        for (const auto& cache_id : image_ids) {
-            view_mip = -1;
-            view_slice = -1;
-
-            const auto& merged_info = image_id ? slot_images[image_id].info : info;
-            auto [overlap_image_id, overlap_view_mip, overlap_view_slice] =
-                ResolveOverlap(merged_info, desc.type, cache_id, image_id);
-            if (overlap_image_id) {
-                image_id = overlap_image_id;
-                view_mip = overlap_view_mip;
-                view_slice = overlap_view_slice;
+        for (const ImageId cache_id : image_ids) {
+            const auto& cache_info = slot_images[cache_id].info;
+            if (!CanServeRequest(cache_info, info, exact_fmt)) {
+                continue;
+            }
+            if (cache_info.guest_address == info.guest_address) {
+                // The same allocation seen the same way, usable as long as every subresource
+                // asked for is present and large enough. The guest size is deliberately not
+                // consulted; guests pad the height of an allocation inconsistently between the
+                // views they take of it, while the extent is what decides whether the data is
+                // there.
+                if (cache_info.size.width >= info.size.width &&
+                    cache_info.size.height >= info.size.height &&
+                    cache_info.size.depth >= info.size.depth &&
+                    cache_info.resources.Contains(info.resources)) {
+                    image_id = cache_id;
+                    break;
+                }
+                continue;
+            }
+            // Starting further into the allocation, usable when what was asked for is a whole
+            // run of its subresources rather than a subrect of them.
+            SubresourceRange range;
+            if (IsViewOf(cache_info, info, range)) {
+                image_id = cache_id;
+                view_base = range.base;
+                break;
             }
         }
     }
 
-    if (image_id) {
-        Image& image_resolved = slot_images[image_id];
-        if (exact_fmt && info.pixel_format != image_resolved.info.pixel_format) {
-            // Cannot reuse this image as we need the exact requested format.
-            image_id = {};
-        } else if (!image_resolved.info.resources.Contains(info.resources)) {
-            // The image was clearly picked up wrong.
-            FreeImage(image_id);
-            image_id = {};
-            LOG_WARNING(Render_Vulkan, "Image overlap resolve failed");
-        }
-    }
-    // Create and register a new image
     if (!image_id) {
         const bool needs_storage = desc.type == BindingType::Storage;
         image_id = slot_images.Insert(instance, runtime, slot_image_views, info, needs_storage);
@@ -669,11 +420,11 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
     TouchImage(image);
 
     // If the image requested is a subresource of the image from cache record its location.
-    if (view_mip > 0) {
-        desc.view_info.range.base.level = view_mip;
+    if (view_base.level > 0) {
+        desc.view_info.range.base.level = view_base.level;
     }
-    if (view_slice > 0) {
-        desc.view_info.range.base.layer = view_slice;
+    if (view_base.layer > 0) {
+        desc.view_info.range.base.layer = view_base.layer;
     }
 
     return image_id;
@@ -885,6 +636,7 @@ void TextureCache::ValidateFromOwners(ImageId image_id) {
         ClipCopiesToRange(image.info, copies, begin, end);
         if (!copies.empty()) {
             runtime.CopySubresources(&src_image, &image, copies);
+            image.info.meta_info.htile_clear_mask = 0;
         }
     }
 }
