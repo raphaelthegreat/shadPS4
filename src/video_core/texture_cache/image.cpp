@@ -18,33 +18,35 @@ using namespace Vulkan;
 
 Common::IncrementalIdProvider<u64> Image::global_image_uid{};
 
-static vk::ImageUsageFlags ImageUsageFlags(const Vulkan::Instance& instance,
-                                           const ImageInfo& info) {
+vk::ImageUsageFlags ImageUsageFlags(const Vulkan::Instance& instance, const ImageInfo& info,
+                                    bool needs_storage) {
     vk::ImageUsageFlags usage = vk::ImageUsageFlagBits::eTransferSrc |
                                 vk::ImageUsageFlagBits::eTransferDst |
                                 vk::ImageUsageFlagBits::eSampled;
-    if (!info.props.is_block) {
-        if (info.props.is_depth) {
-            usage |= vk::ImageUsageFlagBits::eDepthStencilAttachment;
-        } else {
-            usage |= vk::ImageUsageFlagBits::eColorAttachment;
-            if (instance.IsAttachmentFeedbackLoopLayoutSupported()) {
-                usage |= vk::ImageUsageFlagBits::eAttachmentFeedbackLoopEXT;
-            }
-            // Always create images with storage flag to avoid needing re-creation in case of e.g
-            // compute clears This sacrifices a bit of performance but is less work. ExtendedUsage
-            // flag is also used. The exception here is for multisample images when storage is not
-            // supported, where even with ExtendedUsage we may get only one supported sample back.
-            if (info.num_samples == 1 || instance.IsMultisampleStorageImageSupported())
-                usage |= vk::ImageUsageFlagBits::eStorage;
+    if (info.props.is_block) {
+        // Compressed formats do not support storage themselves, but uncompressed views of them
+        // may be used by compute. The extended usage bit makes that combination legal.
+        if (needs_storage) {
+            usage |= vk::ImageUsageFlagBits::eStorage;
         }
-    } else {
-        // Similarly to above, we specify storage usage. This is typically not supported by
-        // compressed formats, but may be used for uncompressed views. In order to satisfy this,
-        // we will also specify the extended usage bit.
+        return usage;
+    }
+    if (info.props.is_depth) {
+        // Depth images are never bound as storage, so the flag is not tracked for them.
+        usage |= vk::ImageUsageFlagBits::eDepthStencilAttachment;
+        return usage;
+    }
+    usage |= vk::ImageUsageFlagBits::eColorAttachment;
+    if (instance.IsAttachmentFeedbackLoopLayoutSupported()) {
+        usage |= vk::ImageUsageFlagBits::eAttachmentFeedbackLoopEXT;
+    }
+    // Storage is requested only once something actually needs it. Carrying it unconditionally
+    // costs framebuffer compression on most hardware, and makes the driver report a reduced set
+    // of supported sample counts for formats that cannot be stored to, multisampled packed
+    // formats in particular.
+    if (needs_storage && (info.num_samples == 1 || instance.IsMultisampleStorageImageSupported())) {
         usage |= vk::ImageUsageFlagBits::eStorage;
     }
-
     return usage;
 }
 
@@ -81,8 +83,8 @@ static vk::FormatFeatureFlags2 FormatFeatureFlags(const vk::ImageUsageFlags usag
     if (usage_flags & vk::ImageUsageFlagBits::eDepthStencilAttachment) {
         feature_flags |= vk::FormatFeatureFlagBits2::eDepthStencilAttachment;
     }
-    // Note: StorageImage is intentionally ignored for now since it is always set, and can mess up
-    // compatibility checks.
+    // Note: StorageImage is intentionally ignored, as it is satisfied through extended usage and
+    // an uncompressed or otherwise storable view rather than by the image format itself.
     return feature_flags;
 }
 
@@ -131,11 +133,13 @@ void UniqueImage::Create(const vk::ImageCreateInfo& image_ci) {
 }
 
 Image::Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime_,
-             Common::SlotVector<ImageView>& slot_image_views_, const ImageInfo& info_)
+             Common::SlotVector<ImageView>& slot_image_views_, const ImageInfo& info_,
+             bool needs_storage)
     : runtime{&runtime_}, slot_image_views{&slot_image_views_}, info{info_} {
     if (info.pixel_format == vk::Format::eUndefined) {
         return;
     }
+    usage.storage = needs_storage;
 
     image_uid = global_image_uid.Next();
     vk::ImageCreateFlags flags{vk::ImageCreateFlagBits::eMutableFormat |
@@ -150,7 +154,7 @@ Image::Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime_,
         flags |= vk::ImageCreateFlagBits::eBlockTexelViewCompatible;
     }
 
-    usage_flags = ImageUsageFlags(instance, info);
+    usage_flags = ImageUsageFlags(instance, info, needs_storage);
     format_features = FormatFeatureFlags(usage_flags);
     if (info.props.is_depth) {
         aspect_mask = vk::ImageAspectFlagBits::eDepth;

@@ -635,7 +635,9 @@ std::tuple<ImageId, int, int> TextureCache::ResolveOverlap(const ImageInfo& imag
 }
 
 ImageId TextureCache::ExpandImage(const ImageInfo& info, ImageId image_id) {
-    const auto new_image_id = slot_images.Insert(instance, runtime, slot_image_views, info);
+    const bool needs_storage = slot_images[image_id].usage.storage;
+    const auto new_image_id =
+        slot_images.Insert(instance, runtime, slot_image_views, info, needs_storage);
     RegisterImage(new_image_id);
 
     auto& src_image = slot_images[image_id];
@@ -728,7 +730,8 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
     }
     // Create and register a new image
     if (!image_id) {
-        image_id = slot_images.Insert(instance, runtime, slot_image_views, info);
+        const bool needs_storage = desc.type == BindingType::Storage;
+        image_id = slot_images.Insert(instance, runtime, slot_image_views, info, needs_storage);
         RegisterImage(image_id);
     }
 
@@ -777,11 +780,20 @@ ImageId TextureCache::FindImageFromRange(VAddr address, size_t size, bool ensure
     return {};
 }
 
+void TextureCache::EnsureStorageUsage(ImageId image_id) {
+    Image& image = slot_images[image_id];
+    image.usage.storage = 1u;
+    runtime.AddImageStorageUsage(&image);
+}
+
 ImageView& TextureCache::FindTexture(ImageId image_id, const ImageDesc& desc) {
     Image& image = slot_images[image_id];
-    if (desc.type == BindingType::Storage) {
+    const bool is_storage = desc.type == BindingType::Storage;
+    image.usage.texture |= !is_storage;
+    if (is_storage) {
         image.flags |= ImageFlagBits::GpuModified;
         ClaimOwnership(image_id);
+        EnsureStorageUsage(image_id);
         if (readback_linear_images && (!image.info.props.is_tiled || image.info.size.width <= 8) &&
             image.info.guest_address != 0) {
             std::unique_lock lk{download_images_mutex};

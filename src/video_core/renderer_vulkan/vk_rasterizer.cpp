@@ -935,6 +935,11 @@ void Rasterizer::BindTextures(const Shader::Info& stage, Shader::Backend::Bindin
                 image->binding.force_general |= image_desc.is_written;
             }
             image->binding.is_bound = 1u;
+            if (image_desc.is_written) {
+                // Gaining storage usage recreates the image, so it has to settle before any
+                // view of it is handed out below.
+                texture_cache.EnsureStorageUsage(image_id);
+            }
         }
 
         image_descriptor_array_sizes.push_back(num_bindings);
@@ -988,9 +993,6 @@ void Rasterizer::BindTextures(const Shader::Info& stage, Shader::Backend::Bindin
                         vk::AccessFlagBits2::eShaderRead, desc.view_info.range);
                 }
             }
-            image.usage.storage |= is_storage;
-            image.usage.texture |= !is_storage;
-
             image_infos.emplace_back(VK_NULL_HANDLE, *image_view.image_view,
                                      image.backing->state.layout);
         }
@@ -1106,8 +1108,6 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
         attachment.image_layout = image->backing->state.layout;
         attachment.clear_value = clear_value.color.uint32;
         attachment.is_clear = is_clear;
-
-        image->usage.render_target = 1u;
     }
     for (u32 cb = state.num_color_attachments; cb < state.color_attachments.size(); ++cb) {
         state.color_attachments[cb] = {};
@@ -1167,8 +1167,6 @@ RenderState Rasterizer::BeginRendering(const GraphicsPipeline* pipeline) {
             attachment.has_stencil = true;
             attachment.stencil_clear = is_stencil_clear;
         }
-
-        image.usage.depth_target = true;
     } else {
         state.depth_stencil_attachment = {};
     }

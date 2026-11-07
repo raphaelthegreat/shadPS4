@@ -39,6 +39,9 @@ enum ImageFlagBits : u32 {
 };
 DECLARE_ENUM_FLAG_OPERATORS(ImageFlagBits)
 
+vk::ImageUsageFlags ImageUsageFlags(const Vulkan::Instance& instance, const ImageInfo& info,
+                                    bool needs_storage);
+
 struct UniqueImage {
     explicit UniqueImage() = default;
     explicit UniqueImage(vk::Device device, VmaAllocator allocator)
@@ -85,7 +88,8 @@ public:
 
 struct Image : public Common::LRUNode<> {
     explicit Image(const Vulkan::Instance& instance, Vulkan::Runtime& runtime,
-                   Common::SlotVector<ImageView>& slot_image_views, const ImageInfo& info);
+                   Common::SlotVector<ImageView>& slot_image_views, const ImageInfo& info,
+                   bool needs_storage = false);
     ~Image();
 
     Image(const Image&) = delete;
@@ -113,6 +117,10 @@ struct Image : public Common::LRUNode<> {
     bool CanBeDownloaded() {
         return HasGpuValidData() && info.num_samples == 1 && !info.props.has_stencil &&
                IsVulkanFormatCompatible(info.pixel_format, backing->image.image_ci.format);
+    }
+
+    bool HasUsage(vk::ImageUsageFlags required) const noexcept {
+        return ((usage_flags | unsupported_usage) & required) == required;
     }
 
     void AssociateDepth(ImageId depth_image_id, u64 depth_image_uid) {
@@ -152,6 +160,7 @@ public:
     u64 depth_uid{};
 
     vk::ImageUsageFlags usage_flags;
+    vk::ImageUsageFlags unsupported_usage; ///< Usage the image was created without and cannot gain
     vk::FormatFeatureFlags2 format_features;
     struct State {
         vk::PipelineStageFlags2 pl_stage = vk::PipelineStageFlagBits2::eAllCommands;

@@ -628,6 +628,25 @@ void Runtime::SetBackingSamples(VideoCore::Image* image, u32 num_samples, bool c
     VideoCore::Image::BackingImage* new_backing;
     auto it = std::ranges::find(backing_images, num_samples,
                                 &VideoCore::Image::BackingImage::num_samples);
+    if (it != backing_images.end() && it->image.image_ci.usage != image->usage_flags) {
+        // The image gained usage flags after this backing was created, so it has to be rebuilt.
+        // Its contents are stale regardless, as it is not the backing currently in use.
+        auto new_image_ci = it->image.image_ci;
+        new_image_ci.usage = image->usage_flags;
+        scheduler.DeferOperation([old = std::move(it->image), views = std::move(it->image_view_ids),
+                                  slot_image_views = image->slot_image_views]() mutable {
+            for (const auto view_id : views) {
+                slot_image_views->Erase(view_id);
+            }
+            old.Destroy();
+        });
+        it->image = VideoCore::UniqueImage{instance.GetDevice(), instance.GetAllocator()};
+        it->image.Create(new_image_ci);
+        it->state = {};
+        it->subresource_states.clear();
+        it->image_view_infos.clear();
+        it->image_view_ids.clear();
+    }
     if (it == backing_images.end()) {
         const auto previous_size = Common::AlignUp(image->SizeBytes(), 1024);
         auto new_image_ci = backing->image.image_ci;
@@ -699,6 +718,144 @@ void Runtime::SetBackingSamples(VideoCore::Image* image, u32 num_samples, bool c
     }
 
     backing = new_backing;
+}
+
+void Runtime::AddImageStorageUsage(VideoCore::Image* image) {
+    constexpr auto extra_usage = vk::ImageUsageFlagBits::eStorage;
+    auto* backing = image->backing;
+    if (!backing || image->HasUsage(extra_usage)) {
+        return;
+    }
+
+    // Asking for the full usage set keeps the decision of whether storage is granted at all in
+    // one place, shared with image creation.
+    const auto new_usage = VideoCore::ImageUsageFlags(instance, image->info, true);
+    if (!(new_usage & extra_usage)) {
+        image->unsupported_usage |= extra_usage;
+        return;
+    }
+    auto new_image_ci = backing->image.image_ci;
+    new_image_ci.usage = new_usage;
+
+    const vk::PhysicalDeviceImageFormatInfo2 format_info{
+        .format = new_image_ci.format,
+        .type = new_image_ci.imageType,
+        .tiling = new_image_ci.tiling,
+        .usage = new_image_ci.usage,
+        .flags = new_image_ci.flags,
+    };
+    const auto format_properties =
+        instance.GetPhysicalDevice().getImageFormatProperties2(format_info);
+    if (format_properties.result != vk::Result::eSuccess) {
+        LOG_WARNING(Render_Vulkan, "Cannot add usage {} to image with format {}",
+                    vk::to_string(extra_usage), vk::to_string(new_image_ci.format));
+        image->unsupported_usage |= extra_usage;
+        return;
+    }
+    const auto supported_samples = format_properties.value.imageFormatProperties.sampleCounts;
+    if (!(supported_samples & new_image_ci.samples)) {
+        LOG_WARNING(Render_Vulkan, "Cannot add usage {} to image with format {} at {} samples",
+                    vk::to_string(extra_usage), vk::to_string(new_image_ci.format),
+                    vk::to_string(new_image_ci.samples));
+        image->unsupported_usage |= extra_usage;
+        return;
+    }
+    image->supported_samples = supported_samples;
+
+    scheduler.EndRendering();
+    const auto previous_size = Common::AlignUp(image->SizeBytes(), 1024);
+
+    // A freshly created image carries no contents, so the copy can be skipped entirely.
+    const bool has_contents = backing->state.layout != vk::ImageLayout::eUndefined ||
+                              !backing->subresource_states.empty();
+    const vk::Image old_handle = backing->image.image;
+    if (has_contents) {
+        Transit(image, vk::ImageLayout::eTransferSrcOptimal, vk::PipelineStageFlagBits2::eCopy,
+                vk::AccessFlagBits2::eTransferRead);
+    }
+
+    VideoCore::UniqueImage new_image{instance.GetDevice(), instance.GetAllocator()};
+    new_image.Create(new_image_ci);
+    Vulkan::SetObjectName(
+        instance.GetDevice(), new_image.image,
+        "Image {}x{}x{} {} {} {:#x}:{:#x} L:{} M:{} S:{} (usage {})", image->info.size.width,
+        image->info.size.height, image->info.size.depth, AmdGpu::NameOf(image->info.tile_mode),
+        vk::to_string(image->info.pixel_format), image->info.guest_address, image->info.guest_size,
+        image->info.resources.layers, image->info.resources.levels, backing->num_samples,
+        vk::to_string(new_image_ci.usage));
+
+    if (has_contents) {
+        image_barriers.push_back(vk::ImageMemoryBarrier2{
+            .srcStageMask = vk::PipelineStageFlagBits2::eNone,
+            .srcAccessMask = vk::AccessFlagBits2::eNone,
+            .dstStageMask = vk::PipelineStageFlagBits2::eCopy,
+            .dstAccessMask = vk::AccessFlagBits2::eTransferWrite,
+            .oldLayout = vk::ImageLayout::eUndefined,
+            .newLayout = vk::ImageLayout::eTransferDstOptimal,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .image = new_image.image,
+            .subresourceRange{
+                .aspectMask = image->aspect_mask,
+                .baseMipLevel = 0,
+                .levelCount = new_image_ci.mipLevels,
+                .baseArrayLayer = 0,
+                .layerCount = new_image_ci.arrayLayers,
+            },
+        });
+        FlushBarriers();
+
+        SmallVector<vk::ImageCopy, 16> regions;
+        for (u32 mip = 0; mip < new_image_ci.mipLevels; ++mip) {
+            const vk::ImageSubresourceLayers subres{
+                .aspectMask = image->aspect_mask,
+                .mipLevel = mip,
+                .baseArrayLayer = 0,
+                .layerCount = new_image_ci.arrayLayers,
+            };
+            regions.push_back(vk::ImageCopy{
+                .srcSubresource = subres,
+                .dstSubresource = subres,
+                .extent{
+                    .width = std::max(new_image_ci.extent.width >> mip, 1u),
+                    .height = std::max(new_image_ci.extent.height >> mip, 1u),
+                    .depth = std::max(new_image_ci.extent.depth >> mip, 1u),
+                },
+            });
+        }
+        scheduler.CommandBuffer().copyImage(old_handle, vk::ImageLayout::eTransferSrcOptimal,
+                                            new_image.image, vk::ImageLayout::eTransferDstOptimal,
+                                            regions);
+
+        backing->state = VideoCore::Image::State{
+            .pl_stage = vk::PipelineStageFlagBits2::eCopy,
+            .access_mask = vk::AccessFlagBits2::eTransferWrite,
+            .layout = vk::ImageLayout::eTransferDstOptimal,
+        };
+    } else {
+        backing->state = VideoCore::Image::State{};
+    }
+    backing->subresource_states.clear();
+
+    // Views refer to the old handle, so they have to be rebuilt against the new one. Both they
+    // and the old image may still be referenced by submitted work.
+    auto old_view_ids = std::move(backing->image_view_ids);
+    backing->image_view_ids.clear();
+    backing->image_view_infos.clear();
+    auto old_image = std::move(backing->image);
+    backing->image = std::move(new_image);
+    image->usage_flags = new_image_ci.usage;
+    if (image->memory_usage_counter) {
+        *image->memory_usage_counter += Common::AlignUp(image->SizeBytes(), 1024) - previous_size;
+    }
+
+    scheduler.DeferOperation([views = std::move(old_view_ids), old = std::move(old_image),
+                              slot_image_views = image->slot_image_views]() mutable {
+        for (const auto view_id : views) {
+            slot_image_views->Erase(view_id);
+        }
+        old.Destroy();
+    });
 }
 
 bool Runtime::IsBufferAccessed(const VideoCore::Buffer* handle, u64 offset, u64 size,
