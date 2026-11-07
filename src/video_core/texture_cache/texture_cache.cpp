@@ -218,7 +218,7 @@ void TextureCache::MarkAsMaybeDirty(ImageId image_id, Image& image) {
         const u8* addr = std::bit_cast<u8*>(image.info.guest_address);
         image.cpu_hash = XXH3_64bits(addr, image.info.guest_size);
     }
-    image.flags |= ImageFlagBits::MaybeCpuDirty;
+    image.MarkDirty(ImageFlagBits::MaybeCpuDirty);
     UntrackImage(image_id);
 }
 
@@ -239,7 +239,7 @@ void TextureCache::InvalidateMemory(VAddr addr, size_t size) {
         if (image.Overlaps(addr, size)) {
             // Modified region overlaps image, so the image was definitely accessed by this fault.
             // Untrack the image, so that the range is unprotected and the guest can write freely.
-            image.flags |= ImageFlagBits::CpuDirty;
+            image.MarkDirty(ImageFlagBits::CpuDirty, addr, addr + size);
             ReleaseOwnership(image_id, true);
             UntrackImage(image_id);
         } else if (pages_end < image_end) {
@@ -300,7 +300,7 @@ void TextureCache::InvalidateMemoryFromGPU(VAddr address, size_t max_size) {
                 return;
             }
             // Ensure image is reuploaded when accessed again.
-            image.flags |= ImageFlagBits::GpuDirty;
+            image.MarkDirty(ImageFlagBits::GpuDirty);
             ReleaseOwnership(image_id);
             next_end = std::max<VAddr>(next_end, next + image.info.guest_size);
         });
@@ -386,7 +386,7 @@ ImageId TextureCache::ResolveDepthOverlap(const ImageInfo& requested_info, Bindi
              new_info.resources.levels > cache_image.info.resources.levels)) {
             RefreshImage(new_image);
         }
-        new_image.flags &= ~ImageFlagBits::Dirty;
+        new_image.ClearDirty();
         // When creating a depth buffer through overlap resolution don't clear it on first use.
         new_image.info.meta_info.htile_clear_mask = 0;
         runtime.CopyColorAndDepth(&cache_image, &new_image);
@@ -567,7 +567,7 @@ ImageId TextureCache::ExpandImage(const ImageInfo& info, ImageId image_id) {
     }
 
     TrackImage(new_image_id);
-    new_image.flags &= ~ImageFlagBits::Dirty;
+    new_image.ClearDirty();
     if (src_has_gpu_data) {
         runtime.CopyImage(&src_image, &new_image);
     }
@@ -919,6 +919,13 @@ void TextureCache::RefreshImage(Image& image) {
             image.info.props.is_volume ? std::max(image.info.size.depth >> m, 1u) : 1u;
         const auto [mip_size, mip_pitch, mip_height, mip_offset, mip_slice_size] =
             image.info.mips_layout[m];
+        // Only the mips something was actually written into have to come back from guest memory;
+        // the rest keep whatever the gpu last rendered into them, as a mip chain built on the gpu
+        // one level at a time does.
+        const VAddr mip_addr = image.info.guest_address + mip_offset;
+        if (!image.IsDirtyAt(mip_addr, mip_addr + mip_size)) {
+            continue;
+        }
         const u32 extent_width = mip_pitch ? std::min<u32>(mip_pitch, width) : width;
         const u32 extent_height = mip_height ? std::min<u32>(mip_height, height) : height;
         image_copies.push_back({
@@ -937,7 +944,7 @@ void TextureCache::RefreshImage(Image& image) {
     }
 
     if (image_copies.empty()) {
-        image.flags &= ~ImageFlagBits::Dirty;
+        image.ClearDirty();
         return;
     }
 
@@ -1098,13 +1105,13 @@ void TextureCache::MarkDirtyIfEdgesModified(Image& image) {
     if (image.head_hash != 0) {
         const auto head_end = GetNextPageAddr(image_begin);
         if (HashBackingMemory(image_begin, head_end - image_begin) != image.head_hash) {
-            image.flags |= ImageFlagBits::CpuDirty;
+            image.MarkDirty(ImageFlagBits::CpuDirty, image_begin, head_end);
         }
     }
     if (image.tail_hash != 0) {
         const auto tail_begin = GetPageAddr(image_end);
         if (HashBackingMemory(tail_begin, image_end - tail_begin) != image.tail_hash) {
-            image.flags |= ImageFlagBits::CpuDirty;
+            image.MarkDirty(ImageFlagBits::CpuDirty, tail_begin, image_end);
         }
     }
 }

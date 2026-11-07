@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <limits>
 #include <mutex>
 #include <optional>
 
@@ -114,6 +115,31 @@ struct Image : public Common::LRUNode<> {
     /// its writes stop faulting; the hash of the image bytes in there is what recovers from it.
     std::pair<VAddr, VAddr> TrackedRange() const noexcept;
 
+    /// Widens the range the image has to be refilled from to also cover [begin, end).
+    void MarkDirty(ImageFlagBits kind, VAddr begin, VAddr end) noexcept {
+        flags |= kind;
+        if (dirty_begin >= dirty_end) {
+            dirty_begin = begin;
+            dirty_end = end;
+        } else {
+            dirty_begin = std::min(dirty_begin, begin);
+            dirty_end = std::max(dirty_end, end);
+        }
+    }
+
+    void MarkDirty(ImageFlagBits kind) noexcept {
+        MarkDirty(kind, info.guest_address, info.guest_address + info.guest_size);
+    }
+
+    void ClearDirty() noexcept {
+        flags &= ~ImageFlagBits::Dirty;
+        dirty_begin = dirty_end = 0;
+    }
+
+    bool IsDirtyAt(VAddr begin, VAddr end) const noexcept {
+        return dirty_begin < end && begin < dirty_end;
+    }
+
     bool HasGpuValidData() const {
         return True(flags & ImageFlagBits::GpuModified) && False(flags & ImageFlagBits::Dirty);
     }
@@ -158,6 +184,10 @@ public:
     vk::ImageAspectFlags aspect_mask = vk::ImageAspectFlagBits::eColor;
     vk::SampleCountFlags supported_samples = vk::SampleCountFlagBits::e1;
     ImageFlagBits flags = ImageFlagBits::Dirty;
+    /// Guest range the image has to be refilled from, as the union of everything written to it.
+    /// A fresh image has nothing at all, so it starts out covering every address.
+    VAddr dirty_begin = 0;
+    VAddr dirty_end = std::numeric_limits<VAddr>::max();
     ImageId depth_id{};
     u64 depth_uid{};
 
