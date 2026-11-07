@@ -11,7 +11,6 @@
 #include "common/types.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/buffer_cache/fault_manager.h"
-#include "video_core/buffer_cache/range_set.h"
 #include "video_core/buffer_cache/region_manager.h"
 #include "video_core/renderer_vulkan/vk_semaphore.h"
 #include "video_core/texture_cache/image.h"
@@ -168,6 +167,9 @@ private:
     /// Call 'func' for each CPU modified range and unmark those pages as CPU modified
     void ForEachUploadRange(VAddr device_addr, u64 size, bool is_written, auto&& func);
 
+    /// Call 'func' with the bounds of each part of the range a buffer holds the newest copy of
+    void ForEachGpuModifiedRange(VAddr device_addr, u64 size, auto&& func);
+
     /// Call 'func' for each GPU modified range and unmark those pages as GPU modified
     template <bool clear>
     void ForEachDownloadRange(VAddr device_addr, u64 size, auto&& func);
@@ -194,7 +196,6 @@ private:
     StreamBuffer stream_buffer;
     Buffer gds_buffer;
     std::unique_ptr<Buffer> null_index_buffer;
-    RangeSet gpu_modified_ranges;
 
     std::unique_ptr<FaultManager> fault_manager;
     std::unique_ptr<Buffer> bda_pagetable_buffer;

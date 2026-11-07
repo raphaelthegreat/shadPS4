@@ -25,6 +25,12 @@ namespace VideoCore {
 static constexpr size_t GDS_BUFFER_SIZE = 64_KB;
 static constexpr size_t NULL_INDEX_BUFFER_SIZE = 16;
 static constexpr size_t STREAM_BUFFER_SIZE = 128_MB;
+
+// Buffers all share one owner identity. Nothing reads back a single buffer in isolation, and a
+// range handed from one arena to another is still the same bytes, so telling them apart would
+// only keep runs from merging.
+static constexpr Owner BufferOwner{OwnerKind::Buffer, 0};
+
 constexpr std::optional<u32> CmaskColorExpandedValue(u32 num_samples) {
     switch (num_samples) {
     case 1:
@@ -241,7 +247,21 @@ void BufferCache::InvalidateMemory(VAddr device_addr, u64 size, bool assume_lock
 
 void BufferCache::UnmarkRegionAsGpuModified(VAddr device_addr, u64 size, bool is_write) {
     UnmarkPagesAsGpuModified(device_addr, size, is_write);
-    gpu_modified_ranges.Subtract(device_addr, size);
+    gpu_memory.ReleaseOwner(device_addr, size, BufferOwner);
+}
+
+void BufferCache::ForEachGpuModifiedRange(VAddr device_addr, u64 size, auto&& func) {
+    // The owner lock is held for the duration of the walk, so the runs are gathered first and
+    // handed out once it is gone.
+    boost::container::small_vector<std::pair<VAddr, VAddr>, 8> ranges;
+    gpu_memory.ForEachOwner(device_addr, size, [&](VAddr addr, u64 run_size, Owner owner) {
+        if (owner.kind == OwnerKind::Buffer) {
+            ranges.emplace_back(addr, addr + run_size);
+        }
+    });
+    for (const auto& [start, end] : ranges) {
+        func(start, end);
+    }
 }
 
 void BufferCache::ReadMemory(VAddr device_addr, u64 size, bool is_write, bool async,
@@ -289,8 +309,8 @@ void BufferCache::DownloadMemory(const Buffer* arena, VAddr device_addr, u64 siz
             constexpr u64 mask = ~(align - 1ULL);
             total_size_bytes += (new_size + align - 1) & mask;
         };
-        gpu_modified_ranges.ForEachInRange(address, size, add_download);
-        gpu_modified_ranges.Subtract(address, size);
+        ForEachGpuModifiedRange(address, size, add_download);
+        gpu_memory.ReleaseOwner(address, size, BufferOwner);
     });
     if (total_size_bytes == 0) {
         return;
@@ -347,7 +367,7 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
     }
     SynchronizeMemory(arena, device_addr, size, is_written, is_texel_buffer);
     if (is_written) {
-        gpu_modified_ranges.Add(device_addr, size);
+        gpu_memory.AssignOwner(device_addr, size, BufferOwner);
     }
     return {arena, arena->Offset(device_addr)};
 }
@@ -376,7 +396,7 @@ bool BufferCache::IsRegionGpuModified(VAddr addr, size_t size) {
 void BufferCache::MarkRegionAsGpuModified(VAddr addr, size_t size) {
     texture_cache.MarkAsMaybeGpuDirty(addr, size);
     MarkPagesAsGpuModified(addr, size);
-    gpu_modified_ranges.Add(addr, size);
+    gpu_memory.AssignOwner(addr, size, BufferOwner);
 }
 
 void BufferCache::ReadEdgeImagePages(const Image& image) {
@@ -404,9 +424,9 @@ void BufferCache::ReadEdgeImagePages(const Image& image) {
         constexpr u64 mask = ~(align - 1ULL);
         total_size_bytes += (new_size + align - 1) & mask;
     };
-    gpu_modified_ranges.ForEachInRange(page_start, image_addr - page_start, add_download);
-    gpu_modified_ranges.ForEachInRange(image_end, page_end - image_end, add_download);
-    gpu_modified_ranges.Subtract(page_start, page_end - page_start);
+    ForEachGpuModifiedRange(page_start, image_addr - page_start, add_download);
+    ForEachGpuModifiedRange(image_end, page_end - image_end, add_download);
+    gpu_memory.ReleaseOwner(page_start, page_end - page_start, BufferOwner);
     if (total_size_bytes == 0) {
         return;
     }
