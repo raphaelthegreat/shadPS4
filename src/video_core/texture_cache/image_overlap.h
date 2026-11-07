@@ -39,9 +39,9 @@ bool IsLayoutCompatible(const ImageInfo& lhs, const ImageInfo& rhs);
 ///
 /// Slices of a volume image are addressed through its depth rather than its layer count, so an
 /// overlap that starts past the first slice of one is not reported and the caller has to fall back
-/// to filling the image from guest memory. The same holds for a macro tiled image offset by a
-/// partial slice, because macro tiling rotates the bank assignment with the macro tile row and no
-/// plain copy can express that.
+/// to filling the image from guest memory. An overlap that begins part way down the rows of
+/// the other is reported with a row offset, but only when the shift covers whole tiles; a finer
+/// one lands the same texels in different banks and no plain copy can express it.
 void CollectOverlapCopies(const ImageInfo& src, const ImageInfo& dst, SubresourceCopies& copies);
 
 /// True when every subresource of `view` is a whole subresource of `base` at the same size, so

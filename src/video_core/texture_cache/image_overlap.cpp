@@ -48,14 +48,17 @@ std::optional<RowLayout> GetRowLayout(const ImageInfo& info, u32 level) {
     if (info.array_mode == AmdGpu::ArrayMode::ArrayLinearAligned) {
         return RowLayout{row_bytes, 1};
     }
-    // Macro tiling rotates the bank a tile lands in with its macro tile row, so the same texels
-    // occupy a different byte order once shifted and a copy cannot express it.
-    if (AmdGpu::IsMacroTiled(info.array_mode) && ((info.micro_tiled_mips >> level) & 1) == 0) {
-        return std::nullopt;
-    }
-    // Thick micro tiles interleave slices within a tile row, which a vertical shift would break.
+    // Thick tiles interleave slices within a tile row, which a vertical shift would break.
     if (AmdGpu::GetMicroTileThickness(info.array_mode) != 1) {
         return std::nullopt;
+    }
+    // Which bank and pipe a tile lands in repeats with the macro tile, and a whole row of macro
+    // tiles is contiguous, so a shift by a multiple of one is a plain translation of the bytes.
+    // Anything finer lands the same texels in different banks.
+    if (AmdGpu::IsMacroTiled(info.array_mode) && ((info.micro_tiled_mips >> level) & 1) == 0) {
+        const auto [macro_pitch, macro_height] =
+            GetMacroTileExtents(info.tile_mode, info.num_bits, info.num_samples, info.alt_tile);
+        return RowLayout{row_bytes, macro_height};
     }
     return RowLayout{row_bytes, micro_tile_extent.second};
 }
@@ -72,7 +75,8 @@ bool CollectRowShifted(const ImageInfo& src, u32 src_level, const ImageInfo& dst
     }
     const auto src_rows = GetRowLayout(src, src_level);
     const auto dst_rows = GetRowLayout(dst, dst_level);
-    if (!src_rows || !dst_rows || src_rows->row_bytes != dst_rows->row_bytes) {
+    if (!src_rows || !dst_rows || src_rows->row_bytes != dst_rows->row_bytes ||
+        src_rows->granularity != dst_rows->granularity) {
         return false;
     }
     const s64 row_bytes = src_rows->row_bytes;
@@ -80,7 +84,7 @@ bool CollectRowShifted(const ImageInfo& src, u32 src_level, const ImageInfo& dst
         return false;
     }
     const s64 shift = delta / row_bytes;
-    const u32 granularity = std::max(src_rows->granularity, dst_rows->granularity);
+    const u32 granularity = src_rows->granularity;
     if (shift % granularity != 0) {
         return false;
     }
