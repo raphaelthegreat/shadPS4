@@ -30,6 +30,10 @@ bool IsLayoutCompatible(const ImageInfo& lhs, const ImageInfo& rhs);
 
 /// Collects the subresources of `dst` that `src` holds the contents of. Only overlaps that fall on
 /// a slice boundary are reported; a partial overlap within a single slice needs a retiling pass.
+///
+/// Slices of a volume image are addressed through its depth rather than its layer count, so an
+/// overlap that starts past the first slice of one is not reported and the caller has to fall back
+/// to filling the image from guest memory.
 void CollectOverlapCopies(const ImageInfo& src, const ImageInfo& dst, SubresourceCopies& copies);
 
 /// True when every subresource of `view` is a whole subresource of `base` at the same size, so

@@ -448,6 +448,67 @@ void Runtime::CopyMip(VideoCore::Image* src, VideoCore::Image* dst, u32 mip, u32
     dst->flags &= ~VideoCore::ImageFlagBits::Dirty;
 }
 
+void Runtime::CopySubresources(VideoCore::Image* src, VideoCore::Image* dst,
+                               std::span<const VideoCore::SubresourceCopy> copies) {
+    if (copies.empty()) {
+        return;
+    }
+    // Slices of a 3D image are addressed through the depth extent rather than the layer count,
+    // which the subresource runs do not describe. Those are handled by a whole image copy.
+    if (ConvertImageType(src->info.type) == vk::ImageType::e3D ||
+        ConvertImageType(dst->info.type) == vk::ImageType::e3D) {
+        LOG_WARNING(Render_Vulkan, "Skipping subresource copy involving a 3D image");
+        return;
+    }
+
+    SetBackingSamples(dst, dst->info.num_samples);
+    SetBackingSamples(src, src->info.num_samples);
+
+    const vk::ImageAspectFlags src_aspect = src->aspect_mask & ~vk::ImageAspectFlagBits::eStencil;
+    const vk::ImageAspectFlags dst_aspect = dst->aspect_mask & ~vk::ImageAspectFlagBits::eStencil;
+
+    SmallVector<vk::ImageCopy, 8> regions;
+    for (const auto& copy : copies) {
+        // Both mips occupy the same padded memory, but the extent each of them exposes can still
+        // differ, so transfer only the part that is visible in both.
+        const auto src_extent = VideoCore::MipExtent(src->info, copy.src.level);
+        const auto dst_extent = VideoCore::MipExtent(dst->info, copy.dst.level);
+        regions.push_back(vk::ImageCopy{
+            .srcSubresource{
+                .aspectMask = src_aspect,
+                .mipLevel = copy.src.level,
+                .baseArrayLayer = copy.src.layer,
+                .layerCount = copy.num_layers,
+            },
+            .dstSubresource{
+                .aspectMask = dst_aspect,
+                .mipLevel = copy.dst.level,
+                .baseArrayLayer = copy.dst.layer,
+                .layerCount = copy.num_layers,
+            },
+            .extent = {std::min(src_extent.width, dst_extent.width),
+                       std::min(src_extent.height, dst_extent.height), 1},
+        });
+    }
+
+    scheduler.EndRendering();
+
+    bool needs_flush =
+        Transit(src, vk::ImageLayout::eTransferSrcOptimal, vk::PipelineStageFlagBits2::eCopy,
+                vk::AccessFlagBits2::eTransferRead);
+    needs_flush |= Transit(dst, vk::ImageLayout::eTransferDstOptimal,
+                           vk::PipelineStageFlagBits2::eCopy, vk::AccessFlagBits2::eTransferWrite);
+    if (needs_flush) {
+        FlushBarriers();
+    }
+
+    const auto cmdbuf = scheduler.CommandBuffer();
+    cmdbuf.copyImage(src->GetImage(), vk::ImageLayout::eTransferSrcOptimal, dst->GetImage(),
+                     vk::ImageLayout::eTransferDstOptimal, regions);
+
+    dst->flags |= (src->flags & VideoCore::ImageFlagBits::GpuModified);
+}
+
 void Runtime::CopyColorAndDepth(VideoCore::Image* src, VideoCore::Image* dst) {
     if (src->info.num_samples == 1 && dst->info.num_samples == 1) {
         if ((instance.IsMaintenance8Supported() ||

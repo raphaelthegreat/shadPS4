@@ -8,6 +8,7 @@
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/renderer_vulkan/vk_staging_buffer_pool.h"
 #include "video_core/texture_cache/image.h"
+#include "video_core/texture_cache/image_overlap.h"
 #include "video_core/texture_cache/types.h"
 
 namespace VideoCore {
@@ -54,6 +55,8 @@ public:
     void CopyImageWithBuffer(VideoCore::Image* src, VideoCore::Image* dst,
                              const VideoCore::Buffer* buffer, u64 offset);
     void CopyMip(VideoCore::Image* src, VideoCore::Image* dst, u32 mip, u32 slice);
+    void CopySubresources(VideoCore::Image* src, VideoCore::Image* dst,
+                          std::span<const VideoCore::SubresourceCopy> copies);
 
     void CopyColorAndDepth(VideoCore::Image* src, VideoCore::Image* dst);
 
