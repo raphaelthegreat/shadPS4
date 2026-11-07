@@ -465,8 +465,17 @@ std::tuple<ImageId, int, int> TextureCache::ResolveOverlap(const ImageInfo& imag
             return {cache_image_id, range.base.level, range.base.layer};
         }
 
-        // The images only happen to share memory. Both stay in the cache; whichever of them the
-        // guest writes through takes ownership of the pages they have in common.
+        // The request covers a subrect of the cached image rather than whole subresources of it,
+        // so it needs an image of its own. Both stay in the cache, and the one the guest renders
+        // through takes ownership of the pages they have in common.
+        SubresourceCopies copies;
+        CollectOverlapCopies(cache_image.info, image_info, copies);
+        if (copies.empty() || !cache_image.HasGpuValidData()) {
+            return {merged_image_id, -1, -1};
+        }
+        merged_image_id = ObtainMergedImage(image_info, merged_image_id);
+        runtime.CopySubresources(&slot_images[cache_image_id], &slot_images[merged_image_id],
+                                 copies);
         return {merged_image_id, -1, -1};
     }
 
@@ -478,9 +487,16 @@ std::tuple<ImageId, int, int> TextureCache::ResolveOverlap(const ImageInfo& imag
         return {merged_image_id, -1, -1};
     }
 
-    // A render target bound through the smaller image has to be redirected to the merged one,
+    // When the cached image only covers a subrect of the request the two remain distinct views of
+    // the allocation, so it is kept. Whole subresources on the other hand are now held by the
+    // merged image and keeping a second copy of them would only let the two drift apart.
+    const bool absorbed = std::ranges::all_of(copies, [](const SubresourceCopy& copy) {
+        return copy.src_offset_y == 0 && copy.dst_offset_y == 0;
+    });
+
+    // A render target bound through the cached image has to be redirected to the merged one,
     // otherwise rendering would keep landing in an image nothing samples from anymore.
-    if (cache_image.binding.is_target) {
+    if (absorbed && cache_image.binding.is_target) {
         cache_image.binding.needs_rebind = 1u;
         if (merged_image_id) {
             GetImage(merged_image_id).binding.is_target = 1u;
@@ -489,23 +505,31 @@ std::tuple<ImageId, int, int> TextureCache::ResolveOverlap(const ImageInfo& imag
         return {merged_image_id, -1, -1};
     }
 
-    // The merged image has to exist before the copy, otherwise it would later be filled from
-    // guest memory and the contents the GPU produced would be lost.
-    if (!merged_image_id) {
-        merged_image_id = slot_images.Insert(instance, runtime, slot_image_views, image_info);
-        RegisterImage(merged_image_id);
-        RefreshImage(slot_images[merged_image_id]);
-        TrackImage(merged_image_id);
-    }
     // Only carry the contents over when the GPU produced them. A cache image whose memory the
     // CPU has since rewritten is stale, and copying it would undo the fresh guest upload.
     if (slot_images[cache_image_id].HasGpuValidData()) {
+        merged_image_id = ObtainMergedImage(image_info, merged_image_id);
         runtime.CopySubresources(&slot_images[cache_image_id], &slot_images[merged_image_id],
                                  copies);
     }
-    FreeImage(cache_image_id);
+    if (absorbed) {
+        FreeImage(cache_image_id);
+    }
 
     return {merged_image_id, -1, -1};
+}
+
+ImageId TextureCache::ObtainMergedImage(const ImageInfo& info, ImageId merged_image_id) {
+    // The merged image has to exist before anything is copied into it, otherwise it would later
+    // be filled from guest memory and the contents the GPU produced would be lost.
+    if (merged_image_id) {
+        return merged_image_id;
+    }
+    merged_image_id = slot_images.Insert(instance, runtime, slot_image_views, info);
+    RegisterImage(merged_image_id);
+    RefreshImage(slot_images[merged_image_id]);
+    TrackImage(merged_image_id);
+    return merged_image_id;
 }
 
 ImageId TextureCache::ExpandImage(const ImageInfo& info, ImageId image_id) {

@@ -182,6 +182,9 @@ public:
     /// Creates a new image with provided image info and copies subresources from image_id
     [[nodiscard]] ImageId ExpandImage(const ImageInfo& info, ImageId image_id);
 
+    /// Returns the image an overlap is being merged into, creating it if needed.
+    [[nodiscard]] ImageId ObtainMergedImage(const ImageInfo& info, ImageId merged_image_id);
+
     /// Reuploads image contents.
     void RefreshImage(Image& image);
 

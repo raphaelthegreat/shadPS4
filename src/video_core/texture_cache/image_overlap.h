@@ -12,10 +12,16 @@ namespace VideoCore {
 /// A run of subresources of one image that holds the same guest memory, and the same bytes within
 /// it, as a run of subresources of another. Layers are contiguous in both images, so an arbitrary
 /// overlap decomposes into a handful of these.
+///
+/// One of the two row offsets is always zero; they express an image that begins part way down the
+/// rows of the other, which is how a guest renders into a subrect of a larger allocation.
 struct SubresourceCopy {
     SubresourceBase src;
     SubresourceBase dst;
     u16 num_layers;
+    u32 src_offset_y;
+    u32 dst_offset_y;
+    u32 height;
 };
 
 using SubresourceCopies = SmallVector<SubresourceCopy, 8>;
@@ -33,7 +39,9 @@ bool IsLayoutCompatible(const ImageInfo& lhs, const ImageInfo& rhs);
 ///
 /// Slices of a volume image are addressed through its depth rather than its layer count, so an
 /// overlap that starts past the first slice of one is not reported and the caller has to fall back
-/// to filling the image from guest memory.
+/// to filling the image from guest memory. The same holds for a macro tiled image offset by a
+/// partial slice, because macro tiling rotates the bank assignment with the macro tile row and no
+/// plain copy can express that.
 void CollectOverlapCopies(const ImageInfo& src, const ImageInfo& dst, SubresourceCopies& copies);
 
 /// True when every subresource of `view` is a whole subresource of `base` at the same size, so

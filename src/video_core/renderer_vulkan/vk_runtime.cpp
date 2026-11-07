@@ -469,10 +469,13 @@ void Runtime::CopySubresources(VideoCore::Image* src, VideoCore::Image* dst,
 
     SmallVector<vk::ImageCopy, 8> regions;
     for (const auto& copy : copies) {
-        // Both mips occupy the same padded memory, but the extent each of them exposes can still
+        // Both mips lay their rows out alike, but the extent each of them exposes can still
         // differ, so transfer only the part that is visible in both.
         const auto src_extent = VideoCore::MipExtent(src->info, copy.src.level);
         const auto dst_extent = VideoCore::MipExtent(dst->info, copy.dst.level);
+        if (copy.height == 0) {
+            continue;
+        }
         regions.push_back(vk::ImageCopy{
             .srcSubresource{
                 .aspectMask = src_aspect,
@@ -480,14 +483,15 @@ void Runtime::CopySubresources(VideoCore::Image* src, VideoCore::Image* dst,
                 .baseArrayLayer = copy.src.layer,
                 .layerCount = copy.num_layers,
             },
+            .srcOffset = {0, static_cast<s32>(copy.src_offset_y), 0},
             .dstSubresource{
                 .aspectMask = dst_aspect,
                 .mipLevel = copy.dst.level,
                 .baseArrayLayer = copy.dst.layer,
                 .layerCount = copy.num_layers,
             },
-            .extent = {std::min(src_extent.width, dst_extent.width),
-                       std::min(src_extent.height, dst_extent.height), 1},
+            .dstOffset = {0, static_cast<s32>(copy.dst_offset_y), 0},
+            .extent = {std::min(src_extent.width, dst_extent.width), copy.height, 1},
         });
     }
 
