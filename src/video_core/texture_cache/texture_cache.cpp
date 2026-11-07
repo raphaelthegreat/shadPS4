@@ -347,34 +347,6 @@ void TextureCache::UnmapMemory(VAddr cpu_addr, size_t size) {
     }
 }
 
-namespace {
-
-/// Whether a cached image can be handed to a request as it stands. Only the properties a view
-/// cannot paper over are consulted: everything else about reconciling two images that share an
-/// allocation is settled afterwards, by copying from whichever of them owns the memory.
-bool CanServeRequest(const ImageInfo& cache_info, const ImageInfo& info, bool exact_fmt) {
-    // Guest size is not part of the identity of an image. It follows the height the guest
-    // declared for the allocation, which is padded inconsistently and sometimes outright wrong,
-    // while the layout the texels actually sit in is what decides reusability.
-    if (!IsLayoutCompatible(cache_info, info) || cache_info.pitch != info.pitch) {
-        return false;
-    }
-    // A volume and an array over the same memory are laid out alike but cannot be views of one
-    // another, so the requested interpretation has to be materialised separately.
-    if (cache_info.type != info.type && info.size != Extent3D{1, 1, 1}) {
-        return false;
-    }
-    // Depth and colour are distinct kinds of image to the host even when they alias the same
-    // texels, which the format classes already say, so an aliasing pair ends up as two images
-    // and the contents are carried between them by the owner driven validation.
-    if (exact_fmt) {
-        return cache_info.pixel_format == info.pixel_format;
-    }
-    return IsVulkanFormatCompatible(cache_info.pixel_format, info.pixel_format);
-}
-
-} // Anonymous namespace
-
 ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
     const auto& info = desc.info;
 
@@ -389,9 +361,10 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
         }
     });
 
-    // Otherwise look for one the request is a plain view of. Nothing else in the cache can serve
-    // it, so anything short of that means a new image, which the contents of the old ones are
-    // then copied into according to who owns the memory they share.
+    // Otherwise look for one the request is a plain view of, consulting only the properties a
+    // view cannot paper over. Nothing else in the cache can serve it, so anything short of that
+    // means a new image, which the contents of the old ones are then copied into according to
+    // who owns the memory they share.
     SubresourceBase view_base;
     if (!image_id) {
         SmallVector<ImageId, 8> image_ids;
@@ -399,19 +372,34 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
                              [&](ImageId id, Image&) { image_ids.push_back(id); });
         for (const ImageId cache_id : image_ids) {
             const auto& cache_info = slot_images[cache_id].info;
-            if (!CanServeRequest(cache_info, info, exact_fmt)) {
+            // Guest size is not part of the identity of an image. It follows the height the
+            // guest declared for the allocation, which is padded inconsistently and sometimes
+            // outright wrong, while the layout the texels actually sit in is what decides
+            // reusability.
+            if (!IsLayoutCompatible(cache_info, info) || cache_info.pitch != info.pitch) {
+                continue;
+            }
+            // A volume and an array over the same memory are laid out alike but cannot be views
+            // of one another, so the requested interpretation has to be materialised separately.
+            if (cache_info.type != info.type && info.size != Extent3D{1, 1, 1}) {
+                continue;
+            }
+            // Depth and colour are distinct kinds of image to the host even when they alias the
+            // same texels, which the format classes already say, so an aliasing pair ends up as
+            // two images whose contents the owner driven validation carries between them.
+            const bool format_matches =
+                exact_fmt ? cache_info.pixel_format == info.pixel_format
+                          : IsVulkanFormatCompatible(cache_info.pixel_format, info.pixel_format);
+            if (!format_matches) {
                 continue;
             }
             if (cache_info.guest_address == info.guest_address) {
-                // The same allocation seen the same way, usable as long as every subresource
-                // asked for is present and large enough. The guest size is deliberately not
-                // consulted; guests pad the height of an allocation inconsistently between the
-                // views they take of it, while the extent is what decides whether the data is
-                // there.
-                if (cache_info.size.width >= info.size.width &&
-                    cache_info.size.height >= info.size.height &&
-                    cache_info.size.depth >= info.size.depth &&
-                    cache_info.resources.Contains(info.resources)) {
+                // The same allocation seen the same way. Extra mips and layers are fine because
+                // the view picks out the ones asked for, but the extent has to match, as
+                // sampling a wider or taller image normalises the coordinates against the wrong
+                // size. The guest size is deliberately not consulted; guests pad the height of
+                // an allocation inconsistently between the views they take of it.
+                if (cache_info.size == info.size && cache_info.resources.Contains(info.resources)) {
                     image_id = cache_id;
                     break;
                 }
