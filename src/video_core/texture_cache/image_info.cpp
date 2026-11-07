@@ -79,13 +79,15 @@ ImageInfo::ImageInfo(const AmdGpu::ColorBuffer& buffer, AmdGpu::CbDbExtent hint)
 
     guest_address = buffer.Address();
     if (props.is_tiled) {
-        guest_size = buffer.GetColorSliceSize() * resources.layers;
-        mips_layout[0] = MipInfo(guest_size, pitch, buffer.Height(), 0);
+        const u32 slice_size = buffer.GetColorSliceSize();
+        guest_size = slice_size * resources.layers;
+        mips_layout[0] = MipInfo(guest_size, pitch, buffer.Height(), 0, slice_size);
     } else {
-        std::tie(std::ignore, std::ignore, guest_size) =
+        u32 slice_size = 0;
+        std::tie(std::ignore, std::ignore, slice_size) =
             ImageSizeLinearAligned(pitch, size.height, num_bits, num_samples);
-        guest_size *= resources.layers;
-        mips_layout[0] = MipInfo(guest_size, pitch, size.height, 0);
+        guest_size = slice_size * resources.layers;
+        mips_layout[0] = MipInfo(guest_size, pitch, size.height, 0, slice_size);
     }
     alt_tile = Libraries::Kernel::sceKernelIsNeoMode() && buffer.info.alt_tile_mode;
 }
@@ -124,19 +126,21 @@ ImageInfo::ImageInfo(const AmdGpu::DepthBuffer& buffer, u32 num_slices, VAddr ht
     if (buffer.z_info.format != AmdGpu::DepthBuffer::ZFormat::Invalid) {
         guest_address = write_buffer ? buffer.DepthWriteAddress() : buffer.DepthAddress();
         if (props.is_tiled) {
-            guest_size = buffer.GetDepthSliceSize() * resources.layers;
-            mips_layout[0] = MipInfo(guest_size, pitch, buffer.Height(), 0);
+            const u32 slice_size = buffer.GetDepthSliceSize();
+            guest_size = slice_size * resources.layers;
+            mips_layout[0] = MipInfo(guest_size, pitch, buffer.Height(), 0, slice_size);
         } else {
-            std::tie(std::ignore, std::ignore, guest_size) =
+            u32 slice_size = 0;
+            std::tie(std::ignore, std::ignore, slice_size) =
                 ImageSizeLinearAligned(pitch, size.height, num_bits, num_samples);
-            guest_size *= resources.layers;
-            mips_layout[0] = MipInfo(guest_size, pitch, size.height, 0);
+            guest_size = slice_size * resources.layers;
+            mips_layout[0] = MipInfo(guest_size, pitch, size.height, 0, slice_size);
         }
     } else {
         guest_address = stencil_addr;
         guest_size = stencil_size;
-        mips_layout[0] =
-            MipInfo(guest_size, pitch, props.is_tiled ? buffer.Height() : size.height, 0);
+        mips_layout[0] = MipInfo(guest_size, pitch, props.is_tiled ? buffer.Height() : size.height,
+                                 0, guest_size / resources.layers);
         num_bits = 8;
     }
 }
@@ -227,7 +231,7 @@ s32 ImageInfo::MipOf(const ImageInfo& info) const {
     // Find mip
     auto mip = -1;
     for (auto m = 0; m < info.resources.levels; ++m) {
-        const auto& [mip_size, mip_pitch, mip_height, mip_ofs] = info.mips_layout[m];
+        const auto& [mip_size, mip_pitch, mip_height, mip_ofs, mip_slice] = info.mips_layout[m];
         const VAddr mip_base = info.guest_address + mip_ofs;
         const VAddr mip_end = mip_base + mip_size;
         const u32 slice_size = mip_size / info.resources.layers;

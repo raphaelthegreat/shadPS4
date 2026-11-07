@@ -351,10 +351,11 @@ constexpr std::tuple<u16, u16, size_t> ImageSizeMacroTiled(u32 pitch, u32 height
 }
 
 struct MipInfo {
-    u32 size;
+    u32 size; ///< Byte size of the whole mip, covering every slice of it
     u16 pitch;
     u16 height;
-    u32 offset;
+    u32 offset;     ///< Byte offset of the mip from the start of the image
+    u32 slice_size; ///< Byte size of a single slice, which mip size is a whole multiple of
 };
 
 static constexpr std::size_t MAX_MIPS = 16;
@@ -409,6 +410,7 @@ constexpr void ComputeImageSize(u32 pitch, u32 height, u32 depth, u32 levels, u3
         }
         u32 num_slices = mip_d * layers;
         num_slices += (-num_slices) & (mip_thickness - 1);
+        mip_info.slice_size = mip_info.size;
         mip_info.size *= num_slices;
         mip_info.offset = *out_size;
         *out_size += mip_info.size;

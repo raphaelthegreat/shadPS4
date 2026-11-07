@@ -127,7 +127,7 @@ void TextureCache::DownloadImageMemory(ImageId image_id, DownloadMemoryFlags fla
         const u32 height = std::max(image.info.size.height >> mip, 1u);
         const u32 depth =
             image.info.props.is_volume ? std::max(image.info.size.depth >> mip, 1u) : 1u;
-        const auto [mip_size, mip_pitch, mip_height, mip_offset] = image.info.mips_layout[mip];
+        const auto [mip_size, mip_pitch, mip_height, mip_offset, mip_slice_size] = image.info.mips_layout[mip];
         const u32 extent_width = mip_pitch ? std::min<u32>(mip_pitch, width) : width;
         const u32 extent_height = mip_height ? std::min<u32>(mip_height, height) : height;
         buffer_copies.push_back(vk::BufferImageCopy{
@@ -967,7 +967,7 @@ void TextureCache::RefreshImage(Image& image) {
         const u32 height = std::max(image.info.size.height >> m, 1u);
         const u32 depth =
             image.info.props.is_volume ? std::max(image.info.size.depth >> m, 1u) : 1u;
-        const auto [mip_size, mip_pitch, mip_height, mip_offset] = image.info.mips_layout[m];
+        const auto [mip_size, mip_pitch, mip_height, mip_offset, mip_slice_size] = image.info.mips_layout[m];
         const u32 extent_width = mip_pitch ? std::min<u32>(mip_pitch, width) : width;
         const u32 extent_height = mip_height ? std::min<u32>(mip_height, height) : height;
         image_copies.push_back({
