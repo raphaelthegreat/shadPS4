@@ -253,7 +253,7 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBuffer(VAddr device_addr, u32 s
     const auto* arena = GetArena(first_block, last_block);
     EnsureResident(arena, first_block, last_block);
     if (is_written) {
-        texture_cache.MarkAsMaybeGpuDirty(device_addr, size);
+        texture_cache.MarkAsDisplaced(device_addr, size);
     }
     SynchronizeMemory(arena, device_addr, size, is_written);
     if (is_written) {
@@ -283,8 +283,19 @@ bool BufferCache::IsRegionGpuModified(VAddr addr, size_t size) {
     return gpu_memory.IsRegionOwned(addr, size);
 }
 
+void BufferCache::UnmarkPagesAsGpuModified(VAddr device_addr, u64 size, bool is_write) {
+    IterateRegions(device_addr, size, [is_write](RegionManager* region, u64 offset, u64 size) {
+        if (is_write) {
+            region->ChangeRegionState<StateOp::Set, StateOp::Clear>(offset, size);
+        } else {
+            region->ChangeRegionState<StateOp::None, StateOp::Clear>(offset, size);
+        }
+    });
+    gpu_memory.ReleaseOwner(device_addr, size, BufferOwner);
+}
+
 void BufferCache::MarkRegionAsGpuModified(VAddr addr, size_t size) {
-    texture_cache.MarkAsMaybeGpuDirty(addr, size);
+    texture_cache.MarkAsDisplaced(addr, size);
     MarkPagesAsGpuModified(addr, size);
     gpu_memory.AssignOwner(addr, size, BufferOwner);
 }

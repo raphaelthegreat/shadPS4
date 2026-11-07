@@ -334,15 +334,17 @@ void TextureCache::InvalidateMemoryFromGPU(VAddr address, size_t max_size) {
     }
 }
 
-void TextureCache::MarkAsMaybeGpuDirty(VAddr addr, size_t size) {
-    ForEachImageInRegion(addr, size, [&](ImageId image_id, Image& image) {
-        if (image.gpu_hash == 0) {
-            // Read backing pages directly, without faulting through the guest readback path.
-            image.gpu_hash = HashBackingMemory(image.info.guest_address, image.info.guest_size);
+void TextureCache::MarkAsDisplaced(VAddr addr, size_t size) {
+    if (!gpu_memory.IsRegionOwned(addr, size)) {
+        return;
+    }
+    // A buffer is about to claim the range. Whatever an image still owns around it stays its own,
+    // but its claim no longer covers the whole image, and the part it lost must not be written
+    // back over what the buffer is going to put there.
+    gpu_memory.ForEachOwner(addr, size, [&](VAddr, u64, Owner owner) {
+        if (owner.kind == OwnerKind::Image) {
+            slot_images[ImageId{owner.index}].flags |= ImageFlagBits::Displaced;
         }
-        // The buffer is about to claim this range, which leaves whatever the image still owns
-        // around it intact but means the claim no longer covers the whole image.
-        image.flags |= ImageFlagBits::Displaced;
     });
 }
 
@@ -686,8 +688,6 @@ void TextureCache::RefreshImage(Image& image) {
         image.cpu_hash = hash;
     }
 
-    image.gpu_hash = 0;
-
     const u32 num_layers = image.info.resources.layers;
     const u32 num_mips = image.info.resources.levels;
 
@@ -935,7 +935,6 @@ void TextureCache::GarbageCollectImages() {
     u64 ticks_to_destroy = 0;
     size_t num_deletions = 0;
     boost::container::small_vector<ImageId, 8> download_queue;
-    boost::container::small_vector<ImageId, 8> maybe_download;
 
     const auto configure = [&](bool allow_aggressive) {
         pressured = total_used_memory >= pressure_gc_memory;
@@ -950,7 +949,10 @@ void TextureCache::GarbageCollectImages() {
         }
         // An edge write means the guest reused the memory, so the image is freed without download.
         MarkDirtyIfEdgesModified(image);
-        const bool download = image.HasGpuValidData();
+        // A buffer took part of the range from under the image, so it holds the newer copy and
+        // writing the image back would undo whatever went in there.
+        const bool download =
+            image.HasGpuValidData() && False(image.flags & ImageFlagBits::Displaced);
         if (download && (!pressured || !image.CanBeDownloaded())) {
             return false;
         }
@@ -959,13 +961,7 @@ void TextureCache::GarbageCollectImages() {
         if (download) {
             UntrackImage(image_id);
             UnregisterImage(image_id);
-            if (image.gpu_hash != 0) {
-                buffer_cache.ReadMemory(image.info.guest_address, image.info.guest_size, false,
-                                        true, true);
-                maybe_download.push_back(image_id);
-            } else {
-                download_queue.push_back(image_id);
-            }
+            download_queue.push_back(image_id);
         } else {
             FreeImage(image_id);
         }
@@ -991,22 +987,6 @@ void TextureCache::GarbageCollectImages() {
         // If we are still over the critical limit, run an aggressive GC
         configure(true);
         image_lru_cache.ForEachItemBelow(gc_tick - ticks_to_destroy, clean_up);
-    }
-
-    if (!maybe_download.empty()) {
-        // wait for memory reads to finish
-        scheduler.Finish();
-        scheduler.PopPendingOperations();
-
-        for (const auto& image_id : maybe_download) {
-            const auto& image = slot_images[image_id];
-            const u64 hash = HashBackingMemory(image.info.guest_address, image.info.guest_size);
-            if (image.gpu_hash == hash) {
-                download_queue.push_back(image_id);
-            } else {
-                DeleteImage(image_id);
-            }
-        }
     }
 
     for (const auto& image_id : download_queue) {

@@ -129,7 +129,7 @@ public:
     void InvalidateMemoryFromGPU(VAddr address, size_t max_size);
 
     /// Marks all images as maybe GPU dirty within the provided range.
-    void MarkAsMaybeGpuDirty(VAddr addr, size_t size);
+    void MarkAsDisplaced(VAddr addr, size_t size);
 
     /// Evicts any images that overlap the unmapped range.
     void UnmapMemory(VAddr cpu_addr, size_t size);

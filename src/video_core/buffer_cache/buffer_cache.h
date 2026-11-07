@@ -100,18 +100,6 @@ public:
     /// Invalidates any buffer in the logical page range.
     void InvalidateMemory(VAddr device_addr, u64 size, bool assume_locks = false);
 
-    /// Unmark region as modified from the host GPU, handing its memory back to the guest
-    void UnmarkPagesAsGpuModified(VAddr device_addr, u64 size, bool is_write = false) {
-        IterateRegions(device_addr, size, [is_write](RegionManager* region, u64 offset, u64 size) {
-            if (is_write) {
-                region->ChangeRegionState<StateOp::Set, StateOp::Clear>(offset, size);
-            } else {
-                region->ChangeRegionState<StateOp::None, StateOp::Clear>(offset, size);
-            }
-        });
-        gpu_memory.ReleaseOwner(device_addr, size, BufferOwner);
-    }
-
     /// Flushes any GPU modified buffer in the logical page range back to CPU memory.
     void ReadMemory(VAddr device_addr, u64 size, bool is_write = false, bool async = false,
                     bool assume_locks = false);
@@ -134,6 +122,9 @@ public:
 
     /// Mark region as modified from the GPU
     void MarkRegionAsGpuModified(VAddr addr, size_t size);
+
+    /// Unmark region as modified from the GPU, handing its memory back to the guest
+    void UnmarkPagesAsGpuModified(VAddr device_addr, u64 size, bool is_write = false);
 
     /// Synchronizes all buffers needed for DMA.
     void SynchronizeDmaBuffers();

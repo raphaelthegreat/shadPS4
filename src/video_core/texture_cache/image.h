@@ -41,7 +41,8 @@ enum ImageFlagBits : u32 {
     Tracked = 1 << 7,       ///< Write watchers are held over the image range
     HeadUntracked = 1 << 8, ///< The watcher on the partly occupied first page was dropped
     TailUntracked = 1 << 9, ///< The watcher on the partly occupied last page was dropped
-    Displaced = 1 << 10,    ///< A buffer took over part of the range this image had claimed
+    Displaced = 1 << 10,    ///< A buffer took over part of the range this image had claimed, so the
+                            ///< image must not be written back over it
 };
 DECLARE_ENUM_FLAG_OPERATORS(ImageFlagBits)
 
@@ -216,7 +217,6 @@ public:
     u64 lru_id{};
     u64 tick_accessed_last{};
     u64 cpu_hash{};
-    u64 gpu_hash{};
     u64 head_hash{};
     u64 tail_hash{};
 
