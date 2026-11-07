@@ -12,6 +12,7 @@
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/buffer_cache/fault_manager.h"
 #include "video_core/buffer_cache/region_manager.h"
+#include "video_core/gpu_memory.h"
 #include "video_core/renderer_vulkan/vk_semaphore.h"
 #include "video_core/texture_cache/image.h"
 
@@ -36,10 +37,14 @@ namespace VideoCore {
 class TextureCache;
 class GpuMemory;
 
+/// Buffers all share one owner identity. Nothing reads back a single buffer in isolation, and a
+/// range handed from one arena to another is still the same bytes, so telling them apart would
+/// only keep runs from merging.
+static constexpr Owner BufferOwner{OwnerKind::Buffer, 0};
+
 enum class ObtainBufferFlags {
     None = 0,
     IsWritten = 1 << 0,
-    IsTexelBuffer = 1 << 1,
     IgnoreStreamBuffer = 1 << 2,
     InvalidateTextureCache = 1 << 3,
 };
@@ -95,8 +100,17 @@ public:
     /// Invalidates any buffer in the logical page range.
     void InvalidateMemory(VAddr device_addr, u64 size, bool assume_locks = false);
 
-    /// Unmark a region as modified from the GPU.
-    void UnmarkRegionAsGpuModified(VAddr device_addr, u64 size, bool is_write = false);
+    /// Unmark region as modified from the host GPU, handing its memory back to the guest
+    void UnmarkPagesAsGpuModified(VAddr device_addr, u64 size, bool is_write = false) {
+        IterateRegions(device_addr, size, [is_write](RegionManager* region, u64 offset, u64 size) {
+            if (is_write) {
+                region->ChangeRegionState<StateOp::Set, StateOp::Clear>(offset, size);
+            } else {
+                region->ChangeRegionState<StateOp::None, StateOp::Clear>(offset, size);
+            }
+        });
+        gpu_memory.ReleaseOwner(device_addr, size, BufferOwner);
+    }
 
     /// Flushes any GPU modified buffer in the logical page range back to CPU memory.
     void ReadMemory(VAddr device_addr, u64 size, bool is_write = false, bool async = false,
@@ -147,36 +161,86 @@ private:
 
     void DownloadMemory(const Buffer* arena, VAddr device_addr, u64 size, bool async);
 
-    bool SynchronizeMemory(const Buffer* arena, VAddr device_addr, u32 size, bool is_written,
-                           bool is_texel_buffer);
+    bool SynchronizeMemory(const Buffer* arena, VAddr device_addr, u32 size, bool is_written);
 
     bool SynchronizeMemoryFromImage(const Buffer* arena, VAddr device_addr, u32 size);
 
-    /// Removes all protection from a page and ensures GPU data has been flushed if requested
-    void InvalidateRegion(VAddr device_addr, u64 size, auto&& on_flush);
+    /// Calls 'func' with the region and local range of each region the range spans
+    template <bool create_region_on_fail = false, typename Func>
+    bool IterateRegions(VAddr device_addr, u64 size, Func&& func) {
+        using FuncReturn = typename std::invoke_result<Func, RegionManager*, u64, size_t>::type;
+        static constexpr bool BOOL_BREAK = std::is_same_v<FuncReturn, bool>;
+        u64 remaining_size = size;
+        u64 page_index = device_addr >> HIGHER_PAGE_BITS;
+        u64 page_offset = device_addr & HIGHER_PAGE_MASK;
+        while (remaining_size > 0) {
+            const u64 copy_amount = std::min(HIGHER_PAGE_SIZE - page_offset, remaining_size);
+            auto* region = regions[page_index];
+            if (region == nullptr && create_region_on_fail) {
+                region = CreateRegion(page_index);
+            }
+            if (region != nullptr) {
+                if constexpr (BOOL_BREAK) {
+                    if (func(region, page_offset, copy_amount)) {
+                        return true;
+                    }
+                } else {
+                    func(region, page_offset, copy_amount);
+                }
+            }
+            page_index++;
+            page_offset = 0;
+            remaining_size -= copy_amount;
+        }
+        return false;
+    }
 
     /// Mark region as modified from the host GPU without uploading it again
-    void MarkPagesAsGpuModified(VAddr device_addr, u64 size);
-
-    /// Unmark region as modified from the host GPU
-    void UnmarkPagesAsGpuModified(VAddr device_addr, u64 size, bool is_write);
+    void MarkPagesAsGpuModified(VAddr device_addr, u64 size) {
+        IterateRegions<true>(device_addr, size, [](RegionManager* region, u64 offset, u64 size) {
+            region->ChangeRegionState<StateOp::None, StateOp::Set>(offset, size);
+        });
+    }
 
     /// Mark region as modified from the CPU
-    void MarkRegionAsCpuModified(VAddr device_addr, u64 size);
+    void MarkRegionAsCpuModified(VAddr device_addr, u64 size) {
+        IterateRegions(device_addr, size, [](RegionManager* region, u64 offset, u64 size) {
+            region->ChangeRegionState<StateOp::Set, StateOp::None>(offset, size);
+        });
+    }
 
     /// Call 'func' for each CPU modified range and unmark those pages as CPU modified
-    void ForEachUploadRange(VAddr device_addr, u64 size, bool is_written, auto&& func);
+    void ForEachUploadRange(VAddr device_addr, u64 size, bool is_written, auto&& func) {
+        IterateRegions<true>(
+            device_addr, size, [&func, is_written](RegionManager* region, u64 offset, u64 size) {
+                if (is_written) {
+                    region->ForEachModifiedRange<Type::CPU, StateOp::Clear, StateOp::Set>(
+                        offset, size, func);
+                } else {
+                    region->ForEachModifiedRange<Type::CPU, StateOp::Clear, StateOp::None>(
+                        offset, size, func);
+                }
+            });
+    }
 
-    /// Call 'func' with the bounds of each part of the range a buffer holds the newest copy of
-    void ForEachGpuModifiedRange(VAddr device_addr, u64 size, auto&& func);
+    /// Call 'func' with the bounds of each part of the range a buffer holds the newest copy of.
+    /// The owner lock is held throughout, so 'func' must not touch gpu memory itself.
+    void ForEachGpuModifiedRange(VAddr device_addr, u64 size, auto&& func) {
+        gpu_memory.ForEachOwner(device_addr, size, [&](VAddr addr, u64 run_size, Owner owner) {
+            if (owner.kind == OwnerKind::Buffer) {
+                func(addr, addr + run_size);
+            }
+        });
+    }
 
     /// Call 'func' for each GPU modified range and unmark those pages as GPU modified
     template <bool clear>
-    void ForEachDownloadRange(VAddr device_addr, u64 size, auto&& func);
-
-    /// Calls 'func' with the region and local range of each region the range spans
-    template <bool create_region_on_fail = false, typename Func>
-    bool IterateRegions(VAddr device_addr, u64 size, Func&& func);
+    void ForEachDownloadRange(VAddr device_addr, u64 size, auto&& func) {
+        constexpr auto gpu_op = clear ? StateOp::Clear : StateOp::None;
+        IterateRegions(device_addr, size, [&func](RegionManager* region, u64 offset, u64 size) {
+            region->ForEachModifiedRange<Type::GPU, StateOp::None, gpu_op>(offset, size, func);
+        });
+    }
 
     RegionManager* CreateRegion(u64 page_index);
 

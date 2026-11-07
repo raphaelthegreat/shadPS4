@@ -162,7 +162,7 @@ void TextureCache::DownloadImageMemory(ImageId image_id, DownloadMemoryFlags fla
                                                   copy_size);
         ReleaseOwnership(image_id);
         if (discard_buffer_cache) {
-            buffer_cache.UnmarkRegionAsGpuModified(image_addr, copy_size, true);
+            buffer_cache.UnmarkPagesAsGpuModified(image_addr, copy_size, true);
         }
         if (!is_sync) {
             runtime.GetStagingPool().FreeDeferred(download);
