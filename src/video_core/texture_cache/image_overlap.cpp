@@ -4,6 +4,8 @@
 #include <algorithm>
 #include <optional>
 
+#include "common/alignment.h"
+
 #include "video_core/texture_cache/host_compatibility.h"
 #include "video_core/texture_cache/image_overlap.h"
 #include "video_core/texture_cache/tile.h"
@@ -109,6 +111,42 @@ bool CollectRowShifted(const ImageInfo& src, u32 src_level, const ImageInfo& dst
 }
 
 } // Anonymous namespace
+
+void ClipCopiesToRange(const ImageInfo& dst, SubresourceCopies& copies, VAddr begin, VAddr end) {
+    const u32 block = dst.props.is_block ? 4 : 1;
+    const auto is_outside = [&](SubresourceCopy& copy) {
+        const auto& mip = dst.mips_layout[copy.dst.level];
+        const VAddr base = dst.guest_address + mip.offset + u64{copy.dst.layer} * mip.slice_size;
+        const auto rows = GetRowLayout(dst, copy.dst.level);
+        const bool by_row = copy.num_layers == 1 && rows.has_value();
+        // Bytes the trimmed edges have to land on to keep whole tiles together.
+        const u64 unit = by_row ? u64{rows->row_bytes} * rows->granularity : mip.slice_size;
+        const u64 from = by_row ? u64{copy.dst_offset_y / block} * rows->row_bytes : 0;
+        const u64 to = by_row ? from + u64{copy.height / block} * rows->row_bytes
+                              : u64{copy.num_layers} * mip.slice_size;
+        if (base + to <= begin || base + from >= end) {
+            return true;
+        }
+        const u64 lo = Common::AlignUp(std::max(base + from, begin) - base, unit);
+        const u64 hi = Common::AlignDown(std::min(base + to, end) - base, unit);
+        if (lo >= hi) {
+            return true;
+        }
+        if (by_row) {
+            const u32 trimmed = static_cast<u32>((lo - from) / rows->row_bytes) * block;
+            copy.src_offset_y += trimmed;
+            copy.dst_offset_y += trimmed;
+            copy.height = static_cast<u32>((hi - lo) / rows->row_bytes) * block;
+        } else {
+            const u16 trimmed = static_cast<u16>(lo / mip.slice_size);
+            copy.src.layer += trimmed;
+            copy.dst.layer += trimmed;
+            copy.num_layers = static_cast<u16>((hi - lo) / mip.slice_size);
+        }
+        return false;
+    };
+    copies.erase(std::remove_if(copies.begin(), copies.end(), is_outside), copies.end());
+}
 
 void CollectOverlapCopies(const ImageInfo& src, const ImageInfo& dst, SubresourceCopies& copies) {
     if (!IsLayoutCompatible(src, dst)) {

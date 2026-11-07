@@ -167,6 +167,7 @@ public:
         TouchImage(image);
         TrackImage(image_id);
         RefreshImage(image);
+        ValidateFromOwners(image_id);
     }
 
     /// Resolves overlap between existing cache image and pending merged image
@@ -187,6 +188,10 @@ public:
 
     /// Reuploads image contents.
     void RefreshImage(Image& image);
+
+    /// Copies into the image the parts of its guest range that another image holds a newer copy
+    /// of, so that it ends up with the contents the guest would see.
+    void ValidateFromOwners(ImageId image_id);
 
     /// Retrieves the sampler that matches the provided S# descriptor.
     [[nodiscard]] vk::Sampler GetSampler(const AmdGpu::Sampler& sampler,

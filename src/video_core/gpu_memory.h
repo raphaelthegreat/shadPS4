@@ -13,6 +13,7 @@
 #include "common/assert.h"
 #include "common/multi_level_page_table.h"
 #include "common/types.h"
+#include "video_core/owner_map.h"
 #include "video_core/page_bits.h"
 #include "video_core/page_protect.h"
 
@@ -59,10 +60,16 @@ private:
     static constexpr size_t ADDRESS_BITS = 40;
     static constexpr size_t NUM_REGIONS = 1ULL << (ADDRESS_BITS - HIGHER_PAGE_BITS);
 
-    /// Ownership bits of one region, tagged with the address its first page maps to.
-    struct OwnedBits : RegionBits {
+    /// State of one region, tagged with the address its first page maps to. The bits summarize
+    /// at page granularity which parts of the region some resource holds a newer copy of, and are
+    /// published after host protection so they can be read without any lock. The owner map records
+    /// the same thing exactly, at the cost of needing its own lock to be read.
+    struct RegionState : RegionBits {
         VAddr base_addr;
+        mutable std::mutex owner_mutex;
+        OwnerMap owners;
     };
+    static_assert(OwnerMap::MAX_REGION_SIZE >= HIGHER_PAGE_SIZE);
 
     struct OwnedUpdates;
 
@@ -70,7 +77,7 @@ public:
     /// Returns true if any page in the range holds data newer than guest memory.
     [[nodiscard]] bool IsRegionOwned(VAddr addr, u64 size) const {
         bool owned = false;
-        ForEachRegion(addr, size, [&](const OwnedBits* bits, const Bounds& bounds) {
+        ForEachRegion(addr, size, [&](const RegionState* bits, const Bounds& bounds) {
             owned = bits != nullptr && bits->AnySet(bounds);
             return !owned;
         });
@@ -79,7 +86,7 @@ public:
 
     /// Calls 'func' with the address and size of each owned run of pages in the range.
     void ForEachOwnedRange(VAddr addr, u64 size, auto&& func) const {
-        ForEachRegion(addr, size, [&](const OwnedBits* bits, const Bounds& bounds) {
+        ForEachRegion(addr, size, [&](const RegionState* bits, const Bounds& bounds) {
             if (bits != nullptr) {
                 const VAddr base = bits->base_addr;
                 bits->ForEachSetRange(
@@ -89,7 +96,50 @@ public:
         });
     }
 
+    /// Gives 'owner' the newest copy of a range of guest memory, taking it away from whoever held
+    /// it before. Ranges never claimed by anyone belong to the guest.
+    void AssignOwner(VAddr addr, u64 size, Owner owner) {
+        ForEachOwnerMap(addr, size, [&](RegionState& state, u32 begin, u32 end) {
+            state.owners.Assign(begin, end, owner);
+        });
+    }
+
+    /// Takes a range away from 'owner', leaving alone the parts of it other resources have
+    /// claimed in the meantime.
+    void ReleaseOwner(VAddr addr, u64 size, Owner owner) {
+        ForEachOwnerMap(addr, size, [&](RegionState& state, u32 begin, u32 end) {
+            state.owners.Release(begin, end, owner);
+        });
+    }
+
+    /// Calls 'func' with the address, size and owner of each owned run in the range. The owner
+    /// lock is held throughout, so the callback must not touch gpu memory itself.
+    void ForEachOwner(VAddr addr, u64 size, auto&& func) const {
+        ForEachOwnerMap(addr, size, [&](RegionState& state, u32 begin, u32 end) {
+            state.owners.ForEachRun(begin, end, [&](u32 from, u32 to, Owner owner) {
+                func(state.base_addr + from, u64{to - from}, owner);
+            });
+        });
+    }
+
 private:
+    /// Calls 'func' with the state and local byte bounds of each existing region the range spans,
+    /// holding its owner lock. Regions never claimed are skipped, as nothing can own them yet.
+    void ForEachOwnerMap(VAddr addr, u64 size, auto&& func) const {
+        const VAddr end_addr = addr + size;
+        while (addr < end_addr) {
+            const VAddr region_base = addr & ~HIGHER_PAGE_MASK;
+            const VAddr region_end = std::min(region_base + HIGHER_PAGE_SIZE, end_addr);
+            if (auto* state =
+                    owned_regions[addr >> HIGHER_PAGE_BITS].load(std::memory_order_acquire)) {
+                std::scoped_lock lk{state->owner_mutex};
+                func(*state, static_cast<u32>(addr - region_base),
+                     static_cast<u32>(region_end - region_base));
+            }
+            addr = region_end;
+        }
+    }
+
     struct PageState {
         u8 num_write_watchers;
         u8 num_read_watchers;
@@ -180,8 +230,8 @@ private:
     Common::MultiLevelPageTable<PageTraits> cached_pages;
     Common::MultiLevelPageTable<MutexTraits> locks;
     std::mutex ensure_mutex;
-    std::deque<OwnedBits> owned_pool;
-    std::vector<std::atomic<OwnedBits*>> owned_regions;
+    std::deque<RegionState> owned_pool;
+    std::vector<std::atomic<RegionState*>> owned_regions;
 };
 
 } // namespace VideoCore

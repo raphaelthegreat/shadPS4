@@ -44,6 +44,12 @@ bool IsLayoutCompatible(const ImageInfo& lhs, const ImageInfo& rhs);
 /// one lands the same texels in different banks and no plain copy can express it.
 void CollectOverlapCopies(const ImageInfo& src, const ImageInfo& dst, SubresourceCopies& copies);
 
+/// Narrows copies so that they only read the part of `src` that lies within the guest range
+/// [begin, end), dropping any that fall outside it entirely. Copies are trimmed at whole slices,
+/// or at whole tile rows when they carry a row offset, so a range that cuts through either leaves
+/// the texels it only partly covers behind.
+void ClipCopiesToRange(const ImageInfo& dst, SubresourceCopies& copies, VAddr begin, VAddr end);
+
 /// True when every subresource of `view` is a whole subresource of `base` at the same size, so
 /// that `base` can serve the request through a plain image view. The addressed range of `base` is
 /// written to `out_range`.

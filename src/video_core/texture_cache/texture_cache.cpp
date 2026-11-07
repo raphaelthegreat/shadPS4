@@ -192,6 +192,8 @@ void TextureCache::ClaimOwnership(ImageId image_id, bool assume_locked) {
     image.flags |= ImageFlagBits::Owned;
     gpu_memory.UpdatePageWatchers(image.info.guest_address, image.info.guest_size, PageOp::None,
                                   PageOp::Track);
+    gpu_memory.AssignOwner(image.info.guest_address, image.info.guest_size,
+                           Owner{OwnerKind::Image, image_id.index});
 }
 
 void TextureCache::ReleaseOwnership(ImageId image_id, bool assume_locked) {
@@ -206,6 +208,8 @@ void TextureCache::ReleaseOwnership(ImageId image_id, bool assume_locked) {
     image.flags &= ~ImageFlagBits::Owned;
     gpu_memory.UpdatePageWatchers(image.info.guest_address, image.info.guest_size, PageOp::None,
                                   PageOp::Untrack);
+    gpu_memory.ReleaseOwner(image.info.guest_address, image.info.guest_size,
+                            Owner{OwnerKind::Image, image_id.index});
 }
 
 void TextureCache::MarkAsMaybeDirty(ImageId image_id, Image& image) {
@@ -706,7 +710,6 @@ ImageView& TextureCache::FindTexture(ImageId image_id, const ImageDesc& desc) {
     image.usage.texture |= !is_storage;
     if (is_storage) {
         image.flags |= ImageFlagBits::GpuModified;
-        ClaimOwnership(image_id);
         EnsureStorageUsage(image_id);
         if (readback_linear_images && (!image.info.props.is_tiled || image.info.size.width <= 8) &&
             image.info.guest_address != 0) {
@@ -715,6 +718,9 @@ ImageView& TextureCache::FindTexture(ImageId image_id, const ImageDesc& desc) {
         }
     }
     UpdateImage(image_id);
+    if (is_storage) {
+        ClaimOwnership(image_id);
+    }
     return image.FindView(desc.view_info);
 }
 
@@ -746,13 +752,15 @@ void TextureCache::UnregisterMeta(VAddr address, u64 owner_uid) {
 ImageView& TextureCache::FindRenderTarget(ImageId image_id, const ImageDesc& desc) {
     Image& image = slot_images[image_id];
     image.flags |= ImageFlagBits::GpuModified;
-    ClaimOwnership(image_id);
     if (readback_linear_images && (!image.info.props.is_tiled || image.info.size.width <= 8)) {
         std::unique_lock lk{download_images_mutex};
         download_images.emplace(image_id);
     }
     image.usage.render_target = 1u;
+    // Ownership is taken only once the image holds everything the guest would see, since claiming
+    // it takes the overlapping range away from whoever the contents would have come from.
     UpdateImage(image_id);
+    ClaimOwnership(image_id);
 
     // Register meta data for this color buffer
     const VAddr cmask_addr = desc.info.meta_info.cmask_addr;
@@ -789,9 +797,9 @@ ImageView& TextureCache::FindRenderTarget(ImageId image_id, const ImageDesc& des
 ImageView& TextureCache::FindDepthTarget(ImageId image_id, const ImageDesc& desc) {
     Image& image = slot_images[image_id];
     image.flags |= ImageFlagBits::GpuModified;
-    ClaimOwnership(image_id);
     image.usage.depth_target = 1u;
     UpdateImage(image_id);
+    ClaimOwnership(image_id);
 
     // Register meta data for this depth buffer
     const VAddr htile_addr = desc.info.meta_info.htile_addr;
@@ -840,6 +848,34 @@ void TextureCache::AssociateStencil(ImageId depth_id, const ImageInfo& depth_inf
     Image& stencil_image = slot_images[stencil_id];
     TouchImage(stencil_image);
     stencil_image.AssociateDepth(depth_id, slot_images[depth_id].image_uid);
+}
+
+void TextureCache::ValidateFromOwners(ImageId image_id) {
+    Image& image = slot_images[image_id];
+    const VAddr addr = image.info.guest_address;
+    const u64 size = image.info.guest_size;
+    if (size == 0 || !gpu_memory.IsRegionOwned(addr, size)) {
+        return;
+    }
+    // The owner lock is held while walking, so the runs are gathered before anything is copied.
+    boost::container::small_vector<std::tuple<ImageId, VAddr, VAddr>, 8> runs;
+    gpu_memory.ForEachOwner(addr, size, [&](VAddr run_addr, u64 run_size, Owner owner) {
+        if (owner.kind == OwnerKind::Image && ImageId{owner.index} != image_id) {
+            runs.emplace_back(ImageId{owner.index}, run_addr, run_addr + run_size);
+        }
+    });
+    for (const auto& [src_id, begin, end] : runs) {
+        Image& src_image = slot_images[src_id];
+        if (False(src_image.flags & ImageFlagBits::Registered) || !src_image.HasGpuValidData()) {
+            continue;
+        }
+        SubresourceCopies copies;
+        CollectOverlapCopies(src_image.info, image.info, copies);
+        ClipCopiesToRange(image.info, copies, begin, end);
+        if (!copies.empty()) {
+            runtime.CopySubresources(&src_image, &image, copies);
+        }
+    }
 }
 
 void TextureCache::RefreshImage(Image& image) {
