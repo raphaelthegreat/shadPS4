@@ -28,10 +28,6 @@ using SubresourceCopies = SmallVector<SubresourceCopy, 8>;
 
 /// True when both images lay their texels out identically, so that a subresource of one can be
 /// copied into a subresource of the other without retiling.
-///
-/// Tile mode is deliberately not compared. What decides the in-memory layout is the array mode;
-/// a depth image and a colour image aliasing the same memory carry different tile modes while
-/// being laid out the same, which guests rely on when sampling a depth buffer as R32.
 bool IsLayoutCompatible(const ImageInfo& lhs, const ImageInfo& rhs);
 
 /// Collects the subresources of `dst` that `src` holds the contents of. Only overlaps that fall on
@@ -50,9 +46,7 @@ void CollectOverlapCopies(const ImageInfo& src, const ImageInfo& dst, Subresourc
 /// the texels it only partly covers behind.
 void ClipCopiesToRange(const ImageInfo& dst, SubresourceCopies& copies, VAddr begin, VAddr end);
 
-/// True when every subresource of `view` is a whole subresource of `base` at the same size, so
-/// that `base` can serve the request through a plain image view. The addressed range of `base` is
-/// written to `out_range`.
+/// True when base can serve the request through a plain image view.
 bool IsViewOf(const ImageInfo& base, const ImageInfo& view, SubresourceRange& out_range);
 
 /// Extent of a single mip of an image, in texels.

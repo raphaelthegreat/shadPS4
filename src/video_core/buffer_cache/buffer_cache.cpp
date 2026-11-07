@@ -348,8 +348,6 @@ void BufferCache::ReadEdgeImagePages(const Image& image) {
             memory->TryWriteBacking(std::bit_cast<u8*>(copy_device_addr),
                                     download.mapped + dst_offset, copy.size);
         }
-        // The guest is up to date on the pages around the image now, so whatever a buffer
-        // still held of them goes back to it.
         UnmarkPagesAsGpuModified(page_start, image_addr - page_start);
         UnmarkPagesAsGpuModified(image_end, page_end - image_end);
         staging_pool.FreeDeferred(download);
@@ -504,8 +502,6 @@ bool BufferCache::SynchronizeMemory(const Buffer* arena, VAddr device_addr, u32 
         staging.Flush();
         runtime.CopyBuffer(staging.buffer, arena, copies);
     }
-    // Whatever the buffer is going to be used as, an image holding newer data than guest memory
-    // has to be tiled back into it first, or the caller reads what the image already replaced.
     if (gpu_memory.IsRegionOwnedBy(device_addr, size, OwnerKind::Image)) {
         return SynchronizeMemoryFromImage(arena, device_addr, size);
     }

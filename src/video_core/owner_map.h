@@ -71,8 +71,6 @@ public:
 
     /// Takes ownership of [begin, end) away from 'owner', leaving other owners alone.
     void Release(u32 begin, u32 end, Owner owner) {
-        // Runs of one owner are never adjacent, so the matching ones can be gathered and then
-        // dropped one by one without any of them merging in between.
         SmallVector<std::pair<u32, u32>, 8> runs;
         ForEachRun(begin, end, [&](u32 from, u32 to, Owner run_owner) {
             if (run_owner == owner) {

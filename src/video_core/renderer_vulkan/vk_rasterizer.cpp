@@ -935,7 +935,8 @@ void Rasterizer::BindTextures(const Shader::Info& stage, Shader::Backend::Bindin
             if (image_desc.is_written) {
                 // Gaining storage usage recreates the image, so it has to settle before any
                 // view of it is handed out below.
-                texture_cache.EnsureStorageUsage(image_id);
+                image->usage.storage = 1u;
+                runtime.AddImageStorageUsage(image);
             }
         }
 

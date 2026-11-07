@@ -181,10 +181,6 @@ void TextureCache::DownloadImageMemory(ImageId image_id, DownloadMemoryFlags fla
 
 void TextureCache::ClaimOwnership(ImageId image_id, bool assume_locked) {
     Image& image = slot_images[image_id];
-    // The flag is only raised once the claim is recorded, so finding it already raised means
-    // there is nothing left to do and the image does not have to be locked to find that out.
-    // A buffer that took over part of the range clears it again, since the claim is no longer
-    // whole and has to be written back over the whole range.
     constexpr ImageFlagBits Claimed =
         ImageFlagBits(ImageFlagBits::Owned | ImageFlagBits::Displaced);
     if ((image.flags & Claimed) == ImageFlagBits::Owned) {
@@ -205,15 +201,11 @@ void TextureCache::ClaimOwnership(ImageId image_id, bool assume_locked) {
     if (lk.owns_lock()) {
         lk.unlock();
     }
-    // An owner has to be watched for writes as well, so this also starts tracking the image if
-    // something dropped it in the meantime.
     TrackImage(image_id, true, assume_locked);
 }
 
 void TextureCache::ReleaseOwnership(ImageId image_id, bool assume_locked) {
     Image& image = slot_images[image_id];
-    // Images that never claimed anything, which is most of them, are turned away without being
-    // locked. The flag outlives the claim it stands for, so seeing it lowered is conclusive.
     if (False(image.flags & ImageFlagBits::Owned)) {
         return;
     }
@@ -239,7 +231,7 @@ void TextureCache::ReleaseOwnership(ImageId image_id, bool assume_locked) {
 void TextureCache::MarkAsMaybeDirty(ImageId image_id, Image& image) {
     if (image.cpu_hash == 0) {
         // Initialize hash
-        const u8* addr = std::bit_cast<u8*>(image.info.guest_address);
+        const u8* addr = std::bit_cast<const u8*>(image.info.guest_address);
         image.cpu_hash = XXH3_64bits(addr, image.info.guest_size);
     }
     image.MarkDirty(ImageFlagBits::MaybeCpuDirty);
@@ -321,7 +313,6 @@ void TextureCache::InvalidateMemoryFromGPU(VAddr address, size_t max_size) {
         VAddr next_end = 0;
         ForEachEntryWithAddress(next, [&](const BucketEntry& entry) {
             Image& image = slot_images[entry.id];
-            // Images are only aligned to 256 bytes, so sharing a key is not sharing an address.
             if (image.info.guest_address != next) {
                 return;
             }
@@ -338,9 +329,6 @@ void TextureCache::MarkAsDisplaced(VAddr addr, size_t size) {
     if (!gpu_memory.IsRegionOwned(addr, size)) {
         return;
     }
-    // A buffer is about to claim the range. Whatever an image still owns around it stays its own,
-    // but its claim no longer covers the whole image, and the part it lost must not be written
-    // back over what the buffer is going to put there.
     gpu_memory.ForEachOwner(addr, size, [&](VAddr, u64, Owner owner) {
         if (owner.kind == OwnerKind::Image) {
             slot_images[ImageId{owner.index}].flags |= ImageFlagBits::Displaced;
@@ -359,11 +347,8 @@ void TextureCache::UnmapMemory(VAddr cpu_addr, size_t size) {
 
 ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
     const auto& info = desc.info;
-
     ASSERT(info.guest_address != 0);
 
-    // An image laid out exactly as requested needs nothing asked of it, and is found by scanning
-    // the one bucket it has to be in without reading any image registered alongside it.
     ImageId image_id{};
     ForEachEntryWithAddress(info.guest_address, [&, key = info.Key()](const BucketEntry& entry) {
         if (entry.key == key) {
@@ -371,64 +356,41 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
         }
     });
 
-    // Otherwise look for one the request is a plain view of, consulting only the properties a
-    // view cannot paper over. Nothing else in the cache can serve it, so anything short of that
-    // means a new image, which the contents of the old ones are then copied into according to
-    // who owns the memory they share.
     SubresourceBase view_base;
     if (!image_id) {
-        SmallVector<ImageId, 8> image_ids;
-        ForEachImageInRegion(info.guest_address, info.guest_size,
-                             [&](ImageId id, Image&) { image_ids.push_back(id); });
-        for (const ImageId cache_id : image_ids) {
+        ForEachImageInRegion(info.guest_address, info.guest_size,[&](ImageId cache_id, Image&) {
             const auto& cache_info = slot_images[cache_id].info;
-            // Guest size is not part of the identity of an image. It follows the height the
-            // guest declared for the allocation, which is padded inconsistently and sometimes
-            // outright wrong, while the layout the texels actually sit in is what decides
-            // reusability.
             if (!IsLayoutCompatible(cache_info, info) || cache_info.pitch != info.pitch) {
-                continue;
+                return false;
             }
-            // A volume and an array over the same memory are laid out alike but cannot be views
-            // of one another, so the requested interpretation has to be materialised separately.
             if (cache_info.type != info.type && info.size != Extent3D{1, 1, 1}) {
-                continue;
+                return false;
             }
-            // Depth and colour are distinct kinds of image to the host even when they alias the
-            // same texels, which the format classes already say, so an aliasing pair ends up as
-            // two images whose contents the owner driven validation carries between them.
             const bool format_matches =
                 exact_fmt ? cache_info.pixel_format == info.pixel_format
                           : IsVulkanFormatCompatible(cache_info.pixel_format, info.pixel_format);
             if (!format_matches) {
-                continue;
+                return false;
             }
             if (cache_info.guest_address == info.guest_address) {
-                // The same allocation seen the same way. Extra mips and layers are fine because
-                // the view picks out the ones asked for, but the extent has to match, as
-                // sampling a wider or taller image normalises the coordinates against the wrong
-                // size. The guest size is deliberately not consulted; guests pad the height of
-                // an allocation inconsistently between the views they take of it.
                 if (cache_info.size == info.size && cache_info.resources.Contains(info.resources)) {
                     image_id = cache_id;
-                    break;
+                    return true;
                 }
-                continue;
+                return false;
             }
-            // Starting further into the allocation, usable when what was asked for is a whole
-            // run of its subresources rather than a subrect of them.
             SubresourceRange range;
             if (IsViewOf(cache_info, info, range)) {
                 image_id = cache_id;
                 view_base = range.base;
-                break;
+                return true;
             }
-        }
+        });
     }
 
     if (!image_id) {
-        const bool needs_storage = desc.type == BindingType::Storage;
-        image_id = slot_images.Insert(instance, runtime, slot_image_views, info, needs_storage);
+        image_id = slot_images.Insert(instance, runtime, slot_image_views, info,
+                                      desc.type == BindingType::Storage);
         RegisterImage(image_id);
     }
 
@@ -477,19 +439,14 @@ ImageId TextureCache::FindImageFromRange(VAddr address, size_t size, bool ensure
     return {};
 }
 
-void TextureCache::EnsureStorageUsage(ImageId image_id) {
-    Image& image = slot_images[image_id];
-    image.usage.storage = 1u;
-    runtime.AddImageStorageUsage(&image);
-}
-
 ImageView& TextureCache::FindTexture(ImageId image_id, const ImageDesc& desc) {
     Image& image = slot_images[image_id];
     const bool is_storage = desc.type == BindingType::Storage;
     image.usage.texture |= !is_storage;
     if (is_storage) {
         image.flags |= ImageFlagBits::GpuModified;
-        EnsureStorageUsage(image_id);
+        image.usage.storage = 1u;
+        runtime.AddImageStorageUsage(&image);
         if (readback_linear_images && (!image.info.props.is_tiled || image.info.size.width <= 8) &&
             image.info.guest_address != 0) {
             std::unique_lock lk{download_images_mutex};
@@ -622,15 +579,14 @@ void TextureCache::AssociateStencil(ImageId depth_id, const ImageInfo& depth_inf
     stencil_image.AssociateDepth(depth_id, slot_images[depth_id].image_uid);
 }
 
-void TextureCache::GatherOwners(ImageId image_id, OwnerRuns& runs) {
+void TextureCache::ValidateFromOwners(ImageId image_id) {
     Image& image = slot_images[image_id];
     const VAddr addr = image.info.guest_address;
     const u64 size = image.info.guest_size;
-    if (size == 0 || !gpu_memory.IsRegionOwned(addr, size)) {
+    if (!gpu_memory.IsRegionOwned(addr, size)) {
         return;
     }
-    // The owner lock is held while walking, so nothing is touched until it is gone.
-    boost::container::small_vector<std::pair<VAddr, VAddr>, 4> buffer_runs;
+    SmallVector<std::pair<VAddr, VAddr>, 4> runs, buffer_runs;
     gpu_memory.ForEachOwner(addr, size, [&](VAddr run_addr, u64 run_size, Owner owner) {
         if (owner.kind == OwnerKind::Image && ImageId{owner.index} != image_id) {
             runs.emplace_back(ImageId{owner.index}, run_addr, run_addr + run_size);
@@ -641,10 +597,6 @@ void TextureCache::GatherOwners(ImageId image_id, OwnerRuns& runs) {
     for (const auto& [begin, end] : buffer_runs) {
         image.MarkDirty(ImageFlagBits::GpuDirty, begin, end);
     }
-}
-
-void TextureCache::ValidateFromOwners(ImageId image_id, const OwnerRuns& runs) {
-    Image& image = slot_images[image_id];
     for (const auto& [src_id, begin, end] : runs) {
         Image& src_image = slot_images[src_id];
         if (False(src_image.flags & ImageFlagBits::Registered) || !src_image.HasGpuValidData()) {
@@ -670,17 +622,8 @@ void TextureCache::RefreshImage(Image& image) {
 
     if (True(image.flags & ImageFlagBits::MaybeCpuDirty) &&
         False(image.flags & ImageFlagBits::CpuDirty)) {
-        // The image size should be less than page size to be considered MaybeCpuDirty
-        // So this calculation should be very uncommon and reasonably fast
-        // For now we'll just check up to 64 first pixels
-        const auto addr = std::bit_cast<u8*>(image.info.guest_address);
-        const u32 w = std::min(image.info.size.width, u32(8));
-        const u32 h = std::min(image.info.size.height, u32(8));
-
-        const u32 s_w = image.info.props.is_block ? Common::DivCeil(w, 4u) : w;
-        const u32 s_h = image.info.props.is_block ? Common::DivCeil(h, 4u) : h;
-        const u32 size = s_w * s_h * (image.info.num_bits / 8);
-        const u64 hash = XXH3_64bits(addr, size);
+        const u8* addr = std::bit_cast<const u8*>(image.info.guest_address);
+        const u64 hash = XXH3_64bits(addr, image.info.guest_size);
         if (image.cpu_hash == hash) {
             image.flags &= ~ImageFlagBits::MaybeCpuDirty;
             return;
@@ -699,9 +642,6 @@ void TextureCache::RefreshImage(Image& image) {
             image.info.props.is_volume ? std::max(image.info.size.depth >> m, 1u) : 1u;
         const auto [mip_size, mip_pitch, mip_height, mip_offset, mip_slice_size] =
             image.info.mips_layout[m];
-        // Only the mips something was actually written into have to come back from guest memory;
-        // the rest keep whatever the gpu last rendered into them, as a mip chain built on the gpu
-        // one level at a time does.
         const VAddr mip_addr = image.info.guest_address + mip_offset;
         if (!image.IsDirtyAt(mip_addr, mip_addr + mip_size)) {
             continue;
@@ -814,8 +754,6 @@ void TextureCache::TrackImage(ImageId image_id, bool owner, bool assume_locked) 
     if (!assume_locked) {
         lk.lock();
     }
-    // Pages the image does not watch yet take both watchers at once, while the ones it already
-    // watches only need their read watcher brought in line with the ownership claim.
     const auto read_op = owner ? PageOp::Track : PageOp::None;
     const auto [tracked_begin, tracked_end] = image.TrackedRange();
     const auto image_begin = image.info.guest_address;
@@ -949,8 +887,6 @@ void TextureCache::GarbageCollectImages() {
         }
         // An edge write means the guest reused the memory, so the image is freed without download.
         MarkDirtyIfEdgesModified(image);
-        // A buffer took part of the range from under the image, so it holds the newer copy and
-        // writing the image back would undo whatever went in there.
         const bool download =
             image.HasGpuValidData() && False(image.flags & ImageFlagBits::Displaced);
         if (download && (!pressured || !image.CanBeDownloaded())) {

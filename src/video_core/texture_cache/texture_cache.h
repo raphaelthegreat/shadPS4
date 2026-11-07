@@ -143,9 +143,6 @@ public:
     /// Retrieves image whose address matches provided
     [[nodiscard]] ImageId FindImageFromRange(VAddr address, size_t size, bool ensure_valid = true);
 
-    /// Retrieves an image view with the properties of the specified image id.
-    void EnsureStorageUsage(ImageId image_id);
-
     [[nodiscard]] ImageView& FindTexture(ImageId image_id, const ImageDesc& desc);
 
     /// Retrieves the render target with specified properties
@@ -163,20 +160,13 @@ public:
     /// Drops the ownership claim of an image over its guest range.
     void ReleaseOwnership(ImageId image_id, bool assume_locked = false);
 
-    /// Updates image contents if it was modified by CPU, claiming the memory it covers when the
-    /// image is about to be written to. Tracking already takes the watchers the claim needs, but
-    /// the claim itself is only recorded once the image holds everything the guest would see,
-    /// since it takes the range away from whoever the contents have to come from.
+    /// Updates image contents if it was modified by CPU or by a different GPU resource.
     void UpdateImage(ImageId image_id, bool claim = false) {
         Image& image = slot_images[image_id];
         TouchImage(image);
         TrackImage(image_id, claim || True(image.flags & ImageFlagBits::Owned));
-        OwnerRuns runs;
-        GatherOwners(image_id, runs);
-        // Ranges a buffer owns were marked dirty above, and the upload reads through that same
-        // buffer, so pulling the guest range is what brings their contents back in.
         RefreshImage(image);
-        ValidateFromOwners(image_id, runs);
+        ValidateFromOwners(image_id);
         if (claim) {
             ClaimOwnership(image_id);
         }
@@ -185,15 +175,8 @@ public:
     /// Reuploads image contents.
     void RefreshImage(Image& image);
 
-    using OwnerRuns = boost::container::small_vector<std::tuple<ImageId, VAddr, VAddr>, 8>;
-
-    /// Collects the parts of an image's guest range another image holds a newer copy of, and
-    /// marks dirty the parts a buffer took over so the upload below fetches them back.
-    void GatherOwners(ImageId image_id, OwnerRuns& runs);
-
-    /// Copies into the image the parts of its guest range that another image holds a newer copy
-    /// of, so that it ends up with the contents the guest would see.
-    void ValidateFromOwners(ImageId image_id, const OwnerRuns& runs);
+    /// Validate image contents from other GPU modified images that own their range.
+    void ValidateFromOwners(ImageId image_id);
 
     /// Retrieves the sampler that matches the provided S# descriptor.
     [[nodiscard]] vk::Sampler GetSampler(const AmdGpu::Sampler& sampler,

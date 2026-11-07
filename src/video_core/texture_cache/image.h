@@ -187,8 +187,6 @@ public:
     vk::ImageAspectFlags aspect_mask = vk::ImageAspectFlagBits::eColor;
     vk::SampleCountFlags supported_samples = vk::SampleCountFlagBits::e1;
     ImageFlagBits flags = ImageFlagBits::Dirty;
-    /// Guest range the image has to be refilled from, as the union of everything written to it.
-    /// A fresh image has nothing at all, so it starts out covering every address.
     VAddr dirty_begin = 0;
     VAddr dirty_end = std::numeric_limits<VAddr>::max();
     ImageId depth_id{};
