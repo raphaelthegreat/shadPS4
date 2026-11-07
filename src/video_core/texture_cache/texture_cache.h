@@ -34,7 +34,7 @@ class Runtime;
 namespace VideoCore {
 
 class BufferCache;
-class PageManager;
+class GpuMemory;
 
 class TextureCache {
     static constexpr s64 DEFAULT_PRESSURE_GC_MEMORY = 1_GB + 512_MB;
@@ -110,7 +110,7 @@ public:
 public:
     TextureCache(const Vulkan::Instance& instance, Vulkan::Scheduler& scheduler,
                  Vulkan::Runtime& runtime, AmdGpu::Liverpool* liverpool, BufferCache& buffer_cache,
-                 PageManager& page_manager);
+                 GpuMemory& gpu_memory);
     ~TextureCache();
 
     TileManager& GetTileManager() noexcept {
@@ -403,7 +403,7 @@ private:
     Vulkan::Runtime& runtime;
     AmdGpu::Liverpool* liverpool;
     BufferCache& buffer_cache;
-    PageManager& page_manager;
+    GpuMemory& gpu_memory;
     PageTable page_table;
     Common::SlotVector<Image> slot_images;
     Common::SlotVector<ImageView> slot_image_views;

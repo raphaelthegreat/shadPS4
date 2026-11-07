@@ -12,6 +12,7 @@
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/buffer_cache/fault_manager.h"
 #include "video_core/buffer_cache/range_set.h"
+#include "video_core/buffer_cache/region_manager.h"
 #include "video_core/renderer_vulkan/vk_semaphore.h"
 #include "video_core/texture_cache/image.h"
 
@@ -34,8 +35,7 @@ struct StagingBufferRef;
 namespace VideoCore {
 
 class TextureCache;
-class MemoryTracker;
-class PageManager;
+class GpuMemory;
 
 enum class ObtainBufferFlags {
     None = 0,
@@ -53,11 +53,13 @@ class BufferCache {
     static constexpr u64 NUM_ARENA_PAGES = u64{1} << (ADDRESS_SPACE_BITS - ARENA_PAGE_BITS);
     static constexpr u64 MIN_BLOCK_SIZE = 16_KB;
     static constexpr u64 STREAM_THRESHOLD = 16_KB;
+    static constexpr u64 NUM_REGIONS = u64{1} << (ADDRESS_SPACE_BITS - HIGHER_PAGE_BITS);
+    static constexpr u64 REGION_POOL_SIZE = 32;
 
 public:
     explicit BufferCache(const Vulkan::Instance& instance, Vulkan::Scheduler& scheduler,
                          Vulkan::Runtime& runtime, AmdGpu::Liverpool* liverpool,
-                         TextureCache& texture_cache, PageManager& tracker);
+                         TextureCache& texture_cache, GpuMemory& gpu_memory);
     ~BufferCache();
 
     /// Returns a pointer to GDS device local buffer.
@@ -151,6 +153,31 @@ private:
 
     bool SynchronizeMemoryFromImage(const Buffer* arena, VAddr device_addr, u32 size);
 
+    /// Removes all protection from a page and ensures GPU data has been flushed if requested
+    void InvalidateRegion(VAddr device_addr, u64 size, auto&& on_flush);
+
+    /// Mark region as modified from the host GPU without uploading it again
+    void MarkPagesAsGpuModified(VAddr device_addr, u64 size);
+
+    /// Unmark region as modified from the host GPU
+    void UnmarkPagesAsGpuModified(VAddr device_addr, u64 size, bool is_write);
+
+    /// Mark region as modified from the CPU
+    void MarkRegionAsCpuModified(VAddr device_addr, u64 size);
+
+    /// Call 'func' for each CPU modified range and unmark those pages as CPU modified
+    void ForEachUploadRange(VAddr device_addr, u64 size, bool is_written, auto&& func);
+
+    /// Call 'func' for each GPU modified range and unmark those pages as GPU modified
+    template <bool clear>
+    void ForEachDownloadRange(VAddr device_addr, u64 size, auto&& func);
+
+    /// Calls 'func' with the region and local range of each region the range spans
+    template <bool create_region_on_fail = false, typename Func>
+    bool IterateRegions(VAddr device_addr, u64 size, Func&& func);
+
+    RegionManager* CreateRegion(u64 page_index);
+
     const Vulkan::Instance& instance;
     Vulkan::Scheduler& scheduler;
     Vulkan::Runtime& runtime;
@@ -158,7 +185,11 @@ private:
     AmdGpu::Liverpool* liverpool;
     Core::MemoryManager* memory;
     TextureCache& texture_cache;
-    std::unique_ptr<MemoryTracker> memory_tracker;
+    GpuMemory& gpu_memory;
+    const u32 readbacks_mode;
+    std::deque<std::array<RegionManager, REGION_POOL_SIZE>> region_pool;
+    std::vector<RegionManager*> free_regions;
+    std::vector<RegionManager*> regions;
 
     StreamBuffer stream_buffer;
     Buffer gds_buffer;

@@ -6,7 +6,7 @@
 #include "common/recursive_lock.h"
 #include "common/shared_first_mutex.h"
 #include "video_core/buffer_cache/buffer_cache.h"
-#include "video_core/page_manager.h"
+#include "video_core/gpu_memory.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/texture_cache/texture_cache.h"
@@ -140,7 +140,7 @@ private:
     const Instance& instance;
     Scheduler& scheduler;
     Runtime& runtime;
-    VideoCore::PageManager page_manager;
+    VideoCore::GpuMemory gpu_memory;
     VideoCore::BufferCache buffer_cache;
     VideoCore::TextureCache texture_cache;
     AmdGpu::Liverpool* liverpool;

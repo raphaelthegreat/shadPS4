@@ -11,8 +11,6 @@
 #include "video_core/amdgpu/liverpool.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/buffer_cache/buffer_cache.h"
-#include "video_core/buffer_cache/memory_tracker.h"
-#include "video_core/buffer_cache/region_definitions.h"
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
@@ -67,11 +65,11 @@ std::optional<u32> FindMemoryType(const vk::PhysicalDeviceMemoryProperties& prop
 
 BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& scheduler_,
                          Vulkan::Runtime& runtime_, AmdGpu::Liverpool* liverpool_,
-                         TextureCache& texture_cache_, PageManager& tracker)
+                         TextureCache& texture_cache_, GpuMemory& gpu_memory_)
     : instance{instance_}, scheduler{scheduler_}, runtime{runtime_},
       staging_pool{runtime_.GetStagingPool()}, liverpool{liverpool_},
-      memory{Core::Memory::Instance()}, texture_cache{texture_cache_},
-      memory_tracker{std::make_unique<MemoryTracker>(tracker)},
+      memory{Core::Memory::Instance()}, texture_cache{texture_cache_}, gpu_memory{gpu_memory_},
+      readbacks_mode{EmulatorSettings.GetReadbacksMode()}, regions(NUM_REGIONS),
       stream_buffer{instance, scheduler, MemoryType::Stream, STREAM_BUFFER_SIZE},
       gds_buffer{instance, 0, GDS_BUFFER_SIZE, MemoryType::Stream, "GDS Buffer"},
       memory_semaphore{instance} {
@@ -114,6 +112,120 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
 
 BufferCache::~BufferCache() = default;
 
+template <bool create_region_on_fail, typename Func>
+bool BufferCache::IterateRegions(VAddr device_addr, u64 size, Func&& func) {
+    using FuncReturn = typename std::invoke_result<Func, RegionManager*, u64, size_t>::type;
+    static constexpr bool BOOL_BREAK = std::is_same_v<FuncReturn, bool>;
+    u64 remaining_size = size;
+    u64 page_index = device_addr >> HIGHER_PAGE_BITS;
+    u64 page_offset = device_addr & HIGHER_PAGE_MASK;
+    while (remaining_size > 0) {
+        const u64 copy_amount = std::min(HIGHER_PAGE_SIZE - page_offset, remaining_size);
+        if (auto* region = regions[page_index]; region) {
+            if constexpr (BOOL_BREAK) {
+                if (func(region, page_offset, copy_amount)) {
+                    return true;
+                }
+            } else {
+                func(region, page_offset, copy_amount);
+            }
+        } else if constexpr (create_region_on_fail) {
+            region = CreateRegion(page_index);
+            if constexpr (BOOL_BREAK) {
+                if (func(region, page_offset, copy_amount)) {
+                    return true;
+                }
+            } else {
+                func(region, page_offset, copy_amount);
+            }
+        }
+        page_index++;
+        page_offset = 0;
+        remaining_size -= copy_amount;
+    }
+    return false;
+}
+
+RegionManager* BufferCache::CreateRegion(u64 page_index) {
+    const VAddr base_cpu_addr = page_index << HIGHER_PAGE_BITS;
+    if (free_regions.empty()) {
+        region_pool.emplace_back();
+        auto& last_pool = region_pool.back();
+        for (size_t i = 0; i < REGION_POOL_SIZE; i++) {
+            std::construct_at(&last_pool[i], &gpu_memory, 0);
+            free_regions.push_back(&last_pool[i]);
+        }
+    }
+    auto* new_region = free_regions.back();
+    new_region->SetCpuAddress(base_cpu_addr);
+    free_regions.pop_back();
+    regions[page_index] = new_region;
+    return new_region;
+}
+
+void BufferCache::MarkPagesAsGpuModified(VAddr device_addr, u64 size) {
+    IterateRegions<true>(device_addr, size, [](RegionManager* region, u64 offset, u64 size) {
+        region->ChangeRegionState<StateOp::None, StateOp::Set>(offset, size);
+    });
+}
+
+void BufferCache::UnmarkPagesAsGpuModified(VAddr device_addr, u64 size, bool is_write) {
+    IterateRegions(device_addr, size, [is_write](RegionManager* region, u64 offset, u64 size) {
+        if (is_write) {
+            region->ChangeRegionState<StateOp::Set, StateOp::Clear>(offset, size);
+        } else {
+            region->ChangeRegionState<StateOp::None, StateOp::Clear>(offset, size);
+        }
+    });
+}
+
+void BufferCache::MarkRegionAsCpuModified(VAddr device_addr, u64 size) {
+    IterateRegions(device_addr, size, [](RegionManager* region, u64 offset, u64 size) {
+        region->ChangeRegionState<StateOp::Set, StateOp::None>(offset, size);
+    });
+}
+
+void BufferCache::InvalidateRegion(VAddr device_addr, u64 size, auto&& on_flush) {
+    if (readbacks_mode == GpuReadbacksMode::Disabled) {
+        return MarkRegionAsCpuModified(device_addr, size);
+    }
+    bool should_flush = false;
+    IterateRegions(device_addr, size, [&should_flush](RegionManager* region, u64 offset, u64 size) {
+        const auto bounds = GetBounds(offset, size);
+        region->Lock(bounds);
+        const bool modified = region->IsRegionModified<Type::GPU>(offset, size);
+        if (!modified) {
+            region->ChangeRegionState<StateOp::Set, StateOp::None, false>(offset, size);
+        }
+        should_flush |= modified;
+        region->Unlock(bounds);
+    });
+    if (should_flush) {
+        on_flush();
+    }
+}
+
+void BufferCache::ForEachUploadRange(VAddr device_addr, u64 size, bool is_written, auto&& func) {
+    IterateRegions<true>(
+        device_addr, size, [&func, is_written](RegionManager* region, u64 offset, u64 size) {
+            if (is_written) {
+                region->ForEachModifiedRange<Type::CPU, StateOp::Clear, StateOp::Set>(offset, size,
+                                                                                      func);
+            } else {
+                region->ForEachModifiedRange<Type::CPU, StateOp::Clear, StateOp::None>(offset, size,
+                                                                                       func);
+            }
+        });
+}
+
+template <bool clear>
+void BufferCache::ForEachDownloadRange(VAddr device_addr, u64 size, auto&& func) {
+    constexpr auto gpu_op = clear ? StateOp::Clear : StateOp::None;
+    IterateRegions(device_addr, size, [&func](RegionManager* region, u64 offset, u64 size) {
+        region->ForEachModifiedRange<Type::GPU, StateOp::None, gpu_op>(offset, size, func);
+    });
+}
+
 void BufferCache::TickFrame() {
     if (std::exchange(fault_process_pending, false)) {
         fault_manager->ProcessFaultBuffer();
@@ -121,13 +233,13 @@ void BufferCache::TickFrame() {
 }
 
 void BufferCache::InvalidateMemory(VAddr device_addr, u64 size, bool assume_locks) {
-    memory_tracker->InvalidateRegion(device_addr, size, [this, device_addr, size, assume_locks] {
+    InvalidateRegion(device_addr, size, [this, device_addr, size, assume_locks] {
         ReadMemory(device_addr, size, true, false, assume_locks);
     });
 }
 
 void BufferCache::UnmarkRegionAsGpuModified(VAddr device_addr, u64 size, bool is_write) {
-    memory_tracker->UnmarkRegionAsGpuModified(device_addr, size, is_write);
+    UnmarkPagesAsGpuModified(device_addr, size, is_write);
     gpu_modified_ranges.Subtract(device_addr, size);
 }
 
@@ -148,7 +260,7 @@ void BufferCache::ReadMemory(VAddr device_addr, u64 size, bool is_write, bool as
             std::max<VAddr>(window_start + WindowSize, device_addr + size), arena_end);
         DownloadMemory(arena, window_start, window_end - window_start, async);
         if (is_write) {
-            memory_tracker->MarkRegionAsCpuModified(device_addr, size);
+            MarkRegionAsCpuModified(device_addr, size);
         }
     };
     if (assume_locks) {
@@ -162,7 +274,7 @@ void BufferCache::DownloadMemory(const Buffer* arena, VAddr device_addr, u64 siz
     boost::container::small_vector<vk::BufferCopy, 1> copies;
     u64 total_size_bytes = 0;
     const VAddr arena_base = arena->cpu_addr;
-    memory_tracker->ForEachDownloadRange<false>(device_addr, size, [&](u64 address, u64 size) {
+    ForEachDownloadRange<false>(device_addr, size, [&](u64 address, u64 size) {
         const auto add_download = [&](VAddr start, VAddr end) {
             const u64 new_offset = start - arena_base;
             const u64 new_size = end - start;
@@ -197,7 +309,7 @@ void BufferCache::DownloadMemory(const Buffer* arena, VAddr device_addr, u64 siz
             memory->TryWriteBacking(dst_addr, download.mapped + (copy.dstOffset - download.offset),
                                     copy.size);
         }
-        memory_tracker->UnmarkRegionAsGpuModified(device_addr, size, false);
+        UnmarkPagesAsGpuModified(device_addr, size, false);
 
         if (async) {
             staging_pool.FreeDeferred(download);
@@ -251,16 +363,20 @@ std::pair<const Buffer*, u64> BufferCache::ObtainBufferForImage(VAddr device_add
 }
 
 bool BufferCache::IsRegionCpuModified(VAddr addr, size_t size) {
-    return memory_tracker->IsRegionCpuModified(addr, size);
+    return IterateRegions(addr, size, [](RegionManager* region, u64 offset, u64 size) {
+        return region->IsRegionModified<Type::CPU>(offset, size);
+    });
 }
 
 bool BufferCache::IsRegionGpuModified(VAddr addr, size_t size) {
-    return memory_tracker->IsRegionGpuModified(addr, size);
+    return IterateRegions(addr, size, [](RegionManager* region, u64 offset, u64 size) {
+        return region->IsRegionModified<Type::GPU>(offset, size);
+    });
 }
 
 void BufferCache::MarkRegionAsGpuModified(VAddr addr, size_t size) {
     texture_cache.MarkAsMaybeGpuDirty(addr, size);
-    memory_tracker->MarkRegionAsGpuModified(addr, size);
+    MarkPagesAsGpuModified(addr, size);
     gpu_modified_ranges.Add(addr, size);
 }
 
@@ -271,8 +387,8 @@ void BufferCache::ReadEdgeImagePages(const Image& image) {
     const VAddr image_addr = image.info.guest_address;
     const u64 image_size = image.info.guest_size;
     const VAddr image_end = image_addr + image_size;
-    const VAddr page_start = PageManager::GetPageAddr(image_addr);
-    const VAddr page_end = PageManager::GetNextPageAddr(image_end - 1);
+    const VAddr page_start = GetPageAddr(image_addr);
+    const VAddr page_end = GetNextPageAddr(image_end - 1);
     boost::container::small_vector<vk::BufferCopy, 2> copies;
     u64 total_size_bytes = 0;
     const auto [buffer, offset] = ObtainBuffer(page_start, page_end - page_start);
@@ -451,7 +567,7 @@ bool BufferCache::SynchronizeMemory(const Buffer* arena, VAddr device_addr, u32 
                                     bool is_written, bool is_texel_buffer) {
     boost::container::small_vector<vk::BufferCopy, 4> copies;
     size_t total_size_bytes{};
-    memory_tracker->ForEachUploadRange(device_addr, size, is_written, [&](u64 addr, u64 size) {
+    ForEachUploadRange(device_addr, size, is_written, [&](u64 addr, u64 size) {
         copies.emplace_back(total_size_bytes, addr, size);
         total_size_bytes += size;
     });

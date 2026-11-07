@@ -12,7 +12,7 @@
 #include "core/emulator_settings.h"
 #include "core/memory.h"
 #include "video_core/buffer_cache/buffer_cache.h"
-#include "video_core/page_manager.h"
+#include "video_core/gpu_memory.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_runtime.h"
@@ -51,9 +51,9 @@ static u64 HashBackingMemory(VAddr virtual_addr, u64 size) {
 
 TextureCache::TextureCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& scheduler_,
                            Vulkan::Runtime& runtime_, AmdGpu::Liverpool* liverpool_,
-                           BufferCache& buffer_cache_, PageManager& page_manager_)
+                           BufferCache& buffer_cache_, GpuMemory& gpu_memory_)
     : instance{instance_}, scheduler{scheduler_}, runtime{runtime_}, liverpool{liverpool_},
-      buffer_cache{buffer_cache_}, page_manager{page_manager_}, slot_images{MAX_IMAGES},
+      buffer_cache{buffer_cache_}, gpu_memory{gpu_memory_}, slot_images{MAX_IMAGES},
       slot_image_views{MAX_IMAGE_VIEWS}, slot_samplers{MAX_SAMPLERS},
       blit_helper{instance, scheduler},
       tile_manager{instance, scheduler, runtime, buffer_cache.GetStreamBuffer()},
@@ -186,8 +186,8 @@ void TextureCache::MarkAsMaybeDirty(ImageId image_id, Image& image) {
 }
 
 void TextureCache::InvalidateMemory(VAddr addr, size_t size) {
-    const auto pages_start = PageManager::GetPageAddr(addr);
-    const auto pages_end = PageManager::GetNextPageAddr(addr + size - 1);
+    const auto pages_start = GetPageAddr(addr);
+    const auto pages_end = GetNextPageAddr(addr + size - 1);
 
     SmallVector<ImageId, 8> image_ids;
     ForEachImageInRegion(pages_start, pages_end - pages_start,
@@ -995,15 +995,15 @@ void TextureCache::TrackImage(ImageId image_id) {
 
     std::scoped_lock lk{image.mutex};
     if (image.IsUntracked()) {
-        page_manager.UpdatePageWatchers(image_begin, image.info.guest_size, PageOp::Track);
+        gpu_memory.UpdatePageWatchers(image_begin, image.info.guest_size, PageOp::Track);
     } else {
         if (image_begin < image.track_addr) {
-            page_manager.UpdatePageWatchers(image_begin, image.track_addr - image_begin,
-                                            PageOp::Track);
+            gpu_memory.UpdatePageWatchers(image_begin, image.track_addr - image_begin,
+                                          PageOp::Track);
         }
         if (image.track_addr_end < image_end) {
-            page_manager.UpdatePageWatchers(image.track_addr_end, image_end - image.track_addr_end,
-                                            PageOp::Track);
+            gpu_memory.UpdatePageWatchers(image.track_addr_end, image_end - image.track_addr_end,
+                                          PageOp::Track);
         }
     }
     image.track_addr = image_begin;
@@ -1021,7 +1021,7 @@ void TextureCache::UntrackImage(ImageId image_id) {
     const auto addr = image.track_addr;
     const auto size = image.track_addr_end - image.track_addr;
     if (size != 0) {
-        page_manager.UpdatePageWatchers(addr, size, PageOp::Untrack);
+        gpu_memory.UpdatePageWatchers(addr, size, PageOp::Untrack);
     }
     image.track_addr = 0;
     image.track_addr_end = 0;
@@ -1033,10 +1033,10 @@ void TextureCache::UntrackImageHead(ImageId image_id) {
     if (image.IsUntracked() || image_begin < image.track_addr) {
         return;
     }
-    const auto addr = page_manager.GetNextPageAddr(image_begin);
+    const auto addr = GetNextPageAddr(image_begin);
     const auto size = addr - image_begin;
     image.head_hash = HashBackingMemory(image_begin, size);
-    page_manager.UpdatePageWatchers(image_begin, size, PageOp::Untrack);
+    gpu_memory.UpdatePageWatchers(image_begin, size, PageOp::Untrack);
 
     image.track_addr = addr;
     if (image.track_addr == image.track_addr_end) {
@@ -1054,7 +1054,7 @@ void TextureCache::UntrackImageTail(ImageId image_id) {
         return;
     }
     ASSERT(image.track_addr_end != 0);
-    const auto addr = page_manager.GetPageAddr(image_end);
+    const auto addr = GetPageAddr(image_end);
     const auto size = image_end - addr;
     image.tail_hash = HashBackingMemory(addr, size);
     image.track_addr_end = addr;
@@ -1064,20 +1064,20 @@ void TextureCache::UntrackImageTail(ImageId image_id) {
         // Cehck its hash later.
         MarkAsMaybeDirty(image_id, image);
     }
-    page_manager.UpdatePageWatchers(addr, size, PageOp::Untrack);
+    gpu_memory.UpdatePageWatchers(addr, size, PageOp::Untrack);
 }
 
 void TextureCache::MarkDirtyIfEdgesModified(Image& image) {
     const auto image_begin = image.info.guest_address;
     const auto image_end = image.info.guest_address + image.info.guest_size;
     if (image.head_hash != 0) {
-        const auto head_end = page_manager.GetNextPageAddr(image_begin);
+        const auto head_end = GetNextPageAddr(image_begin);
         if (HashBackingMemory(image_begin, head_end - image_begin) != image.head_hash) {
             image.flags |= ImageFlagBits::CpuDirty;
         }
     }
     if (image.tail_hash != 0) {
-        const auto tail_begin = page_manager.GetPageAddr(image_end);
+        const auto tail_begin = GetPageAddr(image_end);
         if (HashBackingMemory(tail_begin, image_end - tail_begin) != image.tail_hash) {
             image.flags |= ImageFlagBits::CpuDirty;
         }
