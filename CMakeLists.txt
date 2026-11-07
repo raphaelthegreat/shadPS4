@@ -1247,10 +1247,9 @@ set(VIDEO_CORE src/video_core/amdgpu/cb_db_extent.h
                src/video_core/cache_storage.h
                src/video_core/gpu_memory.cpp
                src/video_core/gpu_memory.h
+               src/video_core/page_protect.h
                src/video_core/page_protect_signal.cpp
                src/video_core/page_protect_uffd.cpp
-               src/video_core/page_watchers.cpp
-               src/video_core/page_watchers.h
                src/video_core/renderdoc.cpp
                src/video_core/renderdoc.h
 )

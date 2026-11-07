@@ -8,16 +8,17 @@
 #include "common/signal_context.h"
 #include "core/memory.h"
 #include "core/signals.h"
-#include "video_core/page_watchers.h"
+#include "video_core/gpu_memory.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 
 namespace VideoCore {
 
 namespace {
 
-struct SignalWatchers final : PageWatchers {
-    explicit SignalWatchers(Vulkan::Rasterizer* rasterizer_) {
+struct SignalProtector final : PageProtector {
+    explicit SignalProtector(Vulkan::Rasterizer* rasterizer_, GpuMemory& gpu_memory_) {
         rasterizer = rasterizer_;
+        gpu_memory = &gpu_memory_;
 
         // Should be called first.
         constexpr auto priority = std::numeric_limits<u32>::min();
@@ -50,8 +51,9 @@ struct SignalWatchers final : PageWatchers {
 
 } // Anonymous namespace
 
-std::unique_ptr<PageWatchers> CreateSignalPageWatchers(Vulkan::Rasterizer* rasterizer) {
-    return std::make_unique<SignalWatchers>(rasterizer);
+std::unique_ptr<PageProtector> CreateSignalPageProtector(Vulkan::Rasterizer* rasterizer,
+                                                         GpuMemory& gpu_memory) {
+    return std::make_unique<SignalProtector>(rasterizer, gpu_memory);
 }
 
 } // namespace VideoCore

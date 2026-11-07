@@ -17,16 +17,17 @@
 #include "common/error.h"
 #include "common/thread.h"
 #include "core/memory.h"
-#include "video_core/page_watchers.h"
+#include "video_core/gpu_memory.h"
 #include "video_core/renderer_vulkan/vk_rasterizer.h"
 
 namespace VideoCore {
 
 namespace {
 
-struct UffdWatchers final : PageWatchers {
-    explicit UffdWatchers(Vulkan::Rasterizer* rasterizer_) {
+struct UffdProtector final : PageProtector {
+    explicit UffdProtector(Vulkan::Rasterizer* rasterizer_, GpuMemory& gpu_memory_) {
         rasterizer = rasterizer_;
+        gpu_memory = &gpu_memory_;
         uffd = syscall(SYS_userfaultfd, O_CLOEXEC | O_NONBLOCK | UFFD_USER_MODE_ONLY);
         if (uffd == -1) {
             LOG_ERROR(Common_Memory,
@@ -52,7 +53,6 @@ struct UffdWatchers final : PageWatchers {
     }
 
     void OnMap(VAddr address, size_t size) override {
-        PageWatchers::OnMap(address, size);
         uffdio_register reg;
         reg.range.start = address;
         reg.range.len = size;
@@ -85,7 +85,7 @@ struct UffdWatchers final : PageWatchers {
 
         auto regions = Core::Memory::Instance()->GetAddressSpace().GetUsableRegions();
         for (auto& region : regions) {
-            OnMap(region.lower(), region.upper());
+            gpu_memory->OnGpuMap(region.lower(), region.upper());
         }
         LOG_INFO(Common_Memory, "registered reserved memory with userfaultfd");
 
@@ -141,7 +141,7 @@ struct UffdWatchers final : PageWatchers {
             // ::Protect, therefore we use MODE_DONTWAKE and wake the thread with UFFDIO_WAKE here
             uffdio_range wake;
             wake.start = msg.arg.pagefault.address;
-            wake.len = PM_PAGE_SIZE;
+            wake.len = BYTES_PER_PAGE;
             const int ret = ioctl(uffd, UFFDIO_WAKE, &wake);
             ASSERT_MSG(ret != -1, "Waking thread {} failed with: {}", ptid,
                        Common::GetLastErrorMsg());
@@ -154,8 +154,9 @@ struct UffdWatchers final : PageWatchers {
 
 } // Anonymous namespace
 
-std::unique_ptr<PageWatchers> CreateUffdPageWatchers(Vulkan::Rasterizer* rasterizer) {
-    return std::make_unique<UffdWatchers>(rasterizer);
+std::unique_ptr<PageProtector> CreateUffdPageProtector(Vulkan::Rasterizer* rasterizer,
+                                                       GpuMemory& gpu_memory) {
+    return std::make_unique<UffdProtector>(rasterizer, gpu_memory);
 }
 
 } // namespace VideoCore

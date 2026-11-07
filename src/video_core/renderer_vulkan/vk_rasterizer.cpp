@@ -1311,6 +1311,7 @@ bool Rasterizer::ReadMemory(VAddr addr, u64 size, bool assume_locks) {
         return false;
     }
     buffer_cache.ReadMemory(addr, size, false, false, assume_locks);
+    texture_cache.ReadMemory(addr, size, assume_locks);
     return true;
 }
 

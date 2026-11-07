@@ -120,6 +120,9 @@ public:
     /// Invalidates any image in the logical page range.
     void InvalidateMemory(VAddr addr, size_t size);
 
+    /// Writes back to guest memory every image owning part of the range.
+    void ReadMemory(VAddr addr, size_t size, bool assume_locks);
+
     /// Marks an image as dirty if it exists at the provided address.
     void InvalidateMemoryFromGPU(VAddr address, size_t max_size);
 
@@ -149,6 +152,12 @@ public:
 
     /// Links the stencil plane of a depth surface to its depth image.
     void AssociateStencil(ImageId depth_id, const ImageInfo& depth_info);
+
+    /// Marks the image as holding data newer than guest memory over its guest range.
+    void ClaimOwnership(ImageId image_id, bool assume_locked = false);
+
+    /// Drops the ownership claim of an image over its guest range.
+    void ReleaseOwnership(ImageId image_id, bool assume_locked = false);
 
     /// Updates image contents if it was modified by CPU.
     void UpdateImage(ImageId image_id) {

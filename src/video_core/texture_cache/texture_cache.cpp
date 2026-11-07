@@ -11,6 +11,7 @@
 #include "common/hash.h"
 #include "core/emulator_settings.h"
 #include "core/memory.h"
+#include "video_core/amdgpu/liverpool.h"
 #include "video_core/buffer_cache/buffer_cache.h"
 #include "video_core/gpu_memory.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
@@ -153,10 +154,12 @@ void TextureCache::DownloadImageMemory(ImageId image_id, DownloadMemoryFlags fla
 
     tile_manager.TileImage(image, buffer_copies, download.buffer, download.offset);
 
-    const auto write_data = [this, image_addr, copy_size, download, discard_buffer_cache, is_sync] {
+    const auto write_data = [this, image_id, image_addr, copy_size, download, discard_buffer_cache,
+                             is_sync] {
         download.Invalidate();
         Core::Memory::Instance()->TryWriteBacking(std::bit_cast<u8*>(image_addr), download.mapped,
                                                   copy_size);
+        ReleaseOwnership(image_id);
         if (discard_buffer_cache) {
             buffer_cache.UnmarkRegionAsGpuModified(image_addr, copy_size, true);
         }
@@ -173,6 +176,35 @@ void TextureCache::DownloadImageMemory(ImageId image_id, DownloadMemoryFlags fla
     } else {
         scheduler.DeferOperation(std::move(write_data));
     }
+}
+
+void TextureCache::ClaimOwnership(ImageId image_id, bool assume_locked) {
+    Image& image = slot_images[image_id];
+    std::unique_lock lk{image.mutex, std::defer_lock};
+    if (!assume_locked) {
+        lk.lock();
+    }
+    if (True(image.flags & ImageFlagBits::Owned) ||
+        False(image.flags & ImageFlagBits::Registered)) {
+        return;
+    }
+    image.flags |= ImageFlagBits::Owned;
+    gpu_memory.UpdatePageWatchers(image.info.guest_address, image.info.guest_size, PageOp::None,
+                                  PageOp::Track);
+}
+
+void TextureCache::ReleaseOwnership(ImageId image_id, bool assume_locked) {
+    Image& image = slot_images[image_id];
+    std::unique_lock lk{image.mutex, std::defer_lock};
+    if (!assume_locked) {
+        lk.lock();
+    }
+    if (False(image.flags & ImageFlagBits::Owned)) {
+        return;
+    }
+    image.flags &= ~ImageFlagBits::Owned;
+    gpu_memory.UpdatePageWatchers(image.info.guest_address, image.info.guest_size, PageOp::None,
+                                  PageOp::Untrack);
 }
 
 void TextureCache::MarkAsMaybeDirty(ImageId image_id, Image& image) {
@@ -203,6 +235,7 @@ void TextureCache::InvalidateMemory(VAddr addr, size_t size) {
             // Modified region overlaps image, so the image was definitely accessed by this fault.
             // Untrack the image, so that the range is unprotected and the guest can write freely.
             image.flags |= ImageFlagBits::CpuDirty;
+            ReleaseOwnership(image_id, true);
             UntrackImage(image_id);
         } else if (pages_end < image_end) {
             // This page access may or may not modify the image.
@@ -223,6 +256,33 @@ void TextureCache::InvalidateMemory(VAddr addr, size_t size) {
     }
 }
 
+void TextureCache::ReadMemory(VAddr addr, size_t size, bool assume_locks) {
+    SmallVector<ImageId, 8> image_ids;
+    ForEachImageInRegion(addr, size, [&](ImageId image_id, Image& image) {
+        if (True(image.flags & ImageFlagBits::Owned)) {
+            image_ids.push_back(image_id);
+        }
+    });
+    if (image_ids.empty()) {
+        return;
+    }
+    const auto flush_images = [this, image_ids = std::move(image_ids)] {
+        for (const ImageId image_id : image_ids) {
+            if (slot_images[image_id].CanBeDownloaded()) {
+                DownloadImageMemory(image_id, DownloadMemoryFlags::Sync);
+            }
+            // Dropped even when the image could not be written back, as leaving the claim in
+            // place would fault the guest on every retry of the same read.
+            ReleaseOwnership(image_id);
+        }
+    };
+    if (assume_locks) {
+        flush_images();
+    } else {
+        liverpool->SendCommand<true>(std::move(flush_images));
+    }
+}
+
 void TextureCache::InvalidateMemoryFromGPU(VAddr address, size_t max_size) {
     // Mark the image at the written address, then follow images stored right after it
     // (e.g. the chroma planes after a luma plane).
@@ -236,6 +296,7 @@ void TextureCache::InvalidateMemoryFromGPU(VAddr address, size_t max_size) {
             }
             // Ensure image is reuploaded when accessed again.
             image.flags |= ImageFlagBits::GpuDirty;
+            ReleaseOwnership(image_id);
             next_end = std::max<VAddr>(next_end, next + image.info.guest_size);
         });
         next = next_end > next ? next_end : end;
@@ -720,6 +781,7 @@ ImageView& TextureCache::FindTexture(ImageId image_id, const ImageDesc& desc) {
     Image& image = slot_images[image_id];
     if (desc.type == BindingType::Storage) {
         image.flags |= ImageFlagBits::GpuModified;
+        ClaimOwnership(image_id);
         if (readback_linear_images && (!image.info.props.is_tiled || image.info.size.width <= 8) &&
             image.info.guest_address != 0) {
             std::unique_lock lk{download_images_mutex};
@@ -758,6 +820,7 @@ void TextureCache::UnregisterMeta(VAddr address, u64 owner_uid) {
 ImageView& TextureCache::FindRenderTarget(ImageId image_id, const ImageDesc& desc) {
     Image& image = slot_images[image_id];
     image.flags |= ImageFlagBits::GpuModified;
+    ClaimOwnership(image_id);
     if (readback_linear_images && (!image.info.props.is_tiled || image.info.size.width <= 8)) {
         std::unique_lock lk{download_images_mutex};
         download_images.emplace(image_id);
@@ -800,6 +863,7 @@ ImageView& TextureCache::FindRenderTarget(ImageId image_id, const ImageDesc& des
 ImageView& TextureCache::FindDepthTarget(ImageId image_id, const ImageDesc& desc) {
     Image& image = slot_images[image_id];
     image.flags |= ImageFlagBits::GpuModified;
+    ClaimOwnership(image_id);
     image.usage.depth_target = 1u;
     UpdateImage(image_id);
 
@@ -967,6 +1031,7 @@ void TextureCache::UnregisterImage(ImageId image_id) {
     Image& image = slot_images[image_id];
     ASSERT_MSG(True(image.flags & ImageFlagBits::Registered),
                "Trying to unregister an already unregistered image");
+    ReleaseOwnership(image_id);
     image.flags &= ~ImageFlagBits::Registered;
     image.memory_usage_counter = nullptr;
     image_lru_cache.Free(image);

@@ -7,6 +7,7 @@
 
 #include "common/alignment.h"
 #include "core/debug_state.h"
+#include "core/emulator_settings.h"
 #include "core/memory.h"
 #include "video_core/amdgpu/liverpool.h"
 #include "video_core/buffer_cache/buffer.h"
@@ -369,9 +370,7 @@ bool BufferCache::IsRegionCpuModified(VAddr addr, size_t size) {
 }
 
 bool BufferCache::IsRegionGpuModified(VAddr addr, size_t size) {
-    return IterateRegions(addr, size, [](RegionManager* region, u64 offset, u64 size) {
-        return region->IsRegionModified<Type::GPU>(offset, size);
-    });
+    return gpu_memory.IsRegionOwned(addr, size);
 }
 
 void BufferCache::MarkRegionAsGpuModified(VAddr addr, size_t size) {

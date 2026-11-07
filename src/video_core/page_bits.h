@@ -11,9 +11,20 @@
 
 namespace VideoCore {
 
+constexpr u64 PAGE_BITS = 12;
 constexpr u64 PAGES_PER_WORD = 64;
-constexpr u64 BYTES_PER_PAGE = 4_KB;
+constexpr u64 BYTES_PER_PAGE = 1ULL << PAGE_BITS;
 constexpr u64 BYTES_PER_WORD = PAGES_PER_WORD * BYTES_PER_PAGE;
+
+/// Returns page aligned address.
+constexpr VAddr GetPageAddr(VAddr addr) {
+    return addr & ~(BYTES_PER_PAGE - 1);
+}
+
+/// Returns address of the next page.
+constexpr VAddr GetNextPageAddr(VAddr addr) {
+    return GetPageAddr(addr + BYTES_PER_PAGE);
+}
 
 /// Address space is sharded in regions small enough for a single word to summarize them.
 constexpr u64 HIGHER_PAGE_BITS = 24;
@@ -160,6 +171,33 @@ struct alignas(64) BitArray {
         }
     }
 
+    /// Applies the operation to every page in the bounds, refreshing summaries.
+    template <StateOp op>
+    constexpr void UpdateRange(const Bounds& bounds) {
+        IterateWords(bounds, [&](u64 index, u64 mask) { Update<op>(index, mask); });
+    }
+
+    /// Calls 'func' with the offset and length in bytes of each run of set pages in the bounds.
+    constexpr void ForEachSetRange(const Bounds& bounds, auto&& func) const {
+        u64 start_page{};
+        u64 end_page{};
+        IterateWords(bounds, [&](u64 index, u64 mask) {
+            const u64 base_page = index * PAGES_PER_WORD;
+            IteratePages(data[index] & mask, [&](u64 offset, u64 size) {
+                if (end_page != base_page + offset) {
+                    if (end_page != start_page) {
+                        func(start_page * BYTES_PER_PAGE, (end_page - start_page) * BYTES_PER_PAGE);
+                    }
+                    start_page = base_page + offset;
+                }
+                end_page = base_page + offset + size;
+            });
+        });
+        if (end_page != start_page) {
+            func(start_page * BYTES_PER_PAGE, (end_page - start_page) * BYTES_PER_PAGE);
+        }
+    }
+
     constexpr void RefreshSummary(u64 index) {
         const u64 summary_bit = u64{1} << index;
         set_summary = data[index] ? (set_summary | summary_bit) : (set_summary & ~summary_bit);
@@ -167,9 +205,9 @@ struct alignas(64) BitArray {
             data[index] != ~u64{0} ? (clear_summary | summary_bit) : (clear_summary & ~summary_bit);
     }
 
-    u64 set_summary;
-    u64 clear_summary;
-    std::array<u64, NumWords> data;
+    u64 set_summary{0};
+    u64 clear_summary{~u64{0}};
+    std::array<u64, NumWords> data{};
 
 private:
     /// Mask of the words fully contained between the first and last word of the bounds.
