@@ -41,8 +41,10 @@ class TextureCache {
     static constexpr s64 DEFAULT_CRITICAL_GC_MEMORY = 3_GB;
     static constexpr s64 TARGET_GC_THRESHOLD = 8_GB;
 
+    /// The layout of a registered image, held inline so that picking out one laid out exactly as
+    /// requested is a compare against the bucket rather than a read of the image itself.
     struct BucketEntry {
-        u32 key;
+        ImageKey key;
         u32 size;
         ImageId id;
 
@@ -52,14 +54,14 @@ class TextureCache {
         }
 
         VAddr Address() const noexcept {
-            return VAddr(key) << 8;
+            return VAddr(key.guest_address) << IMAGE_ADDRESS_SHIFT;
         }
     };
 
     struct alignas(64) Bucket {
-        SmallVector<BucketEntry, 4, u32> entries;
+        SmallVector<BucketEntry, 7, u32> entries;
     };
-    static_assert(sizeof(Bucket) == 64);
+    static_assert(sizeof(Bucket) == 256);
 
     struct Traits {
         using Entry = Bucket;
@@ -341,15 +343,15 @@ public:
     }
 
     template <typename Func>
-    void ForEachImageWithAddress(VAddr cpu_addr, Func&& func) {
+    void ForEachEntryWithAddress(VAddr cpu_addr, Func&& func) {
         const auto it = page_table.find(cpu_addr >> Traits::PAGE_BITS);
         if (it == nullptr) {
             return;
         }
-        const u32 key = u32(cpu_addr >> 8);
+        const u32 key = u32(cpu_addr >> IMAGE_ADDRESS_SHIFT);
         for (const auto& entry : it->entries) {
-            if (entry.key == key) {
-                func(entry.id, slot_images[entry.id]);
+            if (entry.key.guest_address == key) {
+                func(entry);
             }
         }
     }

@@ -295,13 +295,15 @@ void TextureCache::InvalidateMemoryFromGPU(VAddr address, size_t max_size) {
     VAddr next = address;
     while (next < end) {
         VAddr next_end = 0;
-        ForEachImageWithAddress(next, [&](ImageId image_id, Image& image) {
+        ForEachEntryWithAddress(next, [&](const BucketEntry& entry) {
+            Image& image = slot_images[entry.id];
+            // Images are only aligned to 256 bytes, so sharing a key is not sharing an address.
             if (image.info.guest_address != next) {
                 return;
             }
             // Ensure image is reuploaded when accessed again.
             image.MarkDirty(ImageFlagBits::GpuDirty);
-            ReleaseOwnership(image_id);
+            ReleaseOwnership(entry.id);
             next_end = std::max<VAddr>(next_end, next + image.info.guest_size);
         });
         next = next_end > next ? next_end : end;
@@ -581,11 +583,20 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
 
     ASSERT(info.guest_address != 0);
 
-    SmallVector<ImageId, 8> image_ids;
-    ForEachImageInRegion(info.guest_address, info.guest_size,
-                         [&](ImageId image_id, Image& image) { image_ids.push_back(image_id); });
-
+    // An image laid out exactly as requested needs nothing asked of it, and is found by scanning
+    // the one bucket it has to be in without reading any image registered alongside it.
     ImageId image_id{};
+    ForEachEntryWithAddress(info.guest_address, [&, key = info.Key()](const BucketEntry& entry) {
+        if (entry.key == key) {
+            image_id = entry.id;
+        }
+    });
+
+    SmallVector<ImageId, 8> image_ids;
+    if (!image_id) {
+        ForEachImageInRegion(info.guest_address, info.guest_size,
+                             [&](ImageId id, Image&) { image_ids.push_back(id); });
+    }
 
     // Check for a perfect match first
     for (const auto& cache_id : image_ids) {
@@ -670,11 +681,11 @@ ImageId TextureCache::FindImage(ImageDesc& desc, bool exact_fmt) {
 
 ImageId TextureCache::FindImageFromRange(VAddr address, size_t size, bool ensure_valid) {
     SmallVector<ImageId, 4> image_ids;
-    ForEachImageWithAddress(address, [&](ImageId image_id, Image& image) {
-        if (ensure_valid && !image.HasGpuValidData()) {
+    ForEachEntryWithAddress(address, [&](const BucketEntry& entry) {
+        if (ensure_valid && !slot_images[entry.id].HasGpuValidData()) {
             return;
         }
-        image_ids.push_back(image_id);
+        image_ids.push_back(entry.id);
     });
     if (image_ids.size() == 1) {
         // Sometimes image size might not exactly match with requested buffer size
@@ -987,14 +998,15 @@ void TextureCache::RegisterImage(ImageId image_id) {
     total_used_memory += Common::AlignUp(image.SizeBytes(), 1024);
     image_lru_cache.Insert(image, gc_tick);
     const auto& info = image.info;
-    ASSERT_MSG((info.guest_address & 0xff) == 0, "Trying to register an unaligned image");
-    ForEachPage(info.guest_address, info.guest_size, [this, image_id, info](u64 page) {
-        page_table[page].entries.emplace_back(BucketEntry{
-            .key = u32(info.guest_address >> 8),
-            .size = info.guest_size,
-            .id = image_id,
-        });
-    });
+    ASSERT_MSG((info.guest_address & ((1 << IMAGE_ADDRESS_SHIFT) - 1)) == 0,
+               "Trying to register an unaligned image");
+    const BucketEntry entry{
+        .key = info.Key(),
+        .size = info.guest_size,
+        .id = image_id,
+    };
+    ForEachPage(info.guest_address, info.guest_size,
+                [this, entry](u64 page) { page_table[page].entries.emplace_back(entry); });
 }
 
 void TextureCache::UnregisterImage(ImageId image_id) {

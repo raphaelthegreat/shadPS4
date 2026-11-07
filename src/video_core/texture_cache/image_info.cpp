@@ -179,6 +179,30 @@ ImageInfo::ImageInfo(const AmdGpu::Image& sharp, const Shader::ImageResource& de
     UpdateSize();
 }
 
+ImageKey ImageInfo::Key() const noexcept {
+    // Everything below is narrower than the descriptor field it was read out of, so that the key
+    // packs into three words and a handful of shorts with no padding left between them. A value
+    // wider than its room would let two unrelated images answer to one key, hence the assert.
+    DEBUG_ASSERT(bank_swizzle < 8 && static_cast<u32>(tile_mode) < 64 &&
+                 static_cast<u32>(type) < 16 && num_samples <= 16 && num_bits <= 128 &&
+                 pitch <= UINT16_MAX && size.width <= UINT16_MAX && size.height <= UINT16_MAX &&
+                 size.depth <= UINT16_MAX && resources.levels <= UINT16_MAX &&
+                 resources.layers <= UINT16_MAX);
+    return ImageKey{
+        .guest_address = static_cast<u32>(guest_address >> IMAGE_ADDRESS_SHIFT),
+        .pixel_format = static_cast<u32>(pixel_format),
+        .flags = u32{props.is_block} | u32{props.is_volume} << 1 | u32{alt_tile} << 2 |
+                 u32{bank_swizzle} << 3 | static_cast<u32>(tile_mode) << 6 |
+                 static_cast<u32>(type) << 12 | num_samples << 16 | num_bits << 21,
+        .pitch = static_cast<u16>(pitch),
+        .width = static_cast<u16>(size.width),
+        .height = static_cast<u16>(size.height),
+        .depth = static_cast<u16>(size.depth),
+        .levels = static_cast<u16>(resources.levels),
+        .layers = static_cast<u16>(resources.layers),
+    };
+}
+
 void ImageInfo::UpdateSize() noexcept {
     ASSERT_MSG(array_mode != AmdGpu::ArrayMode::ArrayLinearGeneral,
                "Unhandled array mode: ArrayLinearGeneral");
