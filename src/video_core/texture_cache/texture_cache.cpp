@@ -181,6 +181,11 @@ void TextureCache::DownloadImageMemory(ImageId image_id, DownloadMemoryFlags fla
 
 void TextureCache::ClaimOwnership(ImageId image_id, bool assume_locked) {
     Image& image = slot_images[image_id];
+    // The flag is only raised once the claim is recorded, so finding it already raised means
+    // there is nothing left to do and the image does not have to be locked to find that out.
+    if (True(image.flags & ImageFlagBits::Owned)) {
+        return;
+    }
     std::unique_lock lk{image.mutex, std::defer_lock};
     if (!assume_locked) {
         lk.lock();
@@ -189,9 +194,9 @@ void TextureCache::ClaimOwnership(ImageId image_id, bool assume_locked) {
         False(image.flags & ImageFlagBits::Registered)) {
         return;
     }
-    image.flags |= ImageFlagBits::Owned;
     gpu_memory.AssignOwner(image.info.guest_address, image.info.guest_size,
                            Owner{OwnerKind::Image, image_id.index});
+    image.flags |= ImageFlagBits::Owned;
     if (lk.owns_lock()) {
         lk.unlock();
     }
@@ -202,6 +207,11 @@ void TextureCache::ClaimOwnership(ImageId image_id, bool assume_locked) {
 
 void TextureCache::ReleaseOwnership(ImageId image_id, bool assume_locked) {
     Image& image = slot_images[image_id];
+    // Images that never claimed anything, which is most of them, are turned away without being
+    // locked. The flag outlives the claim it stands for, so seeing it lowered is conclusive.
+    if (False(image.flags & ImageFlagBits::Owned)) {
+        return;
+    }
     std::unique_lock lk{image.mutex, std::defer_lock};
     if (!assume_locked) {
         lk.lock();
@@ -209,9 +219,9 @@ void TextureCache::ReleaseOwnership(ImageId image_id, bool assume_locked) {
     if (False(image.flags & ImageFlagBits::Owned)) {
         return;
     }
-    image.flags &= ~ImageFlagBits::Owned;
     gpu_memory.ReleaseOwner(image.info.guest_address, image.info.guest_size,
                             Owner{OwnerKind::Image, image_id.index});
+    image.flags &= ~ImageFlagBits::Owned;
     const bool tracked = True(image.flags & ImageFlagBits::Tracked);
     if (lk.owns_lock()) {
         lk.unlock();
