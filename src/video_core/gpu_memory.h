@@ -141,6 +141,19 @@ public:
         return owned;
     }
 
+    /// Returns true if any part of the range is held by an owner of the given kind.
+    [[nodiscard]] bool IsRegionOwnedBy(VAddr addr, u64 size, OwnerKind kind) const {
+        if (!IsRegionOwned(addr, size)) {
+            return false;
+        }
+        bool found = false;
+        ForEachOwnerMap(addr, size, [&](RegionState& state, u32 begin, u32 end) {
+            state.owners.ForEachRun(begin, end,
+                                    [&](u32, u32, Owner owner) { found |= owner.kind == kind; });
+        });
+        return found;
+    }
+
     /// Calls 'func' with the address and size of each owned run of pages in the range.
     void ForEachOwnedRange(VAddr addr, u64 size, auto&& func) const {
         ForEachRegion(addr, size, [&](const RegionState* state, const Bounds& bounds) {

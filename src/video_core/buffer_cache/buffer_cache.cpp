@@ -580,7 +580,11 @@ bool BufferCache::SynchronizeMemory(const Buffer* arena, VAddr device_addr, u32 
         staging.Flush();
         runtime.CopyBuffer(staging.buffer, arena, copies);
     }
-    if (is_texel_buffer && !is_written) {
+    // Whatever the buffer is going to be used as, an image holding newer data than guest memory
+    // has to be tiled back into it first, or the caller reads what the image already replaced.
+    // Metadata surfaces are never owned by an image, so they keep their own gate.
+    if ((is_texel_buffer && !is_written) ||
+        gpu_memory.IsRegionOwnedBy(device_addr, size, OwnerKind::Image)) {
         return SynchronizeMemoryFromImage(arena, device_addr, size);
     }
     return false;
@@ -614,9 +618,13 @@ bool BufferCache::SynchronizeMemoryFromImage(const Buffer* arena, VAddr device_a
         return false;
     }
     Image& image = texture_cache.GetImage(image_id);
-    ASSERT_MSG(device_addr == image.info.guest_address,
-               "Texel buffer aliases image subresources {:x} : {:x}", device_addr,
-               image.info.guest_address);
+    if (device_addr != image.info.guest_address) {
+        // The copies below are laid out from the start of the image, so one that merely overlaps
+        // the request cannot be tiled into it at the offset asked for.
+        LOG_WARNING(Render_Vulkan, "Buffer {:#x} aliases subresources of image {:#x}", device_addr,
+                    image.info.guest_address);
+        return false;
+    }
     const u64 arena_offset = arena->Offset(device_addr);
     boost::container::small_vector<vk::BufferImageCopy, 8> buffer_copies;
     for (u32 mip = 0; mip < image.info.resources.levels; mip++) {
