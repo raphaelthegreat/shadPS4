@@ -99,6 +99,7 @@ private:
         s64 flip_arg;
         s32 index;
         bool eop;
+        u32 label_marker;
 
         operator bool() const noexcept {
             return frame != nullptr;

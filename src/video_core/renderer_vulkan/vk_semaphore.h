@@ -4,6 +4,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <thread>
 #include <queue>
@@ -45,6 +46,9 @@ public:
 
     /// Waits for a tick to be hit on the GPU
     void Wait(u64 tick);
+
+    /// Waits for a tick to be hit on the GPU up to the timeout. Returns true if it was hit.
+    bool WaitFor(u64 tick, std::chrono::nanoseconds timeout);
 
 protected:
     const Instance& instance;

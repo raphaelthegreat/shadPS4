@@ -67,4 +67,21 @@ void Semaphore::Wait(u64 tick) {
     Refresh();
 }
 
+bool Semaphore::WaitFor(u64 tick, std::chrono::nanoseconds timeout) {
+    if (IsFree(tick)) {
+        return true;
+    }
+    const vk::SemaphoreWaitInfo wait_info = {
+        .semaphoreCount = 1,
+        .pSemaphores = &semaphore.get(),
+        .pValues = &tick,
+    };
+    const auto result =
+        instance.GetDevice().waitSemaphores(&wait_info, static_cast<u64>(timeout.count()));
+    ASSERT_MSG(result == vk::Result::eSuccess || result == vk::Result::eTimeout,
+               "Failed to wait for master semaphore: {}", vk::to_string(result));
+    Refresh();
+    return IsFree(tick);
+}
+
 } // namespace Vulkan

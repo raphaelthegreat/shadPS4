@@ -7,6 +7,7 @@
 #include "common/shared_first_mutex.h"
 #include "video_core/buffer_cache/buffer_cache.h"
 #include "video_core/page_manager.h"
+#include "video_core/renderer_vulkan/vk_label_signaler.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/texture_cache/texture_cache.h"
@@ -44,6 +45,10 @@ public:
 
     [[nodiscard]] VideoCore::TextureCache& GetTextureCache() noexcept {
         return texture_cache;
+    }
+
+    [[nodiscard]] LabelSignaler& GetLabelSignaler() noexcept {
+        return label_signaler;
     }
 
     void Draw(bool is_indexed, u32 index_offset = 0);
@@ -140,6 +145,7 @@ private:
     const Instance& instance;
     Scheduler& scheduler;
     Runtime& runtime;
+    LabelSignaler label_signaler;
     VideoCore::PageManager page_manager;
     VideoCore::BufferCache buffer_cache;
     VideoCore::TextureCache texture_cache;

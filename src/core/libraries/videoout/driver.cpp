@@ -12,6 +12,7 @@
 #include "imgui/renderer/imgui_core.h"
 #include "video_core/amdgpu/liverpool.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
+#include "video_core/renderer_vulkan/vk_rasterizer.h"
 
 extern std::unique_ptr<Vulkan::Presenter> presenter;
 extern std::unique_ptr<AmdGpu::Liverpool> liverpool;
@@ -333,6 +334,7 @@ void VideoOutDriver::SubmitFlipInternal(VideoOutPort* port, s32 index, s64 flip_
         .flip_arg = flip_arg,
         .index = index,
         .eop = is_eop,
+        .label_marker = presenter->GetRasterizer().GetLabelSignaler().CurrentMarker(),
     });
 }
 
@@ -347,7 +349,8 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
 
     const auto receive_request = [this] -> Request {
         std::scoped_lock lk{mutex};
-        if (!requests.empty()) {
+        if (!requests.empty() && presenter->GetRasterizer().GetLabelSignaler().IsRetired(
+                                     requests.front().label_marker)) {
             const auto request = requests.front();
             requests.pop();
             return request;

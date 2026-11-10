@@ -213,6 +213,11 @@ public:
         return amd_shader_trinary_minmax;
     }
 
+    /// Returns true when VK_AMD_buffer_marker is supported.
+    bool IsAmdBufferMarkerSupported() const {
+        return amd_buffer_marker;
+    }
+
     /// Returns true when the shaderBufferFloat32AtomicMinMax feature of
     /// VK_EXT_shader_atomic_float2 is supported.
     bool IsShaderAtomicFloatBuffer32MinMaxSupported() const {
@@ -541,6 +546,7 @@ private:
     bool image_load_store_lod{};
     bool amd_gcn_shader{};
     bool amd_shader_trinary_minmax{};
+    bool amd_buffer_marker{};
     bool nv_framebuffer_mixed_samples{};
     bool amd_mixed_attachment_samples{};
     bool shader_atomic_float{};
