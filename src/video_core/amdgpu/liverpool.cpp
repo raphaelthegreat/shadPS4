@@ -741,14 +741,30 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                     // immediately
                     regs.cp_strmout_cntl.offset_update_done = 1;
                 } else if (event->event_index.Value() == EventIndex::ZpassDone) {
-                    if (event->event_type.Value() == EventType::PixelPipeStatDump) {
+                    if (event->event_type.Value() == EventType::PixelPipeStatDump ||
+                        event->event_type.Value() == EventType::ZpassDone) {
                         static constexpr u64 OcclusionCounterValidMask = 0x8000000000000000ULL;
                         static constexpr u64 OcclusionCounterStep = 0x2FFFFFFULL;
                         u64* results = event->Address<u64*>();
-                        for (s32 i = 0; i < num_counter_pairs; ++i, results += 2) {
-                            *results = pixel_counter | OcclusionCounterValidMask;
+                        const u32 num_pairs = num_counter_pairs;
+                        auto write_counters = [results, num_pairs](u64 counter) {
+                            results[0] = counter | OcclusionCounterValidMask;
+                            for (u32 i = 1; i < num_pairs; ++i) {
+                                results[i * 2] = OcclusionCounterValidMask;
+                            }
+                        };
+                        if (rasterizer) {
+                            const LabelWrite label = {
+                                .address = reinterpret_cast<VAddr>(results),
+                                .value = std::nullopt,
+                                .num_bytes = num_pairs * 16,
+                            };
+                            rasterizer->GetOcclusionQueries().Dump(label,
+                                                                   std::move(write_counters));
+                        } else {
+                            write_counters(pixel_counter);
+                            pixel_counter += OcclusionCounterStep;
                         }
-                        pixel_counter += OcclusionCounterStep;
                     }
                 }
                 break;
@@ -1324,7 +1340,7 @@ void Liverpool::HandleGetLodStats(const PM4CmdGetLodStats* get_lod) {
 }
 
 bool Liverpool::PollWaitRegMem(const PM4CmdWaitRegMem* wait_reg_mem, u32& num_polls) {
-    if (!rasterizer || wait_reg_mem->mem_space.Value() != PM4CmdWaitRegMem::MemSpace::Memory) {
+    if (!rasterizer || wait_reg_mem->mem_space != PM4CmdWaitRegMem::MemSpace::Memory) {
         return wait_reg_mem->Test(regs.reg_array);
     }
 

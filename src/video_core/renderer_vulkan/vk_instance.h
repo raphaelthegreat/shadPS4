@@ -84,6 +84,11 @@ public:
         return features.samplerAnisotropy;
     }
 
+    /// Returns true if precise occlusion queries are supported
+    bool IsOcclusionQueryPreciseSupported() const {
+        return features.occlusionQueryPrecise;
+    }
+
     /// Returns true if depth bounds testing is supported
     bool IsDepthBoundsSupported() const {
         return features.depthBounds;

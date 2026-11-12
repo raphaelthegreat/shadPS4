@@ -43,7 +43,7 @@ union Regs {
         ComputeProgram cs_program;
         INSERT_PADDING_WORDS(29104);
         DepthRenderControl depth_render_control;
-        INSERT_PADDING_WORDS(1);
+        DepthCountControl depth_count_control;
         DepthView depth_view;
         DepthRenderOverride depth_render_override;
         INSERT_PADDING_WORDS(1);

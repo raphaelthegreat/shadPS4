@@ -390,6 +390,11 @@ public:
         this->on_session = std::move(on_session);
     }
 
+    /// Sets a function to be called before every render pass instance ends.
+    void SetEndRenderingCallback(SessionFunc&& on_end_rendering) {
+        this->on_end_rendering = std::move(on_end_rendering);
+    }
+
     /// Sets a function to be called on every scheduler submission.
     void SetSubmitCallback(SubmitFunc&& on_submit) {
         this->on_submit = std::move(on_submit);
@@ -462,6 +467,7 @@ private:
     CommandPool command_pool;
     DynamicState dynamic_state;
     SessionFunc on_session{};
+    SessionFunc on_end_rendering{};
     SubmitFunc on_submit{};
     struct Session {
         vk::CommandBuffer upload{};

@@ -62,6 +62,7 @@ static_assert(GFX6_3D_REG_INDEX(cs_program) == 0x2E00);
 static_assert(GFX6_3D_REG_INDEX(cs_program.dim_z) == 0x2E03);
 static_assert(GFX6_3D_REG_INDEX(cs_program.user_data) == 0x2E40);
 static_assert(GFX6_3D_REG_INDEX(depth_render_control) == 0xA000);
+static_assert(GFX6_3D_REG_INDEX(depth_count_control) == 0xA001);
 static_assert(GFX6_3D_REG_INDEX(depth_view) == 0xA002);
 static_assert(GFX6_3D_REG_INDEX(depth_htile_data_base) == 0xA005);
 static_assert(GFX6_3D_REG_INDEX(screen_scissor) == 0xA00C);

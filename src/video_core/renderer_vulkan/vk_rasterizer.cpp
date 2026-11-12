@@ -38,7 +38,8 @@ static Shader::PushData MakeUserData(const AmdGpu::Regs& regs) {
 Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime& runtime_,
                        AmdGpu::Liverpool* liverpool_)
     : instance{instance_}, scheduler{scheduler_}, runtime{runtime_},
-      label_signaler{instance, scheduler}, page_manager{this},
+      occlusion_queries{instance, scheduler, label_signaler}, label_signaler{instance, scheduler},
+      page_manager{this},
       buffer_cache{instance, scheduler, runtime, liverpool_, texture_cache, page_manager},
       texture_cache{instance, scheduler, runtime, liverpool_, buffer_cache, page_manager},
       liverpool{liverpool_}, memory{Core::Memory::Instance()},
@@ -55,6 +56,7 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
         runtime.FlushBarriers();
         buffer_cache.SubmitPendingArenaBinds(info);
     });
+    scheduler.SetEndRenderingCallback([this] { occlusion_queries.End(); });
 }
 
 Rasterizer::~Rasterizer() = default;
@@ -194,6 +196,7 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
     if (!FilterDraw()) {
         return;
     }
+    occlusion_queries.Update(liverpool->regs.depth_count_control);
 
     const auto& regs = liverpool->regs;
     const GraphicsPipeline* pipeline = pipeline_cache.GetGraphicsPipeline();
@@ -219,6 +222,7 @@ void Rasterizer::Draw(bool is_indexed, u32 index_offset) {
     pipeline->BindResources(set_writes, push_data);
     UpdateDynamicState(pipeline, is_indexed);
     scheduler.BeginRendering(state);
+    occlusion_queries.Begin();
 
     const auto& vs_info = pipeline->GetStage(Shader::SwStage::Vertex);
     const auto& fetch_shader = pipeline->GetFetchShader();
@@ -250,6 +254,7 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
     if (!FilterDraw()) {
         return;
     }
+    occlusion_queries.Update(liverpool->regs.depth_count_control);
 
     const DrawIndirectParams params = {
         .vertex_sgpr_offset = vertex_sgpr_offset,
@@ -293,6 +298,7 @@ void Rasterizer::DrawIndirect(bool is_indexed, VAddr arg_address, u32 offset, u3
     pipeline->BindResources(set_writes, push_data);
     UpdateDynamicState(pipeline, is_indexed);
     scheduler.BeginRendering(state);
+    occlusion_queries.Begin();
 
     const auto cmdbuf = scheduler.CommandBuffer();
     cmdbuf.bindPipeline(vk::PipelineBindPoint::eGraphics, pipeline->Handle());

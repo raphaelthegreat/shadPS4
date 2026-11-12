@@ -112,6 +112,24 @@ struct DepthRenderControl {
     u32 decompress_enable : 1;
 };
 
+struct DepthCountControl {
+    u32 zpass_increment_disable : 1;
+    u32 perfect_zpass_counts : 1;
+    u32 : 2;
+    u32 sample_rate : 3;
+    u32 : 1;
+    u32 zpass_enable : 4;
+    u32 zfail_enable : 4;
+    u32 sfail_enable : 4;
+    u32 dbfail_enable : 4;
+    u32 slice_even_enable : 4;
+    u32 slice_odd_enable : 4;
+
+    bool IsZPassCountEnabled() const {
+        return !zpass_increment_disable && zpass_enable != 0;
+    }
+};
+
 struct DepthView {
     u32 slice_start : 11;
     u32 : 2;
