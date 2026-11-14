@@ -7,6 +7,7 @@
 #include "common/shared_first_mutex.h"
 #include "video_core/buffer_cache/buffer_cache.h"
 #include "video_core/page_manager.h"
+#include "video_core/renderer_vulkan/vk_descriptor_ring.h"
 #include "video_core/renderer_vulkan/vk_label_signaler.h"
 #include "video_core/renderer_vulkan/vk_occlusion_queries.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
@@ -174,9 +175,6 @@ private:
     std::array<ImageBinding, AmdGpu::NUM_COLOR_BUFFERS> cb_descs;
     ImageBinding db_desc;
 
-    boost::container::static_vector<vk::DescriptorImageInfo, Shader::NUM_IMAGES> image_infos;
-    boost::container::static_vector<vk::DescriptorBufferInfo, Shader::NUM_BUFFERS> buffer_infos;
-
     struct BoundBuffer {
         const VideoCore::Buffer* buffer;
         u64 offset;
@@ -186,8 +184,9 @@ private:
     std::vector<BoundBuffer> bound_buffers;
     std::vector<VideoCore::ImageId> bound_images;
 
-    u32 set_write_index{};
-    Pipeline::DescriptorWrites set_writes;
+    DescriptorRing descriptor_ring{scheduler};
+    Descriptor* descriptors{};
+    u32 num_descriptors{};
     Shader::PushData push_data;
 
     bool attachment_feedback_loop{};

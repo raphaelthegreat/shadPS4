@@ -63,7 +63,9 @@ void OcclusionQueries::Begin() {
     }
     ASSERT(next_query - retired_query.load(std::memory_order_acquire) < NumQueries);
     const u32 slot = next_query++ % NumQueries;
-    scheduler.CommandBuffer().beginQuery(*query_pool, slot, query_flags);
+    scheduler.Record([pool = *query_pool, slot, flags = query_flags](vk::CommandBuffer cmdbuf) {
+        cmdbuf.beginQuery(pool, slot, flags);
+    });
     active_flags = query_flags;
     active = true;
 }
@@ -73,7 +75,8 @@ void OcclusionQueries::End() {
         return;
     }
     const u32 slot = (next_query - 1) % NumQueries;
-    scheduler.CommandBuffer().endQuery(*query_pool, slot);
+    scheduler.Record(
+        [pool = *query_pool, slot](vk::CommandBuffer cmdbuf) { cmdbuf.endQuery(pool, slot); });
     active = false;
 }
 

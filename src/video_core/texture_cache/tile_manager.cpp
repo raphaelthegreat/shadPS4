@@ -224,9 +224,6 @@ std::pair<const Buffer*, u64> TileManager::DetileImage(const VideoCore::Buffer* 
     scheduler.EndRendering();
     runtime.FlushBarriers();
 
-    const auto cmdbuf = scheduler.CommandBuffer();
-    cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, GetTilingPipeline(info, false));
-
     const vk::DescriptorBufferInfo tiled_buffer_info{
         .buffer = in_buffer->Handle(),
         .offset = in_offset,
@@ -239,36 +236,28 @@ std::pair<const Buffer*, u64> TileManager::DetileImage(const VideoCore::Buffer* 
         .range = info.guest_size,
     };
 
-    const std::array<vk::WriteDescriptorSet, 3> set_writes = {{
-        {
-            .dstSet = VK_NULL_HANDLE,
-            .dstBinding = 0,
-            .dstArrayElement = 0,
-            .descriptorCount = 1,
-            .descriptorType = vk::DescriptorType::eStorageBuffer,
-            .pBufferInfo = &tiled_buffer_info,
-        },
-        {
-            .dstSet = VK_NULL_HANDLE,
-            .dstBinding = 1,
-            .dstArrayElement = 0,
-            .descriptorCount = 1,
-            .descriptorType = vk::DescriptorType::eStorageBuffer,
-            .pBufferInfo = &linear_buffer_info,
-        },
-        {
-            .dstSet = VK_NULL_HANDLE,
-            .dstBinding = 2,
-            .dstArrayElement = 0,
-            .descriptorCount = 1,
-            .descriptorType = vk::DescriptorType::eUniformBuffer,
-            .pBufferInfo = &params_buffer_info,
-        },
-    }};
-    cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, *pl_layout, 0, set_writes);
-
     const auto dim_x = (info.guest_size / (info.num_bits / 8)) / 64;
-    cmdbuf.dispatch(dim_x, 1, 1);
+    scheduler.Record(
+        [pipeline = GetTilingPipeline(info, false), pl_layout = *pl_layout,
+         buffer_infos = std::array{tiled_buffer_info, linear_buffer_info, params_buffer_info},
+         dim_x](vk::CommandBuffer cmdbuf) {
+            cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline);
+
+            std::array<vk::WriteDescriptorSet, 3> set_writes{};
+            for (u32 i = 0; i < set_writes.size(); ++i) {
+                set_writes[i] = vk::WriteDescriptorSet{
+                    .dstSet = VK_NULL_HANDLE,
+                    .dstBinding = i,
+                    .dstArrayElement = 0,
+                    .descriptorCount = 1,
+                    .descriptorType = i == 2 ? vk::DescriptorType::eUniformBuffer
+                                             : vk::DescriptorType::eStorageBuffer,
+                    .pBufferInfo = &buffer_infos[i],
+                };
+            }
+            cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, pl_layout, 0, set_writes);
+            cmdbuf.dispatch(dim_x, 1, 1);
+        });
 
     runtime.AccessBuffer(staging.buffer, staging.offset, info.guest_size,
                          vk::PipelineStageFlagBits2::eComputeShader,
@@ -316,9 +305,6 @@ void TileManager::TileImage(Image& in_image, std::span<vk::BufferImageCopy> buff
     runtime.DownloadImage(&in_image, staging.buffer, buffer_copies);
     runtime.FlushBarriers();
 
-    const auto cmdbuf = scheduler.CommandBuffer();
-    cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, GetTilingPipeline(info, true));
-
     const vk::DescriptorBufferInfo tiled_buffer_info{
         .buffer = out_buffer->Handle(),
         .offset = out_offset,
@@ -331,36 +317,28 @@ void TileManager::TileImage(Image& in_image, std::span<vk::BufferImageCopy> buff
         .range = info.guest_size,
     };
 
-    const std::array<vk::WriteDescriptorSet, 3> set_writes = {{
-        {
-            .dstSet = VK_NULL_HANDLE,
-            .dstBinding = 0,
-            .dstArrayElement = 0,
-            .descriptorCount = 1,
-            .descriptorType = vk::DescriptorType::eStorageBuffer,
-            .pBufferInfo = &tiled_buffer_info,
-        },
-        {
-            .dstSet = VK_NULL_HANDLE,
-            .dstBinding = 1,
-            .dstArrayElement = 0,
-            .descriptorCount = 1,
-            .descriptorType = vk::DescriptorType::eStorageBuffer,
-            .pBufferInfo = &linear_buffer_info,
-        },
-        {
-            .dstSet = VK_NULL_HANDLE,
-            .dstBinding = 2,
-            .dstArrayElement = 0,
-            .descriptorCount = 1,
-            .descriptorType = vk::DescriptorType::eUniformBuffer,
-            .pBufferInfo = &params_buffer_info,
-        },
-    }};
-    cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, *pl_layout, 0, set_writes);
-
     const auto dim_x = (info.guest_size / (info.num_bits / 8)) / 64;
-    cmdbuf.dispatch(dim_x, 1, 1);
+    scheduler.Record(
+        [pipeline = GetTilingPipeline(info, true), pl_layout = *pl_layout,
+         buffer_infos = std::array{tiled_buffer_info, linear_buffer_info, params_buffer_info},
+         dim_x](vk::CommandBuffer cmdbuf) {
+            cmdbuf.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline);
+
+            std::array<vk::WriteDescriptorSet, 3> set_writes{};
+            for (u32 i = 0; i < set_writes.size(); ++i) {
+                set_writes[i] = vk::WriteDescriptorSet{
+                    .dstSet = VK_NULL_HANDLE,
+                    .dstBinding = i,
+                    .dstArrayElement = 0,
+                    .descriptorCount = 1,
+                    .descriptorType = i == 2 ? vk::DescriptorType::eUniformBuffer
+                                             : vk::DescriptorType::eStorageBuffer,
+                    .pBufferInfo = &buffer_infos[i],
+                };
+            }
+            cmdbuf.pushDescriptorSetKHR(vk::PipelineBindPoint::eCompute, pl_layout, 0, set_writes);
+            cmdbuf.dispatch(dim_x, 1, 1);
+        });
 
     runtime.AccessBuffer(staging.buffer, staging.offset, info.guest_size,
                          vk::PipelineStageFlagBits2::eComputeShader,

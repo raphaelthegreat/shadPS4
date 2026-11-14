@@ -5,17 +5,19 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <memory>
 #include <mutex>
 #include <thread>
+#include <vector>
 #include <queue>
 
-#include "common/interval_set.h"
+#include "common/alignment.h"
+#include "common/assert.h"
 #include "common/unique_function.h"
 #include "video_core/amdgpu/regs_color.h"
 #include "video_core/amdgpu/regs_primitive.h"
 #include "video_core/renderer_vulkan/vk_resource_pool.h"
 #include "video_core/renderer_vulkan/vk_semaphore.h"
-#include "vulkan/vulkan.hpp"
 
 namespace tracy {
 class VkCtxScope;
@@ -24,6 +26,7 @@ class VkCtxScope;
 namespace Vulkan {
 
 class Instance;
+class Scheduler;
 
 struct RenderAttachment {
     vk::ImageView image_view;
@@ -94,7 +97,7 @@ struct StencilOps {
     }
 };
 struct DynamicState {
-    struct {
+    struct DirtyState {
         bool viewports : 1;
         bool scissors : 1;
 
@@ -165,14 +168,18 @@ struct DynamicState {
     float line_width{};
     bool feedback_loop_enabled{};
 
-    /// Commits the dynamic state to the provided command buffer.
-    void Commit(const Instance& instance, const vk::CommandBuffer& cmdbuf);
+    /// Records the dirty dynamic state into the scheduler.
+    void Commit(const Instance& instance, Scheduler& scheduler);
 
     /// Invalidates all dynamic state to be flushed into the next command buffer.
     void Invalidate() {
         std::memset(&dirty_state, 0xFF, sizeof(dirty_state));
     }
 
+private:
+    void Emit(const Instance& instance, DirtyState emit, vk::CommandBuffer cmdbuf) const;
+
+public:
     void SetViewports(const Viewports& viewports_) {
         if (!std::ranges::equal(viewports, viewports_)) {
             viewports = viewports_;
@@ -353,7 +360,7 @@ using SubmitFunc = Common::UniqueFunction<void, SubmitInfo&>;
 
 class Scheduler {
 public:
-    explicit Scheduler(const Instance& instance);
+    explicit Scheduler(const Instance& instance, bool use_worker_thread = false);
     ~Scheduler();
 
     /// Sends the current execution context to the GPU
@@ -370,6 +377,12 @@ public:
     /// Waits for the given tick to trigger on the GPU.
     void Wait(u64 tick);
 
+    /// Waits for the worker thread to finish executing everything recorded so far.
+    void WaitWorker();
+
+    /// Sends currently recorded work to the worker thread.
+    void DispatchWork();
+
     /// Attempts to execute operations whose tick the GPU has caught up with.
     void PopPendingOperations();
 
@@ -379,15 +392,45 @@ public:
     /// Ends current rendering scope.
     void EndRendering();
 
-    /// Starts a new session.
-    void BeginSession();
+    /// Records a command to be executed on the command buffer of the current tick.
+    template <typename T>
+    void Record(T&& command) {
+        if (!use_worker_thread) {
+            command(GetCommandBuffer());
+            return;
+        }
+        if (chunk->Record(command)) {
+            return;
+        }
+        DispatchWork();
+        const bool recorded = chunk->Record(command);
+        ASSERT(recorded);
+    }
 
-    /// Returns the current command buffer used for uploads.
-    vk::CommandBuffer UploadCommandBuffer();
+    /// Returns the id of the chunk commands are currently recorded into.
+    u64 CurrentChunkId() const noexcept {
+        return current_chunk_id;
+    }
 
-    /// Sets a function to be called on every session finalization.
-    void SetSessionCallback(SessionFunc&& on_session) {
-        this->on_session = std::move(on_session);
+    /// Waits until the worker thread has executed the chunk with the provided id.
+    void WaitChunk(u64 id);
+
+    /// Records a command along with a payload of size bytes stored in the command stream.
+    template <typename Fill, typename T>
+    void RecordWithPayload(size_t size, Fill&& fill, T&& command) {
+        if (!use_worker_thread) {
+            immediate_payload.resize(size);
+            fill(immediate_payload.data());
+            command(GetCommandBuffer(), immediate_payload.data());
+            return;
+        }
+        std::byte* payload = chunk->RecordWithPayload(size, command);
+        if (!payload) {
+            DispatchWork();
+            payload = chunk->RecordWithPayload(size, command);
+            ASSERT(payload);
+        }
+        fill(payload);
     }
 
     /// Sets a function to be called before every render pass instance ends.
@@ -408,11 +451,6 @@ public:
     /// Returns the current pipeline dynamic state tracking.
     DynamicState& GetDynamicState() {
         return dynamic_state;
-    }
-
-    /// Returns the current command buffer.
-    vk::CommandBuffer CommandBuffer() const {
-        return sessions.back().primary;
     }
 
     /// Returns the current command buffer tick.
@@ -455,9 +493,143 @@ public:
     static std::mutex submit_mutex;
 
 private:
-    void EndSession();
+    class Command {
+    public:
+        virtual ~Command() = default;
+
+        virtual void Execute(vk::CommandBuffer cmdbuf) = 0;
+
+        Command* GetNext() const {
+            return next;
+        }
+
+        void SetNext(Command* next_) {
+            next = next_;
+        }
+
+    private:
+        Command* next = nullptr;
+    };
+
+    template <typename T>
+    class PayloadCommand final : public Command {
+    public:
+        explicit PayloadCommand(T&& command_, const std::byte* payload_)
+            : command{std::move(command_)}, payload{payload_} {}
+        ~PayloadCommand() override = default;
+
+        PayloadCommand(PayloadCommand&&) = delete;
+        PayloadCommand& operator=(PayloadCommand&&) = delete;
+
+        void Execute(vk::CommandBuffer cmdbuf) override {
+            command(cmdbuf, payload);
+        }
+
+    private:
+        T command;
+        const std::byte* payload;
+    };
+
+    template <typename T>
+    class TypedCommand final : public Command {
+    public:
+        explicit TypedCommand(T&& command_) : command{std::move(command_)} {}
+        ~TypedCommand() override = default;
+
+        TypedCommand(TypedCommand&&) = delete;
+        TypedCommand& operator=(TypedCommand&&) = delete;
+
+        void Execute(vk::CommandBuffer cmdbuf) override {
+            command(cmdbuf);
+        }
+
+    private:
+        T command;
+    };
+
+    class CommandChunk final {
+    public:
+        void ExecuteAll(vk::CommandBuffer cmdbuf);
+
+        static constexpr size_t PayloadAlignment = 16;
+
+        template <typename T>
+        bool Record(T& command) {
+            using FuncType = TypedCommand<std::remove_cvref_t<T>>;
+            return Emplace<FuncType>(command_offset, std::move(command));
+        }
+
+        template <typename T>
+        std::byte* RecordWithPayload(size_t size, T& command) {
+            using FuncType = PayloadCommand<std::remove_cvref_t<T>>;
+            const size_t payload_offset = Common::AlignUp(command_offset, PayloadAlignment);
+            if (payload_offset + size > sizeof(data)) {
+                return nullptr;
+            }
+            std::byte* const payload = data.data() + payload_offset;
+            if (!Emplace<FuncType>(payload_offset + size, std::move(command), payload)) {
+                return nullptr;
+            }
+            return payload;
+        }
+
+        void MarkSubmit(const SubmitInfo& info) {
+            submit_info = info;
+            submit = true;
+        }
+
+        bool Empty() const {
+            return command_offset == 0;
+        }
+
+        bool HasSubmit() const {
+            return submit;
+        }
+
+        SubmitInfo& GetSubmitInfo() {
+            return submit_info;
+        }
+
+        void Reset() {
+            submit = false;
+        }
+
+    private:
+        template <typename FuncType, typename... Args>
+        bool Emplace(size_t offset, Args&&... args) {
+            static_assert(sizeof(FuncType) <= sizeof(data) / 8, "Command is too large");
+            offset = Common::AlignUp(offset, alignof(FuncType));
+            if (offset > sizeof(data) - sizeof(FuncType)) {
+                return false;
+            }
+            Command* const current_last = last;
+            last = new (data.data() + offset) FuncType(std::forward<Args>(args)...);
+            if (current_last) {
+                current_last->SetNext(last);
+            } else {
+                first = last;
+            }
+            command_offset = offset + sizeof(FuncType);
+            return true;
+        }
+
+        Command* first = nullptr;
+        Command* last = nullptr;
+        size_t command_offset = 0;
+        bool submit = false;
+        SubmitInfo submit_info{};
+        alignas(std::max_align_t) std::array<std::byte, 0x10000> data{};
+    };
 
     void SubmitExecution(SubmitInfo& info);
+
+    vk::CommandBuffer GetCommandBuffer();
+
+    void SubmitCommandBuffer(SubmitInfo& info);
+
+    void AcquireNewChunk();
+
+    void WorkerThread(std::stop_token stoken);
 
     void PriorityPendingOpsThread(std::stop_token stoken);
 
@@ -466,15 +638,21 @@ private:
     Semaphore work_semaphore;
     CommandPool command_pool;
     DynamicState dynamic_state;
-    SessionFunc on_session{};
     SessionFunc on_end_rendering{};
     SubmitFunc on_submit{};
-    struct Session {
-        vk::CommandBuffer upload{};
-        vk::CommandBuffer primary{};
-    };
-    std::vector<Session> sessions;
-    std::condition_variable_any event_cv;
+    vk::CommandBuffer current_cmdbuf{};
+    bool use_worker_thread;
+    std::vector<std::byte> immediate_payload;
+    std::unique_ptr<CommandChunk> chunk;
+    u64 current_chunk_id{1};
+    std::atomic<u64> executed_chunk_id{};
+    std::queue<std::unique_ptr<CommandChunk>> work_queue;
+    std::vector<std::unique_ptr<CommandChunk>> chunk_reserve;
+    std::mutex work_mutex;
+    std::mutex reserve_mutex;
+    std::condition_variable_any work_cv;
+    std::condition_variable work_done_cv;
+    u32 num_pending_work{};
     struct PendingOp {
         Common::UniqueFunction<void> callback;
         u64 gpu_tick;
@@ -486,6 +664,7 @@ private:
     std::mutex priority_pending_ops_mutex;
     std::condition_variable_any priority_pending_ops_cv;
     std::jthread priority_pending_ops_thread;
+    std::jthread worker_thread;
     RenderState render_state;
     bool is_rendering = false;
     tracy::VkCtxScope* profiler_scope{};

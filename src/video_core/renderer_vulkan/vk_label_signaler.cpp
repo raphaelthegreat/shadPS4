@@ -48,8 +48,10 @@ void LabelSignaler::Signal(AmdGpu::EventType event_type, AmdGpu::EventIndex even
 
     const u32 marker = ++current_marker;
     if (marker_buffer) {
-        scheduler.CommandBuffer().writeBufferMarker2AMD(stage, marker_buffer->Handle(),
-                                                        slot * sizeof(u32), marker);
+        scheduler.Record([stage, buffer = marker_buffer->Handle(), offset = slot * sizeof(u32),
+                          marker](vk::CommandBuffer cmdbuf) {
+            cmdbuf.writeBufferMarker2AMD(stage, buffer, offset, marker);
+        });
     }
     last_signal_tick = scheduler.CurrentTick();
 

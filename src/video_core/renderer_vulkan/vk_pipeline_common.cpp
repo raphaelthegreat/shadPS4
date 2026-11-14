@@ -4,6 +4,7 @@
 #include <boost/container/static_vector.hpp>
 
 #include "shader_recompiler/resource.h"
+#include "video_core/renderer_vulkan/vk_descriptor_ring.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 #include "video_core/renderer_vulkan/vk_pipeline_common.h"
@@ -19,31 +20,53 @@ Pipeline::Pipeline(const Instance& instance_, Scheduler& scheduler_, DescriptorH
 
 Pipeline::~Pipeline() = default;
 
-void Pipeline::BindResources(DescriptorWrites& set_writes,
+void Pipeline::BindResources(std::span<const Descriptor> descriptors,
                              const Shader::PushData& push_data) const {
-    const auto cmdbuf = scheduler.CommandBuffer();
     const auto bind_point =
         IsCompute() ? vk::PipelineBindPoint::eCompute : vk::PipelineBindPoint::eGraphics;
-
     const auto stage_flags = IsCompute() ? vk::ShaderStageFlagBits::eCompute : AllGraphicsStageBits;
-    cmdbuf.pushConstants(*pipeline_layout, stage_flags, 0u, sizeof(push_data), &push_data);
+    scheduler.Record([device = instance.GetDevice(), &desc_heap = desc_heap,
+                      layout = *pipeline_layout, set_layout = *desc_layout,
+                      push = uses_push_descriptors, bind_point, stage_flags, descriptors,
+                      push_data](vk::CommandBuffer cmdbuf) {
+        cmdbuf.pushConstants(layout, stage_flags, 0u, sizeof(push_data), &push_data);
+        if (descriptors.empty()) {
+            return;
+        }
 
-    // Bind descriptor set.
-    if (set_writes.empty()) {
-        return;
-    }
+        thread_local std::vector<vk::WriteDescriptorSet> writes;
+        writes.clear();
+        u32 array_element = 0;
+        for (size_t i = 0; i < descriptors.size(); ++i) {
+            const auto& descriptor = descriptors[i];
+            array_element =
+                i > 0 && descriptors[i - 1].binding == descriptor.binding ? array_element + 1 : 0;
+            const bool is_buffer = descriptor.type == vk::DescriptorType::eStorageBuffer;
+            writes.push_back(vk::WriteDescriptorSet{
+                .dstBinding = descriptor.binding,
+                .dstArrayElement = array_element,
+                .descriptorCount = 1,
+                .descriptorType = descriptor.type,
+                .pImageInfo =
+                    is_buffer ? nullptr
+                              : reinterpret_cast<const vk::DescriptorImageInfo*>(&descriptor.image),
+                .pBufferInfo = is_buffer ? reinterpret_cast<const vk::DescriptorBufferInfo*>(
+                                               &descriptor.buffer)
+                                         : nullptr,
+            });
+        }
 
-    if (uses_push_descriptors) {
-        cmdbuf.pushDescriptorSetKHR(bind_point, *pipeline_layout, 0, set_writes);
-        return;
-    }
-
-    const auto desc_set = desc_heap.Commit(*desc_layout);
-    for (auto& set_write : set_writes) {
-        set_write.dstSet = desc_set;
-    }
-    instance.GetDevice().updateDescriptorSets(set_writes, {});
-    cmdbuf.bindDescriptorSets(bind_point, *pipeline_layout, 0, desc_set, {});
+        if (push) {
+            cmdbuf.pushDescriptorSetKHR(bind_point, layout, 0, writes);
+            return;
+        }
+        const auto desc_set = desc_heap.Commit(set_layout);
+        for (auto& write : writes) {
+            write.dstSet = desc_set;
+        }
+        device.updateDescriptorSets(writes, {});
+        cmdbuf.bindDescriptorSets(bind_point, layout, 0, desc_set, {});
+    });
 }
 
 std::string Pipeline::GetDebugString() const {

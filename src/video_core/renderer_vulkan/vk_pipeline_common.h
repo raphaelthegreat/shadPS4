@@ -7,6 +7,8 @@
 #include "shader_recompiler/runtime_info.h"
 #include "video_core/renderer_vulkan/vk_common.h"
 
+#include <span>
+
 #include <boost/container/small_vector.hpp>
 
 namespace Shader {
@@ -24,6 +26,7 @@ static constexpr auto AllGraphicsStageBits =
 class Instance;
 class Scheduler;
 class DescriptorHeap;
+struct Descriptor;
 
 class Pipeline {
 public:
@@ -57,8 +60,8 @@ public:
         return is_compute;
     }
 
-    using DescriptorWrites = std::vector<vk::WriteDescriptorSet>;
-    void BindResources(DescriptorWrites& set_writes, const Shader::PushData& push_data) const;
+    void BindResources(std::span<const Descriptor> descriptors,
+                       const Shader::PushData& push_data) const;
 
 protected:
     [[nodiscard]] std::string GetDebugString() const;

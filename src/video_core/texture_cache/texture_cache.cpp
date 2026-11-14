@@ -1215,7 +1215,7 @@ void TextureCache::GarbageCollectSamplers() {
         sampler_lru_cache.Free(sampler);
         samplers.erase(sampler.hash);
         const auto sampler_id = slot_samplers.GetSlotId(sampler);
-        slot_samplers.Erase(sampler_id);
+        scheduler.DeferOperation([this, sampler_id] { slot_samplers.Erase(sampler_id); });
         return false;
     };
 

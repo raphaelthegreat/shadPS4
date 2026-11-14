@@ -567,6 +567,7 @@ void BufferCache::SubmitPendingArenaBinds(Vulkan::SubmitInfo& info) {
     };
 
     info.AddWait(signal_sema, signal_tick);
+    std::scoped_lock lk{Vulkan::Scheduler::submit_mutex};
     auto submit_result = instance.GetGraphicsQueue().bindSparse(sparse_info);
     ASSERT_MSG(submit_result != vk::Result::eErrorDeviceLost, "Device lost during submit");
 

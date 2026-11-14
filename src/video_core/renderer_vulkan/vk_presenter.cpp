@@ -466,7 +466,7 @@ Presenter::Presenter(Frontend::WindowSDL& window_, AmdGpu::Liverpool* liverpool_
     : window{window_}, liverpool{liverpool_},
       instance{window, EmulatorSettings.GetGpuId(), EmulatorSettings.IsVkValidationEnabled(),
                EmulatorSettings.IsVkCrashDiagnosticEnabled()},
-      draw_scheduler{instance}, present_scheduler{instance}, flip_scheduler{instance},
+      draw_scheduler{instance, true}, present_scheduler{instance}, flip_scheduler{instance},
       swapchain{instance, window}, runtime{instance, draw_scheduler},
       rasterizer{std::make_unique<Rasterizer>(instance, draw_scheduler, runtime, liverpool)},
       texture_cache{rasterizer->GetTextureCache()} {
@@ -507,9 +507,6 @@ Presenter::~Presenter() {
     draw_scheduler.Finish();
     present_scheduler.Finish();
     flip_scheduler.Finish();
-    Check(draw_scheduler.CommandBuffer().reset());
-    Check(present_scheduler.CommandBuffer().reset());
-    Check(flip_scheduler.CommandBuffer().reset());
 
     const vk::Device device = instance.GetDevice();
     for (auto& frame : present_frames) {
@@ -613,7 +610,6 @@ Frame* Presenter::PrepareLastFrame() {
 
     auto& scheduler = flip_scheduler;
     scheduler.EndRendering();
-    const auto cmdbuf = scheduler.CommandBuffer();
 
     const auto frame_subresources = vk::ImageSubresourceRange{
         .aspectMask = vk::ImageAspectFlagBits::eColor,
@@ -633,9 +629,11 @@ Frame* Presenter::PrepareLastFrame() {
                                 .image = frame->image,
                                 .subresourceRange{frame_subresources}};
 
-    cmdbuf.pipelineBarrier2(vk::DependencyInfo{
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &pre_barrier,
+    scheduler.Record([pre_barrier](vk::CommandBuffer cmdbuf) {
+        cmdbuf.pipelineBarrier2(vk::DependencyInfo{
+            .imageMemoryBarrierCount = 1,
+            .pImageMemoryBarriers = &pre_barrier,
+        });
     });
 
     // Flush frame creation commands.
@@ -691,10 +689,11 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
     };
 
     draw_scheduler.EndRendering();
-    const auto cmdbuf = draw_scheduler.CommandBuffer();
-    cmdbuf.pipelineBarrier2(vk::DependencyInfo{
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &pre_barrier,
+    draw_scheduler.Record([pre_barrier](vk::CommandBuffer cmdbuf) {
+        cmdbuf.pipelineBarrier2(vk::DependencyInfo{
+            .imageMemoryBarrierCount = 1,
+            .pImageMemoryBarriers = &pre_barrier,
+        });
     });
 
     VideoCore::ImageViewInfo view_info{};
@@ -740,14 +739,17 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
                     vk::PipelineStageFlagBits2::eFragmentShader, vk::AccessFlagBits2::eShaderRead);
     runtime.FlushBarriers();
 
-    image_view = fsr_pass.Render(cmdbuf, image_view, image_size, {frame->width, frame->height},
-                                 fsr_settings, frame->is_hdr);
-
     // Vulkan has no sRGB variant of the 10-bit format, so an A2R10G10B10Srgb buffer reaches
     // the post process pass still sRGB encoded and has to be decoded there instead.
     pp_settings.srgb_input =
         attribute.attrib.pixel_format == Libraries::VideoOut::PixelFormat::A2R10G10B10Srgb;
-    pp_pass.Render(cmdbuf, image_view, image_size, *frame, pp_settings);
+    draw_scheduler.Record([this, frame, image_view, image_size, fsr_settings = fsr_settings,
+                           pp_settings = pp_settings](vk::CommandBuffer cmdbuf) {
+        const auto output_view =
+            fsr_pass.Render(cmdbuf, image_view, image_size, {frame->width, frame->height},
+                            fsr_settings, frame->is_hdr);
+        pp_pass.Render(cmdbuf, output_view, image_size, *frame, pp_settings);
+    });
 
     DebugState.game_resolution = {image_size.width, image_size.height};
     DebugState.output_resolution = {frame->width, frame->height};
@@ -773,8 +775,6 @@ Frame* Presenter::PrepareBlankFrame(bool present_thread) {
 
     auto& scheduler = present_thread ? present_scheduler : draw_scheduler;
     scheduler.EndRendering();
-
-    const auto cmdbuf = scheduler.CommandBuffer();
 
     constexpr vk::ImageSubresourceRange simple_subresource = {
         .aspectMask = vk::ImageAspectFlagBits::eColor,
@@ -803,34 +803,31 @@ Frame* Presenter::PrepareBlankFrame(bool present_thread) {
         .subresourceRange = simple_subresource,
     };
 
-    const vk::RenderingAttachmentInfo attachment = {
-        .imageView = frame->image_view,
-        .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
-        .loadOp = vk::AttachmentLoadOp::eClear,
-        .storeOp = vk::AttachmentStoreOp::eStore,
-    };
-    const vk::RenderingInfo rendering_info = {
-        .renderArea =
-            {
-                .extent = {frame->width, frame->height},
-            },
-        .layerCount = 1,
-        .colorAttachmentCount = 1u,
-        .pColorAttachments = &attachment,
-    };
-
-    cmdbuf.pipelineBarrier2(vk::DependencyInfo{
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &pre_barrier,
-    });
-
-    cmdbuf.beginRendering(rendering_info);
-    cmdbuf.endRendering();
-
-    cmdbuf.pipelineBarrier2(vk::DependencyInfo{
-        .imageMemoryBarrierCount = 1,
-        .pImageMemoryBarriers = &post_barrier,
-    });
+    scheduler.Record(
+        [pre_barrier, post_barrier, image_view = frame->image_view,
+         extent = vk::Extent2D{frame->width, frame->height}](vk::CommandBuffer cmdbuf) {
+            const vk::RenderingAttachmentInfo attachment = {
+                .imageView = image_view,
+                .imageLayout = vk::ImageLayout::eColorAttachmentOptimal,
+                .loadOp = vk::AttachmentLoadOp::eClear,
+                .storeOp = vk::AttachmentStoreOp::eStore,
+            };
+            cmdbuf.pipelineBarrier2(vk::DependencyInfo{
+                .imageMemoryBarrierCount = 1,
+                .pImageMemoryBarriers = &pre_barrier,
+            });
+            cmdbuf.beginRendering(vk::RenderingInfo{
+                .renderArea = {.extent = extent},
+                .layerCount = 1,
+                .colorAttachmentCount = 1u,
+                .pColorAttachments = &attachment,
+            });
+            cmdbuf.endRendering();
+            cmdbuf.pipelineBarrier2(vk::DependencyInfo{
+                .imageMemoryBarrierCount = 1,
+                .pImageMemoryBarriers = &post_barrier,
+            });
+        });
 
     // Flush frame creation commands.
     frame->ready_semaphore = scheduler.GetWorkSemaphore()->Handle();
@@ -879,132 +876,165 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
     const vk::ImageView swapchain_image_view = swapchain.ImageView();
 
     auto& scheduler = present_scheduler;
-    const auto cmdbuf = scheduler.CommandBuffer();
     const u32 capture_with_overlays_count = VideoCore::ConsumeWithOverlaysScreenshotRequests();
     std::optional<ScreenshotReadback> pending_screenshot;
 
-    if (EmulatorSettings.IsVkHostMarkersEnabled()) {
-        cmdbuf.beginDebugUtilsLabelEXT(vk::DebugUtilsLabelEXT{
-            .pLabelName = "Present",
-        });
-    }
+    // The present scheduler records immediately, so the command may capture by reference.
+    scheduler.Record([&](vk::CommandBuffer cmdbuf) {
+        if (EmulatorSettings.IsVkHostMarkersEnabled()) {
+            cmdbuf.beginDebugUtilsLabelEXT(vk::DebugUtilsLabelEXT{
+                .pLabelName = "Present",
+            });
+        }
 
-    {
-        auto* profiler_ctx = instance.GetProfilerContext();
-        TracyVkNamedZoneC(profiler_ctx, renderer_gpu_zone, cmdbuf, "Host frame",
-                          MarkersPalette::GpuMarkerColor, profiler_ctx != nullptr);
+        {
+            auto* profiler_ctx = instance.GetProfilerContext();
+            TracyVkNamedZoneC(profiler_ctx, renderer_gpu_zone, cmdbuf, "Host frame",
+                              MarkersPalette::GpuMarkerColor, profiler_ctx != nullptr);
 
-        const vk::Extent2D extent = swapchain.GetExtent();
-        const std::array pre_barriers{
-            vk::ImageMemoryBarrier{
-                .srcAccessMask = vk::AccessFlagBits::eNone,
-                .dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite,
-                .oldLayout = vk::ImageLayout::eUndefined,
-                .newLayout = vk::ImageLayout::eColorAttachmentOptimal,
-                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                .image = swapchain_image,
-                .subresourceRange{
-                    .aspectMask = vk::ImageAspectFlagBits::eColor,
-                    .baseMipLevel = 0,
-                    .levelCount = 1,
-                    .baseArrayLayer = 0,
-                    .layerCount = VK_REMAINING_ARRAY_LAYERS,
+            const vk::Extent2D extent = swapchain.GetExtent();
+            const std::array pre_barriers{
+                vk::ImageMemoryBarrier{
+                    .srcAccessMask = vk::AccessFlagBits::eNone,
+                    .dstAccessMask = vk::AccessFlagBits::eColorAttachmentWrite,
+                    .oldLayout = vk::ImageLayout::eUndefined,
+                    .newLayout = vk::ImageLayout::eColorAttachmentOptimal,
+                    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                    .image = swapchain_image,
+                    .subresourceRange{
+                        .aspectMask = vk::ImageAspectFlagBits::eColor,
+                        .baseMipLevel = 0,
+                        .levelCount = 1,
+                        .baseArrayLayer = 0,
+                        .layerCount = VK_REMAINING_ARRAY_LAYERS,
+                    },
                 },
-            },
-            vk::ImageMemoryBarrier{
-                .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite,
-                .dstAccessMask = vk::AccessFlagBits::eShaderRead,
-                .oldLayout = vk::ImageLayout::eGeneral,
-                .newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
-                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                .image = frame->image,
-                .subresourceRange{
-                    .aspectMask = vk::ImageAspectFlagBits::eColor,
-                    .baseMipLevel = 0,
-                    .levelCount = 1,
-                    .baseArrayLayer = 0,
-                    .layerCount = VK_REMAINING_ARRAY_LAYERS,
+                vk::ImageMemoryBarrier{
+                    .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite,
+                    .dstAccessMask = vk::AccessFlagBits::eShaderRead,
+                    .oldLayout = vk::ImageLayout::eGeneral,
+                    .newLayout = vk::ImageLayout::eShaderReadOnlyOptimal,
+                    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                    .image = frame->image,
+                    .subresourceRange{
+                        .aspectMask = vk::ImageAspectFlagBits::eColor,
+                        .baseMipLevel = 0,
+                        .levelCount = 1,
+                        .baseArrayLayer = 0,
+                        .layerCount = VK_REMAINING_ARRAY_LAYERS,
+                    },
                 },
-            },
-        };
+            };
 
-        bool swapchain_copied_for_screenshot = false;
+            bool swapchain_copied_for_screenshot = false;
 
-        cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eColorAttachmentOutput,
-                               vk::PipelineStageFlagBits::eColorAttachmentOutput |
-                                   vk::PipelineStageFlagBits::eFragmentShader,
-                               {}, {}, {}, pre_barriers);
+            cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eColorAttachmentOutput,
+                                   vk::PipelineStageFlagBits::eColorAttachmentOutput |
+                                       vk::PipelineStageFlagBits::eFragmentShader,
+                                   {}, {}, {}, pre_barriers);
 
-        { // Draw the game
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{0.0f});
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-            ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.0f, 0.0f, 0.0f, 1.0f));
-            ImGui::SetNextWindowDockID(dockId, ImGuiCond_Once);
-            if (ImGui::Begin("Display##game_display", nullptr, ImGuiWindowFlags_NoNav)) {
-                auto game_texture = frame->imgui_texture;
-                auto game_width = frame->width;
-                auto game_height = frame->height;
+            { // Draw the game
+                ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{0.0f});
+                ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+                ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+                ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.0f, 0.0f, 0.0f, 1.0f));
+                ImGui::SetNextWindowDockID(dockId, ImGuiCond_Once);
+                if (ImGui::Begin("Display##game_display", nullptr, ImGuiWindowFlags_NoNav)) {
+                    auto game_texture = frame->imgui_texture;
+                    auto game_width = frame->width;
+                    auto game_height = frame->height;
 
-                if (Libraries::SystemService::IsSplashVisible()) { // draw splash
-                    if (!splash_img.has_value()) {
-                        splash_img.emplace();
-                        const auto& splash_data = Common::ElfInfo::Instance().GetSplashData();
-                        if (!splash_data.empty()) {
-                            splash_img = ImGui::RefCountedTexture::DecodePngTexture(splash_data);
+                    if (Libraries::SystemService::IsSplashVisible()) { // draw splash
+                        if (!splash_img.has_value()) {
+                            splash_img.emplace();
+                            const auto& splash_data = Common::ElfInfo::Instance().GetSplashData();
+                            if (!splash_data.empty()) {
+                                splash_img =
+                                    ImGui::RefCountedTexture::DecodePngTexture(splash_data);
+                            }
+                        }
+                        if (auto& splash_image = this->splash_img.value()) {
+                            auto [im_id, width, height] = splash_image.GetTexture();
+                            game_texture = im_id;
+                            game_width = width;
+                            game_height = height;
                         }
                     }
-                    if (auto& splash_image = this->splash_img.value()) {
-                        auto [im_id, width, height] = splash_image.GetTexture();
-                        game_texture = im_id;
-                        game_width = width;
-                        game_height = height;
+
+                    ImVec2 contentArea = ImGui::GetContentRegionAvail();
+                    SetExpectedGameSize((s32)contentArea.x, (s32)contentArea.y);
+
+                    const auto imgRect =
+                        FitImage(game_width, game_height, (s32)contentArea.x, (s32)contentArea.y);
+                    ImVec2 offset{
+                        static_cast<float>(imgRect.offset.x),
+                        static_cast<float>(imgRect.offset.y),
+                    };
+                    ImVec2 size{
+                        static_cast<float>(imgRect.extent.width),
+                        static_cast<float>(imgRect.extent.height),
+                    };
+
+                    ImGui::SetCursorPos(ImGui::GetCursorStartPos() + offset);
+                    ImGui::Image(game_texture, size);
+
+                    if (EmulatorSettings.IsNullGPU()) {
+                        Core::Devtools::Layer::DrawNullGpuNotice();
                     }
                 }
-
-                ImVec2 contentArea = ImGui::GetContentRegionAvail();
-                SetExpectedGameSize((s32)contentArea.x, (s32)contentArea.y);
-
-                const auto imgRect =
-                    FitImage(game_width, game_height, (s32)contentArea.x, (s32)contentArea.y);
-                ImVec2 offset{
-                    static_cast<float>(imgRect.offset.x),
-                    static_cast<float>(imgRect.offset.y),
-                };
-                ImVec2 size{
-                    static_cast<float>(imgRect.extent.width),
-                    static_cast<float>(imgRect.extent.height),
-                };
-
-                ImGui::SetCursorPos(ImGui::GetCursorStartPos() + offset);
-                ImGui::Image(game_texture, size);
-
-                if (EmulatorSettings.IsNullGPU()) {
-                    Core::Devtools::Layer::DrawNullGpuNotice();
-                }
+                ImGui::End();
+                ImGui::PopStyleVar(3);
+                ImGui::PopStyleColor();
             }
-            ImGui::End();
-            ImGui::PopStyleVar(3);
-            ImGui::PopStyleColor();
-        }
-        ImGui::Core::Render(cmdbuf, swapchain_image_view, swapchain.GetExtent());
+            ImGui::Core::Render(cmdbuf, swapchain_image_view, swapchain.GetExtent());
 
-        if (capture_with_overlays_count > 0) {
-            auto& readback = pending_screenshot.emplace(
-                instance, ScreenshotKind::WithOverlays,
-                BuildScreenshotPaths(ScreenshotKind::WithOverlays, capture_with_overlays_count),
-                extent.width, extent.height,
-                swapchain.GetHDR() ? vk::Format::eA2B10G10R10UnormPack32
-                                   : swapchain.GetSurfaceFormat().format,
-                swapchain.GetHDR());
+            if (capture_with_overlays_count > 0) {
+                auto& readback = pending_screenshot.emplace(
+                    instance, ScreenshotKind::WithOverlays,
+                    BuildScreenshotPaths(ScreenshotKind::WithOverlays, capture_with_overlays_count),
+                    extent.width, extent.height,
+                    swapchain.GetHDR() ? vk::Format::eA2B10G10R10UnormPack32
+                                       : swapchain.GetSurfaceFormat().format,
+                    swapchain.GetHDR());
 
-            const vk::ImageMemoryBarrier to_transfer{
-                .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite,
-                .dstAccessMask = vk::AccessFlagBits::eTransferRead,
-                .oldLayout = vk::ImageLayout::eColorAttachmentOptimal,
-                .newLayout = vk::ImageLayout::eTransferSrcOptimal,
+                const vk::ImageMemoryBarrier to_transfer{
+                    .srcAccessMask = vk::AccessFlagBits::eColorAttachmentWrite,
+                    .dstAccessMask = vk::AccessFlagBits::eTransferRead,
+                    .oldLayout = vk::ImageLayout::eColorAttachmentOptimal,
+                    .newLayout = vk::ImageLayout::eTransferSrcOptimal,
+                    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                    .image = swapchain_image,
+                    .subresourceRange{
+                        .aspectMask = vk::ImageAspectFlagBits::eColor,
+                        .baseMipLevel = 0,
+                        .levelCount = 1,
+                        .baseArrayLayer = 0,
+                        .layerCount = VK_REMAINING_ARRAY_LAYERS,
+                    },
+                };
+
+                cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eColorAttachmentOutput,
+                                       vk::PipelineStageFlagBits::eTransfer,
+                                       vk::DependencyFlagBits::eByRegion, {}, {}, to_transfer);
+                CopyImageToReadback(cmdbuf, swapchain_image, vk::ImageLayout::eTransferSrcOptimal,
+                                    readback);
+                swapchain_copied_for_screenshot = true;
+            }
+
+            const vk::AccessFlags post_src_access_mask =
+                swapchain_copied_for_screenshot ? vk::AccessFlagBits::eTransferRead
+                                                : vk::AccessFlagBits::eColorAttachmentWrite;
+            const vk::ImageLayout post_old_layout = swapchain_copied_for_screenshot
+                                                        ? vk::ImageLayout::eTransferSrcOptimal
+                                                        : vk::ImageLayout::eColorAttachmentOptimal;
+            const vk::ImageMemoryBarrier post_barrier{
+                .srcAccessMask = post_src_access_mask,
+                .dstAccessMask = vk::AccessFlagBits::eNone,
+                .oldLayout = post_old_layout,
+                .newLayout = vk::ImageLayout::ePresentSrcKHR,
                 .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                 .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                 .image = swapchain_image,
@@ -1016,48 +1046,18 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
                     .layerCount = VK_REMAINING_ARRAY_LAYERS,
                 },
             };
+            cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eAllCommands,
+                                   vk::PipelineStageFlagBits::eAllCommands,
+                                   vk::DependencyFlagBits::eByRegion, {}, {}, post_barrier);
 
-            cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eColorAttachmentOutput,
-                                   vk::PipelineStageFlagBits::eTransfer,
-                                   vk::DependencyFlagBits::eByRegion, {}, {}, to_transfer);
-            CopyImageToReadback(cmdbuf, swapchain_image, vk::ImageLayout::eTransferSrcOptimal,
-                                readback);
-            swapchain_copied_for_screenshot = true;
+            if (profiler_ctx) {
+                TracyVkCollect(profiler_ctx, cmdbuf);
+            }
         }
-
-        const vk::AccessFlags post_src_access_mask =
-            swapchain_copied_for_screenshot ? vk::AccessFlagBits::eTransferRead
-                                            : vk::AccessFlagBits::eColorAttachmentWrite;
-        const vk::ImageLayout post_old_layout = swapchain_copied_for_screenshot
-                                                    ? vk::ImageLayout::eTransferSrcOptimal
-                                                    : vk::ImageLayout::eColorAttachmentOptimal;
-        const vk::ImageMemoryBarrier post_barrier{
-            .srcAccessMask = post_src_access_mask,
-            .dstAccessMask = vk::AccessFlagBits::eNone,
-            .oldLayout = post_old_layout,
-            .newLayout = vk::ImageLayout::ePresentSrcKHR,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image = swapchain_image,
-            .subresourceRange{
-                .aspectMask = vk::ImageAspectFlagBits::eColor,
-                .baseMipLevel = 0,
-                .levelCount = 1,
-                .baseArrayLayer = 0,
-                .layerCount = VK_REMAINING_ARRAY_LAYERS,
-            },
-        };
-        cmdbuf.pipelineBarrier(vk::PipelineStageFlagBits::eAllCommands,
-                               vk::PipelineStageFlagBits::eAllCommands,
-                               vk::DependencyFlagBits::eByRegion, {}, {}, post_barrier);
-
-        if (profiler_ctx) {
-            TracyVkCollect(profiler_ctx, cmdbuf);
+        if (EmulatorSettings.IsVkHostMarkersEnabled()) {
+            cmdbuf.endDebugUtilsLabelEXT();
         }
-    }
-    if (EmulatorSettings.IsVkHostMarkersEnabled()) {
-        cmdbuf.endDebugUtilsLabelEXT();
-    }
+    });
 
     // Flush vulkan commands.
     if (pending_screenshot) {
