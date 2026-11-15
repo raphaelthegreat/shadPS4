@@ -236,6 +236,7 @@ private:
         SyncRangeList written;
     };
     std::deque<SyncBatch> sync_batches;
+    SyncRangeList pending_written;
     std::mutex batch_mutex;
     std::atomic<u64> retired_seq{};
     u64 last_seq{};

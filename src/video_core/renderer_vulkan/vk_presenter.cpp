@@ -637,6 +637,7 @@ Frame* Presenter::PrepareLastFrame() {
     });
 
     // Flush frame creation commands.
+    frame->ready_scheduler = &scheduler;
     frame->ready_semaphore = scheduler.GetWorkSemaphore()->Handle();
     frame->ready_tick = scheduler.CurrentTick();
     SubmitInfo info{};
@@ -762,6 +763,7 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
     }
 
     // Flush frame creation commands.
+    frame->ready_scheduler = &draw_scheduler;
     frame->ready_semaphore = draw_scheduler.GetWorkSemaphore()->Handle();
     frame->ready_tick = draw_scheduler.CurrentTick();
     SubmitInfo info{};
@@ -830,6 +832,7 @@ Frame* Presenter::PrepareBlankFrame(bool present_thread) {
         });
 
     // Flush frame creation commands.
+    frame->ready_scheduler = &scheduler;
     frame->ready_semaphore = scheduler.GetWorkSemaphore()->Handle();
     frame->ready_tick = scheduler.CurrentTick();
     SubmitInfo info{};
@@ -1066,6 +1069,7 @@ void Presenter::Present(Frame* frame, bool is_reusing_frame, bool is_game_frame)
         });
     }
 
+    frame->ready_scheduler->WaitSubmitted(frame->ready_tick);
     SubmitInfo info{};
     info.AddWait(swapchain.GetImageAcquiredSemaphore());
     info.AddWait(frame->ready_semaphore, frame->ready_tick);

@@ -32,6 +32,7 @@ struct Frame {
     vk::Image image;
     vk::ImageView image_view;
     vk::Fence present_done;
+    Scheduler* ready_scheduler;
     vk::Semaphore ready_semaphore;
     u64 ready_tick;
     bool is_hdr{false};

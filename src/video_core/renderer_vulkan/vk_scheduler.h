@@ -389,6 +389,9 @@ public:
     /// Waits for the worker thread to finish executing everything recorded so far.
     void WaitWorker();
 
+    /// Waits until the batch signaling the given tick has been submitted to the queue.
+    void WaitSubmitted(u64 tick);
+
     /// Sends currently recorded work to the worker thread.
     void DispatchWork();
 
@@ -681,6 +684,7 @@ private:
     std::unique_ptr<CommandChunk> chunk;
     u64 current_chunk_id{1};
     std::atomic<u64> executed_chunk_id{};
+    std::atomic<u64> submitted_tick{};
     std::queue<std::unique_ptr<CommandChunk>> work_queue;
     std::vector<std::unique_ptr<CommandChunk>> chunk_reserve;
     std::mutex work_mutex;

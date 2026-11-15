@@ -2,8 +2,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <cstring>
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 
 #include "common/assert.h"
+#include "common/logging/log.h"
 #include "common/thread.h"
 #include "video_core/renderer_vulkan/vk_instance.h"
 #include "video_core/renderer_vulkan/vk_label_signaler.h"
@@ -83,6 +87,9 @@ void LabelSignaler::WaitForProgress(std::chrono::microseconds timeout) {
 
 void LabelSignaler::SignalThread(std::stop_token stoken) {
     Common::SetCurrentThreadName("shadPS4:GpuLabelSignaler");
+#ifdef __linux__
+    prctl(PR_SET_TIMERSLACK, 1);
+#endif
 
     while (!stoken.stop_requested()) {
         PendingSignal* signal;
@@ -102,7 +109,6 @@ void LabelSignaler::SignalThread(std::stop_token stoken) {
             on_retire(u64{signal->retire_id});
         }
         signal->func();
-
         {
             std::scoped_lock lk{mutex};
             retired_marker.store(signal->marker, std::memory_order_release);
@@ -114,13 +120,18 @@ void LabelSignaler::SignalThread(std::stop_token stoken) {
 
 bool LabelSignaler::WaitSignal(const PendingSignal& signal, std::stop_token stoken) {
     auto* semaphore = scheduler.GetWorkSemaphore();
-    const auto poll_interval =
-        marker_buffer ? std::chrono::nanoseconds{MarkerPollInterval} : TickPollInterval;
     while (!stoken.stop_requested()) {
-        if (IsMarkerReached(signal.slot, signal.marker) ||
-            semaphore->WaitFor(signal.tick, poll_interval)) {
+        if (!marker_buffer) {
+            if (semaphore->WaitFor(signal.tick, TickPollInterval)) {
+                return true;
+            }
+            continue;
+        }
+        if (IsMarkerReached(signal.slot, signal.marker) || semaphore->IsFree(signal.tick)) {
             return true;
         }
+        // Driver semaphore waits with short timeouts may busy spin, sleep between polls instead
+        Common::AccurateSleep(MarkerPollInterval, nullptr, false);
     }
     return false;
 }

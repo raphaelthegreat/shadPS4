@@ -217,9 +217,6 @@ void Liverpool::Process(std::stop_token stoken) {
             task.resume();
 
             if (task.done()) {
-                if (rasterizer) {
-                    rasterizer->Flush();
-                }
                 task.destroy();
 
                 std::scoped_lock lock{queue.m_access};
@@ -842,14 +839,21 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                     break;
                 }
                 rasterizer->OnFence();
+                auto eop = *event_eop;
+                const auto data_sel = eop.data_sel.Value();
+                if (data_sel == DataSelect::GpuClock64 || data_sel == DataSelect::PerfCounter) {
+                    const u64 timestamp =
+                        data_sel == DataSelect::GpuClock64 ? GetGpuClock64() : GetGpuPerfCounter();
+                    eop.data_sel.Assign(DataSelect::Data64);
+                    eop.data_lo = static_cast<u32>(timestamp);
+                    eop.data_hi = static_cast<u32>(timestamp >> 32);
+                }
                 rasterizer->GetLabelSignaler().Signal(
-                    static_cast<EventType>(event_eop->event_type.Value()),
-                    static_cast<EventIndex>(event_eop->event_index.Value()),
-                    [event_eop = *event_eop, signal_irq] {
-                        event_eop.SignalFence(WriteLabel, signal_irq);
-                    },
-                    PendingLabelWrite(reinterpret_cast<VAddr>(event_eop->Address<u32>()),
-                                      event_eop->data_sel.Value(), event_eop->DataQWord()));
+                    static_cast<EventType>(eop.event_type.Value()),
+                    static_cast<EventIndex>(eop.event_index.Value()),
+                    [eop, signal_irq] { eop.SignalFence(WriteLabel, signal_irq); },
+                    PendingLabelWrite(reinterpret_cast<VAddr>(eop.Address<u32>()),
+                                      eop.data_sel.Value(), eop.DataQWord()));
                 break;
             }
             case PM4ItOpcode::DmaData: {
@@ -1378,7 +1382,7 @@ bool Liverpool::PollWaitRegMem(const PM4CmdWaitRegMem* wait_reg_mem, u32& num_po
         if (label_signaler.NeedsFlush()) {
             rasterizer->Flush();
         }
-        label_signaler.WaitForProgress(LabelProgressTimeout);
+        // label_signaler.WaitForProgress(LabelProgressTimeout);
     }
     return false;
 }

@@ -271,12 +271,29 @@ void VideoOutDriver::Flip(const Request& req) {
 
     // Reset prev flip label
     if (port->prev_index != -1) {
-        ASSERT_MSG(port->buffer_labels[port->prev_index] == 1, "Out of order flip IRQ");
-        port->buffer_labels[port->prev_index] = 0;
-        port->SignalVoLabel();
+        port->pending_label_resets.push_back({port->prev_index, port->prev_label_marker});
     }
     // save to prev buf index
     port->prev_index = req.index;
+    port->prev_label_marker = req.label_marker;
+    ResetRetiredLabels(port);
+}
+
+void VideoOutDriver::ResetRetiredLabels(VideoOutPort* port) {
+    const auto& label_signaler = presenter->GetRasterizer().GetLabelSignaler();
+    bool signaled = false;
+    while (!port->pending_label_resets.empty()) {
+        const auto [index, marker] = port->pending_label_resets.front();
+        if (!label_signaler.IsRetired(marker)) {
+            break;
+        }
+        port->pending_label_resets.pop_front();
+        port->buffer_labels[index] = 0;
+        signaled = true;
+    }
+    if (signaled) {
+        port->SignalVoLabel();
+    }
 }
 
 void VideoOutDriver::DrawBlankFrame() {
@@ -350,8 +367,7 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
 
     const auto receive_request = [this] -> Request {
         std::scoped_lock lk{mutex};
-        if (!requests.empty() && presenter->GetRasterizer().GetLabelSignaler().IsRetired(
-                                     requests.front().label_marker)) {
+        if (!requests.empty()) {
             const auto request = requests.front();
             requests.pop();
             return request;
@@ -367,6 +383,8 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
             timer.End();
             continue;
         }
+
+        ResetRetiredLabels(&main_port);
 
         // Check if it's time to take a request.
         auto& vblank_status = main_port.vblank_status;

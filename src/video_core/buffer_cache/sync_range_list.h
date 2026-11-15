@@ -4,6 +4,7 @@
 #pragma once
 
 #include <algorithm>
+#include <span>
 #include <vector>
 
 #include "common/types.h"
@@ -41,9 +42,17 @@ public:
     }
 
     bool Overlaps(VAddr start, VAddr end) {
-        Normalize();
-        const auto it = std::ranges::upper_bound(ranges, start, {}, &Range::end);
-        return it != ranges.end() && it->start < end;
+        if (ranges.size() - num_sorted > MinUnsortedRanges) {
+            Normalize();
+        }
+        const auto sorted = std::span{ranges}.first(num_sorted);
+        const auto it = std::ranges::upper_bound(sorted, start, {}, &Range::end);
+        if (it != sorted.end() && it->start < end) {
+            return true;
+        }
+        return std::ranges::any_of(std::span{ranges}.subspan(num_sorted), [&](const Range& range) {
+            return range.start < end && start < range.end;
+        });
     }
 
     void ForEach(auto&& func) {

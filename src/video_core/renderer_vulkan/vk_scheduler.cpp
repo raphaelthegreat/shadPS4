@@ -193,6 +193,14 @@ void Scheduler::DispatchWork() {
     AcquireNewChunk();
 }
 
+void Scheduler::WaitSubmitted(u64 tick) {
+    u64 submitted = submitted_tick.load(std::memory_order_acquire);
+    while (submitted < tick) {
+        submitted_tick.wait(submitted, std::memory_order_acquire);
+        submitted = submitted_tick.load(std::memory_order_acquire);
+    }
+}
+
 void Scheduler::WaitChunk(u64 id) {
     if (!use_worker_thread) {
         return;
@@ -344,6 +352,13 @@ void Scheduler::SubmitCommandBuffer(SubmitInfo& info) {
     ImGui::Core::TextureManager::Submit();
     auto submit_result = instance.GetGraphicsQueue().submit(submit_info, info.fence);
     ASSERT_MSG(submit_result != vk::Result::eErrorDeviceLost, "Device lost during submit");
+
+    for (u32 i = 0; i < info.num_signal_semas; ++i) {
+        if (info.signal_semas[i] == work_semaphore.Handle()) {
+            submitted_tick.store(info.signal_ticks[i], std::memory_order_release);
+            submitted_tick.notify_all();
+        }
+    }
 }
 
 void Scheduler::SubmitExecution(SubmitInfo& info) {

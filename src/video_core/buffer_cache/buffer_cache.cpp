@@ -115,8 +115,7 @@ BufferCache::BufferCache(const Vulkan::Instance& instance_, Vulkan::Scheduler& s
                                 vk::MemoryPropertyFlagBits::eHostCoherent;
     for (u32 i = 0; i < mem_props.memoryTypeCount; ++i) {
         const auto& type = mem_props.memoryTypes[i];
-        if (((reqs.memoryTypeBits >> i) & 1) && (type.propertyFlags & RebarFlags) == RebarFlags &&
-            type.heapIndex == vram_heap) {
+        if ((type.propertyFlags & RebarFlags) == RebarFlags) {
             arena_memory_type_index = i;
             rebar = true;
             break;
@@ -255,7 +254,8 @@ void BufferCache::ReadMemoryDirect(VAddr device_addr, u64 size) {
 
 void BufferCache::WaitPendingWrites(VAddr start, VAddr end) {
     if (!sync_written.Overlaps(start, end) &&
-        !FindPendingBatch(start, end, retired_seq.load(std::memory_order_acquire))) {
+        (!pending_written.Overlaps(start, end) ||
+         !FindPendingBatch(start, end, retired_seq.load(std::memory_order_acquire)))) {
         return;
     }
     const u64 tick = scheduler.CurrentTick();
@@ -381,7 +381,8 @@ bool BufferCache::IsRegionGpuModified(VAddr addr, size_t size) {
     }
     const VAddr start = Common::AlignDown(addr, BYTES_PER_PAGE);
     const VAddr end = Common::AlignUp(addr + size, BYTES_PER_PAGE);
-    return sync_written.Overlaps(start, end) || FindPendingBatch(start, end, retired);
+    return sync_written.Overlaps(start, end) ||
+           (pending_written.Overlaps(start, end) && FindPendingBatch(start, end, retired));
 }
 
 BufferCache::SyncBatch* BufferCache::FindPendingBatch(VAddr start, VAddr end, u64 retired) {
@@ -545,9 +546,15 @@ void BufferCache::PopRetiredBatches() {
     if (sync_batches.front().seq > retired) {
         return;
     }
-    std::scoped_lock lk{batch_mutex};
-    while (!sync_batches.empty() && sync_batches.front().seq <= retired) {
-        sync_batches.pop_front();
+    {
+        std::scoped_lock lk{batch_mutex};
+        while (!sync_batches.empty() && sync_batches.front().seq <= retired) {
+            sync_batches.pop_front();
+        }
+    }
+    pending_written.Clear();
+    for (auto& batch : sync_batches) {
+        batch.written.ForEach([this](VAddr start, VAddr end) { pending_written.Add(start, end); });
     }
 }
 
@@ -583,6 +590,7 @@ void BufferCache::UploadSyncBatch() {
         std::scoped_lock lk{batch_mutex};
         sync_written.Normalize();
         sync_batches.emplace_back(++last_seq, 0, sync_written);
+        sync_written.ForEach([this](VAddr start, VAddr end) { pending_written.Add(start, end); });
     }
     sync_written.ForEach([&](VAddr start, VAddr end) {
         memory_tracker->ForEachUploadRange(start, end - start, add_copy);
