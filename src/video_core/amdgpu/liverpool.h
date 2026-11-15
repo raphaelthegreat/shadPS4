@@ -7,6 +7,7 @@
 #include <coroutine>
 #include <exception>
 #include <mutex>
+#include <optional>
 #include <semaphore>
 #include <span>
 #include <thread>
@@ -196,6 +197,7 @@ private:
     void ProcessCeQueue();
     void Process(std::stop_token stoken);
     void HandleGetLodStats(const PM4CmdGetLodStats* get_lod);
+    bool PollWaitRegMem(const PM4CmdWaitRegMem* wait_reg_mem, u32& num_polls);
 
     struct GpuQueue {
         std::mutex m_access{};

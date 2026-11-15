@@ -8,6 +8,7 @@
 #include "core/libraries/videoout/video_out.h"
 
 #include <condition_variable>
+#include <deque>
 #include <mutex>
 #include <queue>
 
@@ -33,6 +34,8 @@ struct VideoOutPort {
     std::condition_variable vblank_cv;
     int flip_rate = 0;
     int prev_index = -1;
+    u32 prev_label_marker = 0;
+    std::deque<std::pair<s32, u32>> pending_label_resets;
     bool is_open = false;
     bool is_hdr = false;
 
@@ -99,6 +102,7 @@ private:
         s64 flip_arg;
         s32 index;
         bool eop;
+        u32 label_marker;
 
         operator bool() const noexcept {
             return frame != nullptr;
@@ -106,6 +110,7 @@ private:
     };
 
     void Flip(const Request& req);
+    void ResetRetiredLabels(VideoOutPort* port);
     void DrawBlankFrame(); // Video port out not open
     void DrawLastFrame();  // Used when there is no flip request
     void SubmitFlipInternal(VideoOutPort* port, s32 index, s64 flip_arg, bool is_eop = false);

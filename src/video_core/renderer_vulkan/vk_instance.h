@@ -213,6 +213,11 @@ public:
         return amd_shader_trinary_minmax;
     }
 
+    /// Returns true when host query pool resets are supported.
+    bool IsHostQueryResetSupported() const {
+        return vk12_features.hostQueryReset;
+    }
+
     /// Returns true when the shaderBufferFloat32AtomicMinMax feature of
     /// VK_EXT_shader_atomic_float2 is supported.
     bool IsShaderAtomicFloatBuffer32MinMaxSupported() const {

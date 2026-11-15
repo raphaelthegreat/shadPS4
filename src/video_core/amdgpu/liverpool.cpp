@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Copyright 2024-2026 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <optional>
 #include <boost/preprocessor/stringize.hpp>
 
 #include "common/assert.h"
@@ -51,6 +52,59 @@ static const char* acb_task_name[] = NAME_ARRAY(ACB_TASK, MAX_NAMES);
 #define RESUME_ASC(task, id) RESUME(task, acb_task_name[id])
 
 std::array<u8, 48_KB> Liverpool::ConstantEngine::constants_heap;
+
+static constexpr u32 MaxWaitRegMemPolls = 32;
+
+static void WriteLabel(void* address, u64 data, u32 num_bytes) {
+    auto* memory = Core::Memory::Instance();
+    ASSERT(memory->TryWriteBacking(address, &data, num_bytes));
+}
+
+static std::optional<LabelWrite> PendingLabelWrite(VAddr address, DataSelect data_sel, u64 data,
+                                                   u32 num_dw = 0) {
+    switch (data_sel) {
+    case DataSelect::None:
+        return std::nullopt;
+    case DataSelect::Data32Low:
+        return LabelWrite{address, static_cast<u32>(data), sizeof(u32)};
+    case DataSelect::Data64:
+        return LabelWrite{address, data, sizeof(u64)};
+    case DataSelect::GdsMemStore:
+        return LabelWrite{address, std::nullopt, num_dw * 4};
+    default:
+        return LabelWrite{address, std::nullopt, sizeof(u64)};
+    }
+}
+
+static void WriteData(Vulkan::Rasterizer* rasterizer, const PM4CmdWriteData* write_data) {
+    ASSERT(write_data->dst_sel.Value() == 2 || write_data->dst_sel.Value() == 5);
+    ASSERT(!write_data->wr_one_addr.Value());
+    const u32 data_size = write_data->Size();
+    auto* address = write_data->Address<u8*>();
+    const bool is_guest = Core::Memory::Instance()->IsValidMapping(VAddr(address), data_size);
+    const auto write = [is_guest](void* address, const void* data, u32 data_size) {
+        if (!is_guest || !Core::Memory::Instance()->TryWriteBacking(address, data, data_size)) {
+            std::memcpy(address, data, data_size);
+        }
+    };
+    if (!rasterizer) {
+        write(address, write_data->data, data_size);
+        return;
+    }
+    rasterizer->OnFence();
+    std::optional<u64> value;
+    if (data_size <= sizeof(u64)) {
+        value.emplace();
+        std::memcpy(&*value, write_data->data, data_size);
+    }
+    rasterizer->GetLabelSignaler().Signal(
+        EventType::BottomOfPipeTs, EventIndex::EopReserved,
+        [write, address,
+         data = std::vector<u32>(write_data->data, write_data->data + data_size / 4)] {
+            write(address, data.data(), data.size() * sizeof(u32));
+        },
+        LabelWrite{reinterpret_cast<VAddr>(address), value, data_size});
+}
 
 static std::span<const u32> NextPacket(std::span<const u32> span, size_t offset) {
     if (offset > span.size()) {
@@ -174,14 +228,19 @@ void Liverpool::Process(std::stop_token stoken) {
 
         if (submit_done) {
             VideoCore::EndCapture();
-            if (rasterizer) {
-                rasterizer->OnSubmit();
-                rasterizer->Flush();
-            }
             submit_done = false;
+            if (!rasterizer) {
+                Platform::IrqC::Instance()->Signal(Platform::InterruptId::GpuIdle);
+                continue;
+            }
+            rasterizer->OnSubmit();
+            rasterizer->GetLabelSignaler().Signal(
+                EventType::BottomOfPipeTs, EventIndex::EopReserved,
+                [] { Platform::IrqC::Instance()->Signal(Platform::InterruptId::GpuIdle); });
+            rasterizer->Flush();
+        } else if (rasterizer && rasterizer->GetLabelSignaler().NeedsFlush()) {
+            rasterizer->Flush();
         }
-
-        Platform::IrqC::Instance()->Signal(Platform::InterruptId::GpuIdle);
     }
 }
 
@@ -721,34 +780,55 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
             }
             case PM4ItOpcode::EventWriteEos: {
                 const auto* event_eos = reinterpret_cast<const PM4CmdEventWriteEos*>(header);
-                if (rasterizer) {
-                    rasterizer->OnFence();
+                if (!rasterizer) {
+                    event_eos->SignalFence(WriteLabel);
+                    break;
                 }
-                event_eos->SignalFence([](void* address, u64 data, u32 num_bytes) {
-                    auto* memory = Core::Memory::Instance();
-                    ASSERT(memory->TryWriteBacking(address, &data, num_bytes));
-                });
+                rasterizer->OnFence();
+                const auto event_type = static_cast<EventType>(event_eos->event_type.Value());
+                const auto event_index = static_cast<EventIndex>(event_eos->event_index.Value());
+                const auto address = reinterpret_cast<VAddr>(event_eos->Address());
                 if (event_eos->command == PM4CmdEventWriteEos::Command::GdsStore) {
                     ASSERT(event_eos->size == 1);
-                    if (rasterizer) {
-                        rasterizer->Finish();
-                        const u32 value = rasterizer->ReadDataFromGds(event_eos->gds_index);
-                        *event_eos->Address() = value;
-                    }
+                    rasterizer->Finish();
+                    const u32 value = rasterizer->ReadDataFromGds(event_eos->gds_index);
+                    rasterizer->GetLabelSignaler().Signal(
+                        event_type, event_index,
+                        [address, value] { *reinterpret_cast<u32*>(address) = value; },
+                        LabelWrite{address, value, sizeof(u32)});
+                } else {
+                    rasterizer->GetLabelSignaler().Signal(
+                        event_type, event_index,
+                        [event_eos = *event_eos] { event_eos.SignalFence(WriteLabel); },
+                        LabelWrite{address, event_eos->DataDWord(), sizeof(u32)});
                 }
                 break;
             }
             case PM4ItOpcode::EventWriteEop: {
                 const auto* event_eop = reinterpret_cast<const PM4CmdEventWriteEop*>(header);
-                if (rasterizer) {
-                    rasterizer->OnFence();
+                const auto signal_irq = [] {
+                    Platform::IrqC::Instance()->Signal(Platform::InterruptId::GfxEop);
+                };
+                if (!rasterizer) {
+                    event_eop->SignalFence(WriteLabel, signal_irq);
+                    break;
                 }
-                event_eop->SignalFence(
-                    [](void* address, u64 data, u32 num_bytes) {
-                        auto* memory = Core::Memory::Instance();
-                        ASSERT(memory->TryWriteBacking(address, &data, num_bytes));
-                    },
-                    [] { Platform::IrqC::Instance()->Signal(Platform::InterruptId::GfxEop); });
+                rasterizer->OnFence();
+                auto eop = *event_eop;
+                const auto data_sel = eop.data_sel.Value();
+                if (data_sel == DataSelect::GpuClock64 || data_sel == DataSelect::PerfCounter) {
+                    const u64 timestamp =
+                        data_sel == DataSelect::GpuClock64 ? GetGpuClock64() : GetGpuPerfCounter();
+                    eop.data_sel.Assign(DataSelect::Data64);
+                    eop.data_lo = static_cast<u32>(timestamp);
+                    eop.data_hi = static_cast<u32>(timestamp >> 32);
+                }
+                rasterizer->GetLabelSignaler().Signal(
+                    static_cast<EventType>(eop.event_type.Value()),
+                    static_cast<EventIndex>(eop.event_index.Value()),
+                    [eop, signal_irq] { eop.SignalFence(WriteLabel, signal_irq); },
+                    PendingLabelWrite(reinterpret_cast<VAddr>(eop.Address<u32>()),
+                                      eop.data_sel.Value(), eop.DataQWord()));
                 break;
             }
             case PM4ItOpcode::DmaData: {
@@ -783,24 +863,13 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                                            dma_data->SrcAddress<VAddr>(), dma_data->NumBytes(),
                                            false, false);
                 } else {
-                    UNREACHABLE_MSG("WriteData src_sel = {}, dst_sel = {}", u32(dma_data->src_sel),
+                    UNREACHABLE_MSG("DmaData src_sel = {}, dst_sel = {}", u32(dma_data->src_sel),
                                     u32(dma_data->dst_sel));
                 }
                 break;
             }
             case PM4ItOpcode::WriteData: {
-                const auto* write_data = reinterpret_cast<const PM4CmdWriteData*>(header);
-                ASSERT(write_data->dst_sel.Value() == 2 || write_data->dst_sel.Value() == 5);
-                const u32 data_size = (header->type3.count.Value() - 2) * 4;
-                u64* address = write_data->Address<u64*>();
-                if (!write_data->wr_one_addr.Value()) {
-                    if (rasterizer) {
-                        rasterizer->OnFence();
-                    }
-                    std::memcpy(address, write_data->data, data_size);
-                } else {
-                    UNREACHABLE();
-                }
+                WriteData(rasterizer, reinterpret_cast<const PM4CmdWriteData*>(header));
                 break;
             }
             case PM4ItOpcode::CopyData: {
@@ -849,10 +918,14 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                 const u64* wait_addr = wait_reg_mem->Address<u64*>();
                 if (vo_port->IsVoLabel(wait_addr) &&
                     num_submits == mapped_queues[GfxQueueId].submits.size()) {
+                    if (rasterizer && rasterizer->GetLabelSignaler().NeedsFlush()) {
+                        rasterizer->Flush();
+                    }
                     vo_port->WaitVoLabel([&] { return wait_reg_mem->Test(regs.reg_array); });
                     break;
                 }
-                while (!wait_reg_mem->Test(regs.reg_array)) {
+                u32 num_polls{};
+                while (!PollWaitRegMem(wait_reg_mem, num_polls)) {
                     YIELD_GFX();
                 }
                 break;
@@ -1094,7 +1167,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
                     rasterizer->CopyBuffer(dst_addr, src_addr, num_bytes, false, false);
                 }
             } else {
-                UNREACHABLE_MSG("WriteData src_sel = {}, dst_sel = {}", u32(dma_data->src_sel),
+                UNREACHABLE_MSG("DmaData src_sel = {}, dst_sel = {}", u32(dma_data->src_sel),
                                 u32(dma_data->dst_sel));
             }
             break;
@@ -1180,17 +1253,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
             break;
         }
         case PM4ItOpcode::WriteData: {
-            const auto* write_data = reinterpret_cast<const PM4CmdWriteData*>(header);
-            ASSERT(write_data->dst_sel.Value() == 2 || write_data->dst_sel.Value() == 5);
-            const u32 data_size = (header->type3.count.Value() - 2) * 4;
-            if (!write_data->wr_one_addr.Value()) {
-                if (rasterizer) {
-                    rasterizer->OnFence();
-                }
-                std::memcpy(write_data->Address<void*>(), write_data->data, data_size);
-            } else {
-                UNREACHABLE();
-            }
+            WriteData(rasterizer, reinterpret_cast<const PM4CmdWriteData*>(header));
             break;
         }
         case PM4ItOpcode::MemSemaphore: {
@@ -1208,23 +1271,37 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
         case PM4ItOpcode::WaitRegMem: {
             const auto* wait_reg_mem = reinterpret_cast<const PM4CmdWaitRegMem*>(header);
             ASSERT(wait_reg_mem->engine.Value() == PM4CmdWaitRegMem::Engine::Me);
-            while (!wait_reg_mem->Test(regs.reg_array)) {
+            u32 num_polls{};
+            while (!PollWaitRegMem(wait_reg_mem, num_polls)) {
                 YIELD_ASC(vqid);
             }
             break;
         }
         case PM4ItOpcode::ReleaseMem: {
             const auto* release_mem = reinterpret_cast<const PM4CmdReleaseMem*>(header);
-            if (rasterizer) {
-                rasterizer->OnFence();
+            const auto signal_irq = [pipe_id = queue.pipe_id] {
+                Platform::IrqC::Instance()->Signal(static_cast<Platform::InterruptId>(pipe_id));
+            };
+            const auto gds_to_mem = [this](VAddr dst, u16 gds_index, u16 num_dwords) {
+                rasterizer->CopyBuffer(dst, gds_index, num_dwords * sizeof(u32), false, true);
+            };
+            if (!rasterizer) {
+                release_mem->SignalFence(signal_irq, gds_to_mem);
+                break;
             }
-            release_mem->SignalFence(
-                [pipe_id = queue.pipe_id] {
-                    Platform::IrqC::Instance()->Signal(static_cast<Platform::InterruptId>(pipe_id));
+            rasterizer->OnFence();
+            if (release_mem->data_sel == DataSelect::GdsMemStore) {
+                gds_to_mem(release_mem->Address<VAddr>(), release_mem->gds_index,
+                           release_mem->num_dw);
+            }
+            rasterizer->GetLabelSignaler().Signal(
+                static_cast<EventType>(release_mem->event_type.Value()),
+                static_cast<EventIndex>(release_mem->event_index.Value()),
+                [release_mem = *release_mem, signal_irq] {
+                    release_mem.SignalFence(signal_irq, [](VAddr, u16, u16) {});
                 },
-                [this](VAddr dst, u16 gds_index, u16 num_dwords) {
-                    rasterizer->CopyBuffer(dst, gds_index, num_dwords * sizeof(u32), false, true);
-                });
+                PendingLabelWrite(release_mem->Address<VAddr>(), release_mem->data_sel.Value(),
+                                  release_mem->DataQWord(), release_mem->num_dw));
             break;
         }
         case PM4ItOpcode::EventWrite: {
@@ -1255,6 +1332,28 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
 void Liverpool::HandleGetLodStats(const PM4CmdGetLodStats* get_lod) {
     LOG_DEBUG(Render, "IT_GET_LOD_STATS: buffer = {:#x}, offset = {:#x}", get_lod->Address(),
               get_lod->DataOffset());
+}
+
+bool Liverpool::PollWaitRegMem(const PM4CmdWaitRegMem* wait_reg_mem, u32& num_polls) {
+    if (!rasterizer || wait_reg_mem->mem_space != PM4CmdWaitRegMem::MemSpace::Memory) {
+        return wait_reg_mem->Test(regs.reg_array);
+    }
+
+    auto& label_signaler = rasterizer->GetLabelSignaler();
+    const auto pending_result = label_signaler.TestPendingLabel(
+        wait_reg_mem->Address<VAddr>(), [&](u32 value) { return wait_reg_mem->Compare(value); });
+    if (pending_result ? *pending_result : wait_reg_mem->Test(regs.reg_array)) {
+        return true;
+    }
+
+    if (++num_polls >= MaxWaitRegMemPolls) {
+        num_polls = 0;
+        if (label_signaler.NeedsFlush()) {
+            rasterizer->Flush();
+        }
+        label_signaler.WaitForProgress();
+    }
+    return false;
 }
 
 Liverpool::CmdBuffer Liverpool::CopyCmdBuffers(std::span<const u32> dcb, std::span<const u32> ccb) {

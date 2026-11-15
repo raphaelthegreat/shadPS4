@@ -434,7 +434,8 @@ struct GPUSettings {
     Setting<bool> userfaultfd{false};
     Setting<bool> inline_fetch_shader{false};
     Setting<bool> fast_shader_math{false};
-    Setting<u32> submit_draw_interval{0};
+    Setting<u32> submit_draw_interval{200};
+    Setting<bool> host_gpu_sync{false};
 
     std::vector<OverrideItem> GetOverrideableFields() const {
         return std::vector<OverrideItem>{
@@ -461,6 +462,7 @@ struct GPUSettings {
             make_override<GPUSettings>("inline_fetch_shader", &GPUSettings::inline_fetch_shader),
             make_override<GPUSettings>("fast_shader_math", &GPUSettings::fast_shader_math),
             make_override<GPUSettings>("submit_draw_interval", &GPUSettings::submit_draw_interval),
+            make_override<GPUSettings>("host_gpu_sync", &GPUSettings::host_gpu_sync),
         };
     }
 };
@@ -471,7 +473,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(GPUSettings, window_width, window_height, int
                                    vblank_frequency, full_screen, full_screen_mode, present_mode,
                                    hdr_allowed, fsr_enabled, rcas_enabled, rcas_attenuation,
                                    userfaultfd, inline_fetch_shader, fast_shader_math,
-                                   submit_draw_interval)
+                                   submit_draw_interval, host_gpu_sync)
 
 // -------------------------------
 // Vulkan settings
@@ -780,6 +782,7 @@ public:
     SETTING_FORWARD_BOOL_READONLY(m_gpu, InlineFetchShader, inline_fetch_shader)
     SETTING_FORWARD_BOOL_READONLY(m_gpu, FastShaderMath, fast_shader_math)
     SETTING_FORWARD(m_gpu, SubmitDrawInterval, submit_draw_interval)
+    SETTING_FORWARD_BOOL_READONLY(m_gpu, HostGpuSync, host_gpu_sync)
 
     u32 GetVblankFrequency() {
         if (m_gpu.vblank_frequency.value < 30) {

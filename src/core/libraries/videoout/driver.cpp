@@ -12,6 +12,7 @@
 #include "imgui/renderer/imgui_core.h"
 #include "video_core/amdgpu/liverpool.h"
 #include "video_core/renderer_vulkan/vk_presenter.h"
+#include "video_core/renderer_vulkan/vk_rasterizer.h"
 
 extern std::unique_ptr<Vulkan::Presenter> presenter;
 extern std::unique_ptr<AmdGpu::Liverpool> liverpool;
@@ -270,11 +271,29 @@ void VideoOutDriver::Flip(const Request& req) {
 
     // Reset prev flip label
     if (port->prev_index != -1) {
-        port->buffer_labels[port->prev_index] = 0;
-        port->SignalVoLabel();
+        port->pending_label_resets.push_back({port->prev_index, port->prev_label_marker});
     }
     // save to prev buf index
     port->prev_index = req.index;
+    port->prev_label_marker = req.label_marker;
+    ResetRetiredLabels(port);
+}
+
+void VideoOutDriver::ResetRetiredLabels(VideoOutPort* port) {
+    const auto& label_signaler = presenter->GetRasterizer().GetLabelSignaler();
+    bool signaled = false;
+    while (!port->pending_label_resets.empty()) {
+        const auto [index, marker] = port->pending_label_resets.front();
+        if (!label_signaler.IsRetired(marker)) {
+            break;
+        }
+        port->pending_label_resets.pop_front();
+        port->buffer_labels[index] = 0;
+        signaled = true;
+    }
+    if (signaled) {
+        port->SignalVoLabel();
+    }
 }
 
 void VideoOutDriver::DrawBlankFrame() {
@@ -333,6 +352,7 @@ void VideoOutDriver::SubmitFlipInternal(VideoOutPort* port, s32 index, s64 flip_
         .flip_arg = flip_arg,
         .index = index,
         .eop = is_eop,
+        .label_marker = presenter->GetRasterizer().GetLabelSignaler().CurrentMarker(),
     });
 }
 
@@ -363,6 +383,8 @@ void VideoOutDriver::PresentThread(std::stop_token token) {
             timer.End();
             continue;
         }
+
+        ResetRetiredLabels(&main_port);
 
         // Check if it's time to take a request.
         auto& vblank_status = main_port.vblank_status;
