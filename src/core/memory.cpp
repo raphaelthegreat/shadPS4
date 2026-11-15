@@ -162,6 +162,22 @@ void MemoryManager::CopySparseMemory(VAddr virtual_addr, u8* dest, u64 size) {
     }
 }
 
+void MemoryManager::WriteSparseMemory(VAddr virtual_addr, const u8* source, u64 size,
+                                      void (*copy)(u8*, const u8*, u64)) {
+    const auto& backing_pages = impl.BackingPages();
+    while (size) {
+        const u64 page = virtual_addr >> GUEST_PAGE_BITS;
+        const u64 offset_in_page = virtual_addr % GUEST_PAGE_SIZE;
+        const u64 copy_size = std::min<u64>(GUEST_PAGE_SIZE - offset_in_page, size);
+        if (auto* entry = backing_pages.find(page); entry && *entry) {
+            copy(*entry + offset_in_page, source, copy_size);
+        }
+        size -= copy_size;
+        virtual_addr += copy_size;
+        source += copy_size;
+    }
+}
+
 bool MemoryManager::TryWriteBacking(void* address, const void* data, u64 size) {
     const VAddr virtual_addr = std::bit_cast<VAddr>(address);
     std::shared_lock lk{mutex};

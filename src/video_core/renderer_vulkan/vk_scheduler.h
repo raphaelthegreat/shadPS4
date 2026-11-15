@@ -5,6 +5,7 @@
 
 #include <atomic>
 #include <condition_variable>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -357,6 +358,14 @@ public:
 
 using SessionFunc = Common::UniqueFunction<void>;
 using SubmitFunc = Common::UniqueFunction<void, SubmitInfo&>;
+using DeferredFunc = Common::UniqueFunction<void, vk::CommandBuffer>;
+
+class DeferredCommand {
+    friend class Scheduler;
+    DeferredFunc func{};
+    std::atomic<bool> resolved{};
+    std::atomic<bool> in_use{};
+};
 
 class Scheduler {
 public:
@@ -431,6 +440,26 @@ public:
             ASSERT(payload);
         }
         fill(payload);
+    }
+
+    /// Records a command whose contents are provided later with ResolveDeferred.
+    /// The worker thread blocks on it until resolved. Requires the worker thread.
+    /// When recorded inside a rendering scope, the scope is only suspended if commands are
+    /// provided.
+    DeferredCommand* RecordDeferred();
+
+    /// Provides the commands of a deferred command and allows the worker thread to continue.
+    void ResolveDeferred(DeferredCommand* command, DeferredFunc&& func);
+
+    /// Sets a function that must resolve every pending deferred command.
+    /// Called before the scheduler submits or waits on the worker thread.
+    void SetResolveCallback(SessionFunc&& on_resolve) {
+        this->on_resolve = std::move(on_resolve);
+    }
+
+    /// Returns true when commands are recorded on a worker thread.
+    bool IsThreaded() const noexcept {
+        return use_worker_thread;
     }
 
     /// Sets a function to be called before every render pass instance ends.
@@ -623,6 +652,8 @@ private:
 
     void SubmitExecution(SubmitInfo& info);
 
+    void ResolvePending();
+
     vk::CommandBuffer GetCommandBuffer();
 
     void SubmitCommandBuffer(SubmitInfo& info);
@@ -640,6 +671,10 @@ private:
     DynamicState dynamic_state;
     SessionFunc on_end_rendering{};
     SubmitFunc on_submit{};
+    SessionFunc on_resolve{};
+    std::deque<DeferredCommand> deferred_commands;
+    u32 num_unresolved{};
+    bool is_resolving{};
     vk::CommandBuffer current_cmdbuf{};
     bool use_worker_thread;
     std::vector<std::byte> immediate_payload;

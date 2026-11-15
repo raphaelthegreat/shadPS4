@@ -851,6 +851,8 @@ set(COMMON src/common/logging/classes.cpp
            src/common/spin_lock.h
            src/common/stb.cpp
            src/common/stb.h
+           src/common/streaming_memcpy.cpp
+           src/common/streaming_memcpy.h
            src/common/string_literal.h
            src/common/string_util.cpp
            src/common/string_util.h
@@ -1185,6 +1187,7 @@ set(VIDEO_CORE src/video_core/amdgpu/cb_db_extent.h
                src/video_core/buffer_cache/range_set.h
                src/video_core/buffer_cache/region_definitions.h
                src/video_core/buffer_cache/region_manager.h
+               src/video_core/buffer_cache/sync_range_list.h
                src/video_core/renderer_vulkan/liverpool_to_vk.cpp
                src/video_core/renderer_vulkan/liverpool_to_vk.h
                src/video_core/renderer_vulkan/vk_common.cpp

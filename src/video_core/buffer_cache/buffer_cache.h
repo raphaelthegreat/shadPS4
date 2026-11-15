@@ -3,15 +3,18 @@
 
 #pragma once
 
+#include <atomic>
 #include <deque>
+#include <mutex>
 #include <boost/container/small_vector.hpp>
 
 #include "common/enum.h"
 #include "common/interval_set.h"
+#include "common/multi_level_page_table.h"
 #include "common/types.h"
 #include "video_core/buffer_cache/buffer.h"
 #include "video_core/buffer_cache/fault_manager.h"
-#include "video_core/buffer_cache/range_set.h"
+#include "video_core/buffer_cache/sync_range_list.h"
 #include "video_core/renderer_vulkan/vk_semaphore.h"
 #include "video_core/texture_cache/image.h"
 
@@ -24,6 +27,7 @@ class MemoryManager;
 }
 
 namespace Vulkan {
+class DeferredCommand;
 class GraphicsPipeline;
 struct SubmitInfo;
 class Runtime;
@@ -123,6 +127,26 @@ public:
     /// Synchronizes all buffers needed for DMA.
     void SynchronizeDmaBuffers();
 
+    /// Returns true when a region has a pending synchronization request.
+    [[nodiscard]] bool IsRegionInSyncBatch(VAddr addr, u64 size);
+
+    /// Uploads CPU modified memory of pending synchronization requests.
+    u64 FlushSyncBatch(bool seal = true);
+
+    /// Assigns the current tick to batches that were recorded since the last seal.
+    void SealPendingBatches();
+
+    /// Marks GPU writes of all batches up to and including seq as GPU modified.
+    void RetireSyncBatches(u64 seq);
+
+    /// Returns true when synchronization batches have GPU writes that are not submitted yet.
+    [[nodiscard]] bool HasUnsubmittedSyncWork() const noexcept;
+
+    /// Returns true when GPU memory can be read directly from the host.
+    [[nodiscard]] bool IsHostVisible() const noexcept {
+        return rebar;
+    }
+
     /// Commits pending sparse buffer memory binds. Must be called before every scheduler submit.
     void SubmitPendingArenaBinds(Vulkan::SubmitInfo& info);
 
@@ -146,8 +170,23 @@ private:
 
     void DownloadMemory(const Buffer* arena, VAddr device_addr, u64 size, bool async);
 
-    bool SynchronizeMemory(const Buffer* arena, VAddr device_addr, u32 size, bool is_written,
-                           bool is_texel_buffer);
+    void QueueSync(VAddr device_addr, u64 size, bool is_written);
+
+    void UploadSyncBatch();
+
+    void PopRetiredBatches();
+
+    struct SyncBatch;
+    SyncBatch* FindPendingBatch(VAddr start, VAddr end, u64 retired);
+
+    void WaitPendingWrites(VAddr start, VAddr end);
+
+    /// Waits until the host GPU executed the batch and marks its writes as GPU modified.
+    void WaitSyncBatch(u64 seq, u64 tick);
+
+    void ReadMemoryDirect(VAddr device_addr, u64 size);
+
+    void OpenSyncBatch();
 
     bool SynchronizeMemoryFromImage(const Buffer* arena, VAddr device_addr, u32 size);
 
@@ -163,7 +202,6 @@ private:
     StreamBuffer stream_buffer;
     Buffer gds_buffer;
     std::unique_ptr<Buffer> null_index_buffer;
-    RangeSet gpu_modified_ranges;
 
     std::unique_ptr<FaultManager> fault_manager;
     std::unique_ptr<Buffer> bda_pagetable_buffer;
@@ -185,6 +223,34 @@ private:
         }
     };
     IntervalList<Backing> resident_ranges;
+
+    SyncRangeList sync_written;
+    SyncRangeList sync_read;
+    Vulkan::DeferredCommand* sync_upload{};
+    bool sync_dma{};
+    u32 num_sync_batches{};
+
+    struct SyncBatch {
+        u64 seq;
+        u64 tick;
+        SyncRangeList written;
+    };
+    std::deque<SyncBatch> sync_batches;
+    std::mutex batch_mutex;
+    std::atomic<u64> retired_seq{};
+    u64 last_seq{};
+    u32 readbacks_mode{};
+
+    struct HostPointerTraits {
+        using Entry = u8*;
+        static constexpr size_t ADDRESS_SPACE_BITS = BufferCache::ADDRESS_SPACE_BITS;
+        static constexpr size_t L1_BITS = 16;
+        static constexpr size_t PAGE_BITS = 14;
+        static constexpr bool NULL_CHECK = false;
+    };
+    static constexpr u64 HOST_POINTER_PAGE_SIZE = u64{1} << HostPointerTraits::PAGE_BITS;
+    Common::MultiLevelPageTable<HostPointerTraits> host_pointers;
+    bool rebar{};
 
     u32 arena_memory_type_index{};
     u32 block_size{};

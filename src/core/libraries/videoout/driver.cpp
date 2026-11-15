@@ -271,6 +271,7 @@ void VideoOutDriver::Flip(const Request& req) {
 
     // Reset prev flip label
     if (port->prev_index != -1) {
+        ASSERT_MSG(port->buffer_labels[port->prev_index] == 1, "Out of order flip IRQ");
         port->buffer_labels[port->prev_index] = 0;
         port->SignalVoLabel();
     }

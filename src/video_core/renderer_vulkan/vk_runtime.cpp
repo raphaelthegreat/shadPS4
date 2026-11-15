@@ -791,9 +791,9 @@ void Runtime::FlushBarriers() {
     }
 
     scheduler.EndRendering();
-    RecordWithSpan(scheduler, std::span<const vk::ImageMemoryBarrier2>{image_barriers},
-                   [memory_barrier = memory_barrier, has_memory_barrier](
-                       vk::CommandBuffer cmdbuf, std::span<const vk::ImageMemoryBarrier2> images) {
+    scheduler.Record(
+                   [images = std::move(image_barriers), memory_barrier = memory_barrier, has_memory_barrier](
+                       vk::CommandBuffer cmdbuf) {
                        cmdbuf.pipelineBarrier2(vk::DependencyInfo{
                            .memoryBarrierCount = has_memory_barrier ? 1U : 0U,
                            .pMemoryBarriers = &memory_barrier,

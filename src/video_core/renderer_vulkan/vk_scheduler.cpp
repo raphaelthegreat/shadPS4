@@ -1,6 +1,9 @@
 // SPDX-FileCopyrightText: Copyright 2025 shadPS4 Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
+#include <optional>
+
 #include "common/assert.h"
 #include "common/debug.h"
 #include "common/thread.h"
@@ -43,6 +46,13 @@ Scheduler::Scheduler(const Instance& instance, bool use_worker_thread_)
 
 Scheduler::~Scheduler() {
     if (use_worker_thread) {
+        for (auto& command : deferred_commands) {
+            if (!command.resolved.load(std::memory_order_relaxed)) {
+                command.resolved.store(true, std::memory_order_release);
+                command.resolved.notify_one();
+            }
+        }
+        num_unresolved = 0;
         WaitWorker();
         worker_thread.request_stop();
         worker_thread.join();
@@ -52,14 +62,54 @@ Scheduler::~Scheduler() {
 #endif
 }
 
-static vk::RenderingAttachmentInfo MakeColorAttachment(const RenderAttachment& cb) {
-    return vk::RenderingAttachmentInfo{
-        .imageView = cb.image_view,
-        .imageLayout = cb.image_layout,
-        .loadOp = cb.is_clear ? vk::AttachmentLoadOp::eClear : vk::AttachmentLoadOp::eLoad,
+static vk::AttachmentLoadOp MakeLoadOp(bool is_clear, bool resume) {
+    return is_clear && !resume ? vk::AttachmentLoadOp::eClear : vk::AttachmentLoadOp::eLoad;
+}
+
+static void RecordBeginRendering(vk::CommandBuffer cmdbuf, const RenderState& state, bool resume) {
+    std::array<vk::RenderingAttachmentInfo, 8> color_attachments;
+    for (u32 i = 0; i < state.num_color_attachments; ++i) {
+        const auto& cb = state.color_attachments[i];
+        color_attachments[i] = vk::RenderingAttachmentInfo{
+            .imageView = cb.image_view,
+            .imageLayout = cb.image_layout,
+            .loadOp = MakeLoadOp(cb.is_clear, resume),
+            .storeOp = vk::AttachmentStoreOp::eStore,
+            .clearValue = vk::ClearValue{.color = vk::ClearColorValue{.uint32 = cb.clear_value}},
+        };
+    }
+
+    const auto& db = state.depth_stencil_attachment;
+    const vk::RenderingAttachmentInfo depth_attachment = {
+        .imageView = db.image_view,
+        .imageLayout = db.image_layout,
+        .loadOp = MakeLoadOp(db.depth_clear, resume),
         .storeOp = vk::AttachmentStoreOp::eStore,
-        .clearValue = vk::ClearValue{.color = vk::ClearColorValue{.uint32 = cb.clear_value}},
+        .clearValue =
+            vk::ClearValue{.depthStencil = vk::ClearDepthStencilValue{.depth = std::bit_cast<float>(
+                                                                          db.clear_value[0])}},
     };
+    const vk::RenderingAttachmentInfo stencil_attachment = {
+        .imageView = db.image_view,
+        .imageLayout = db.image_layout,
+        .loadOp = MakeLoadOp(db.stencil_clear, resume),
+        .storeOp = vk::AttachmentStoreOp::eStore,
+        .clearValue = vk::ClearValue{.depthStencil =
+                                         vk::ClearDepthStencilValue{.stencil = db.clear_value[1]}},
+    };
+
+    cmdbuf.beginRendering(vk::RenderingInfo{
+        .renderArea =
+            {
+                .offset = {0, 0},
+                .extent = {state.width, state.height},
+            },
+        .layerCount = state.num_layers,
+        .colorAttachmentCount = state.num_color_attachments,
+        .pColorAttachments = color_attachments.data(),
+        .pDepthAttachment = db.has_depth ? &depth_attachment : nullptr,
+        .pStencilAttachment = db.has_stencil ? &stencil_attachment : nullptr,
+    });
 }
 
 void Scheduler::BeginRendering(const RenderState& new_state) {
@@ -71,43 +121,7 @@ void Scheduler::BeginRendering(const RenderState& new_state) {
     render_state = new_state;
 
     Record([state = render_state](vk::CommandBuffer cmdbuf) {
-        std::array<vk::RenderingAttachmentInfo, 8> color_attachments;
-        for (u32 i = 0; i < state.num_color_attachments; ++i) {
-            color_attachments[i] = MakeColorAttachment(state.color_attachments[i]);
-        }
-
-        const auto& db = state.depth_stencil_attachment;
-        const vk::RenderingAttachmentInfo depth_attachment = {
-            .imageView = db.image_view,
-            .imageLayout = db.image_layout,
-            .loadOp = db.depth_clear ? vk::AttachmentLoadOp::eClear : vk::AttachmentLoadOp::eLoad,
-            .storeOp = vk::AttachmentStoreOp::eStore,
-            .clearValue = vk::ClearValue{.depthStencil =
-                                             vk::ClearDepthStencilValue{
-                                                 .depth = std::bit_cast<float>(db.clear_value[0])}},
-        };
-        const vk::RenderingAttachmentInfo stencil_attachment = {
-            .imageView = db.image_view,
-            .imageLayout = db.image_layout,
-            .loadOp = db.stencil_clear ? vk::AttachmentLoadOp::eClear : vk::AttachmentLoadOp::eLoad,
-            .storeOp = vk::AttachmentStoreOp::eStore,
-            .clearValue =
-                vk::ClearValue{.depthStencil =
-                                   vk::ClearDepthStencilValue{.stencil = db.clear_value[1]}},
-        };
-
-        cmdbuf.beginRendering(vk::RenderingInfo{
-            .renderArea =
-                {
-                    .offset = {0, 0},
-                    .extent = {state.width, state.height},
-                },
-            .layerCount = state.num_layers,
-            .colorAttachmentCount = state.num_color_attachments,
-            .pColorAttachments = color_attachments.data(),
-            .pDepthAttachment = db.has_depth ? &depth_attachment : nullptr,
-            .pStencilAttachment = db.has_stencil ? &stencil_attachment : nullptr,
-        });
+        RecordBeginRendering(cmdbuf, state, false);
     });
 }
 
@@ -153,6 +167,7 @@ void Scheduler::WaitWorker() {
     if (!use_worker_thread) {
         return;
     }
+    ResolvePending();
     DispatchWork();
     std::unique_lock lk{work_mutex};
     work_done_cv.wait(lk, [this] { return num_pending_work == 0; });
@@ -164,6 +179,11 @@ void Scheduler::DispatchWork() {
     }
     {
         std::unique_lock lk{work_mutex};
+        if (work_queue.size() >= MaxQueuedWork && num_unresolved > 0) {
+            lk.unlock();
+            ResolvePending();
+            lk.lock();
+        }
         work_done_cv.wait(lk, [this] { return work_queue.size() < MaxQueuedWork; });
         work_queue.push(std::move(chunk));
         ++num_pending_work;
@@ -178,6 +198,7 @@ void Scheduler::WaitChunk(u64 id) {
         return;
     }
     ASSERT(id <= current_chunk_id);
+    ResolvePending();
     if (id == current_chunk_id) {
         DispatchWork();
     }
@@ -186,6 +207,58 @@ void Scheduler::WaitChunk(u64 id) {
         executed_chunk_id.wait(executed, std::memory_order_acquire);
         executed = executed_chunk_id.load(std::memory_order_acquire);
     }
+}
+
+DeferredCommand* Scheduler::RecordDeferred() {
+    ASSERT(use_worker_thread);
+    auto it = std::ranges::find_if(deferred_commands, [](const DeferredCommand& command) {
+        return !command.in_use.load(std::memory_order_acquire);
+    });
+    DeferredCommand* command =
+        it != deferred_commands.end() ? &*it : &deferred_commands.emplace_back();
+    command->resolved.store(false, std::memory_order_relaxed);
+    command->in_use.store(true, std::memory_order_relaxed);
+    std::optional<RenderState> state;
+    if (is_rendering) {
+        if (on_end_rendering) {
+            on_end_rendering();
+        }
+        state = render_state;
+    }
+    Record([command, state](vk::CommandBuffer cmdbuf) {
+        command->resolved.wait(false, std::memory_order_acquire);
+        if (command->func) {
+            if (state) {
+                cmdbuf.endRendering();
+            }
+            command->func(vk::CommandBuffer{cmdbuf});
+            command->func = {};
+            if (state) {
+                RecordBeginRendering(cmdbuf, *state, true);
+            }
+        }
+        command->in_use.store(false, std::memory_order_release);
+    });
+    ++num_unresolved;
+    return command;
+}
+
+void Scheduler::ResolveDeferred(DeferredCommand* command, DeferredFunc&& func) {
+    ASSERT(num_unresolved > 0 && !command->resolved.load(std::memory_order_relaxed));
+    command->func = std::move(func);
+    command->resolved.store(true, std::memory_order_release);
+    command->resolved.notify_one();
+    --num_unresolved;
+}
+
+void Scheduler::ResolvePending() {
+    if (num_unresolved == 0 || is_resolving) {
+        return;
+    }
+    is_resolving = true;
+    on_resolve();
+    is_resolving = false;
+    ASSERT_MSG(num_unresolved == 0, "Resolve callback left deferred commands pending");
 }
 
 void Scheduler::AcquireNewChunk() {
@@ -274,6 +347,7 @@ void Scheduler::SubmitCommandBuffer(SubmitInfo& info) {
 }
 
 void Scheduler::SubmitExecution(SubmitInfo& info) {
+    ResolvePending();
     EndRendering();
     if (on_submit) {
         on_submit(info);

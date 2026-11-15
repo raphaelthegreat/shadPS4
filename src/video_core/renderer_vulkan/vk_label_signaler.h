@@ -47,8 +47,19 @@ public:
         return std::nullopt;
     }
 
-    /// Returns true if signals were recorded in the command buffer that is not submitted yet.
-    [[nodiscard]] bool NeedsFlush() const noexcept;
+    /// Sets callbacks invoked when a signal is recorded and when it is retired. on_signal returns
+    /// an identifier passed to on_retire once the host GPU has reached the signal.
+    void SetRetireCallbacks(Common::UniqueFunction<u64>&& on_signal_,
+                            Common::UniqueFunction<void, u64>&& on_retire_,
+                            Common::UniqueFunction<bool>&& has_pending_work_) {
+        on_signal = std::move(on_signal_);
+        on_retire = std::move(on_retire_);
+        has_pending_work = std::move(has_pending_work_);
+    }
+
+    /// Returns true if signals or other pending work were recorded in the command buffer that is
+    /// not submitted yet.
+    [[nodiscard]] bool NeedsFlush() noexcept;
 
     /// Waits until a pending signal is applied or the timeout expires.
     void WaitForProgress(std::chrono::microseconds timeout);
@@ -74,6 +85,7 @@ private:
     struct PendingSignal {
         Common::UniqueFunction<void> func;
         u64 tick;
+        u64 retire_id;
         u32 marker;
         MarkerSlot slot;
         std::optional<AmdGpu::LabelWrite> label;
@@ -95,6 +107,9 @@ private:
     std::condition_variable progress_cv;
     std::deque<PendingSignal> pending_signals;
     std::atomic<u32> retired_marker{};
+    Common::UniqueFunction<u64> on_signal;
+    Common::UniqueFunction<void, u64> on_retire;
+    Common::UniqueFunction<bool> has_pending_work;
     std::jthread signal_thread;
 };
 

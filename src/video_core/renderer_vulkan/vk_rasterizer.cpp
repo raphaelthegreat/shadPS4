@@ -54,9 +54,54 @@ Rasterizer::Rasterizer(const Instance& instance_, Scheduler& scheduler_, Runtime
 
     scheduler.SetSubmitCallback([this](Vulkan::SubmitInfo& info) {
         runtime.FlushBarriers();
+        if (!in_draw) {
+            buffer_cache.SealPendingBatches();
+        }
+        if (buffer_cache.IsHostVisible()) {
+            // Make GPU writes visible to the host for direct readbacks after completion
+            scheduler.Record([](vk::CommandBuffer cmdbuf) {
+                const vk::MemoryBarrier2 barrier = {
+                    .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+                    .srcAccessMask = vk::AccessFlagBits2::eMemoryWrite,
+                    .dstStageMask = vk::PipelineStageFlagBits2::eHost,
+                    .dstAccessMask = vk::AccessFlagBits2::eHostRead,
+                };
+                cmdbuf.pipelineBarrier2(vk::DependencyInfo{
+                    .memoryBarrierCount = 1,
+                    .pMemoryBarriers = &barrier,
+                });
+            });
+        }
         buffer_cache.SubmitPendingArenaBinds(info);
     });
     scheduler.SetEndRenderingCallback([this] { occlusion_queries.End(); });
+    scheduler.SetResolveCallback([this] { buffer_cache.FlushSyncBatch(!in_draw); });
+    label_signaler.SetRetireCallbacks(
+        [this] {
+            const u64 seq = buffer_cache.FlushSyncBatch(true);
+            if (buffer_cache.IsHostVisible() && seq != last_barrier_seq) {
+                // Writes of the sealed batches are read by the host once the label is signaled
+                last_barrier_seq = seq;
+                scheduler.EndRendering();
+                scheduler.Record([](vk::CommandBuffer cmdbuf) {
+                    const vk::MemoryBarrier2 barrier = {
+                        .srcStageMask = vk::PipelineStageFlagBits2::eAllCommands,
+                        .srcAccessMask = vk::AccessFlagBits2::eMemoryWrite,
+                        .dstStageMask = vk::PipelineStageFlagBits2::eAllCommands |
+                                        vk::PipelineStageFlagBits2::eHost,
+                        .dstAccessMask =
+                            vk::AccessFlagBits2::eMemoryRead | vk::AccessFlagBits2::eHostRead,
+                    };
+                    cmdbuf.pipelineBarrier2(vk::DependencyInfo{
+                        .memoryBarrierCount = 1,
+                        .pMemoryBarriers = &barrier,
+                    });
+                });
+            }
+            return seq;
+        },
+        [this](u64 seq) { buffer_cache.RetireSyncBatches(seq); },
+        [this] { return buffer_cache.HasUnsubmittedSyncWork(); });
 }
 
 Rasterizer::~Rasterizer() = default;
@@ -440,6 +485,7 @@ void Rasterizer::OnSubmit() {
 
 void Rasterizer::OnFence() {
     texture_cache.ProcessDownloadImages();
+    buffer_cache.FlushSyncBatch();
 }
 
 bool Rasterizer::BindResources(const Pipeline* pipeline) {
@@ -448,6 +494,7 @@ bool Rasterizer::BindResources(const Pipeline* pipeline) {
         return false;
     }
 
+    in_draw = true;
     descriptors = descriptor_ring.Acquire();
     num_descriptors = 0;
 
@@ -661,6 +708,9 @@ void Rasterizer::ResetBindings(bool is_compute) {
     bound_images.clear();
     bound_buffers.clear();
     needs_barrier = false;
+    if (std::exchange(in_draw, false)) {
+        buffer_cache.SealPendingBatches();
+    }
 }
 
 bool Rasterizer::IsComputeMetaClear(const Pipeline* pipeline) {
@@ -1282,6 +1332,9 @@ void Rasterizer::FillBuffer(VAddr address, u32 num_bytes, u32 value, bool is_gds
     if (!is_gds) {
         texture_cache.ClearMeta(address);
         if (!buffer_cache.IsRegionGpuModified(address, num_bytes)) {
+            if (buffer_cache.IsRegionInSyncBatch(address, num_bytes)) {
+                buffer_cache.FlushSyncBatch();
+            }
             u32* buffer = std::bit_cast<u32*>(address);
             std::fill(buffer, buffer + (num_bytes / sizeof(u32)), value);
             return;
@@ -1302,6 +1355,9 @@ void Rasterizer::CopyBuffer(VAddr dst, VAddr src, u32 num_bytes, bool dst_gds, b
         if (!src_gds && !buffer_cache.IsRegionGpuModified(src, num_bytes) &&
             !texture_cache.FindImageFromRange(src, num_bytes)) {
             // Both buffers were not transferred to GPU yet. Can safely copy in host memory.
+            if (buffer_cache.IsRegionInSyncBatch(dst, num_bytes)) {
+                buffer_cache.FlushSyncBatch();
+            }
             std::memcpy(std::bit_cast<void*>(dst), std::bit_cast<void*>(src), num_bytes);
             return;
         }

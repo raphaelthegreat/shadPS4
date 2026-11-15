@@ -46,6 +46,7 @@ void LabelSignaler::Signal(AmdGpu::EventType event_type, AmdGpu::EventIndex even
         }
     }
 
+    const u64 retire_id = on_signal ? on_signal() : 0;
     const u32 marker = ++current_marker;
     if (marker_buffer) {
         scheduler.Record([stage, buffer = marker_buffer->Handle(), offset = slot * sizeof(u32),
@@ -60,6 +61,7 @@ void LabelSignaler::Signal(AmdGpu::EventType event_type, AmdGpu::EventIndex even
         pending_signals.push_back(PendingSignal{
             .func = std::move(func),
             .tick = last_signal_tick,
+            .retire_id = retire_id,
             .marker = marker,
             .slot = slot,
             .label = label,
@@ -68,8 +70,8 @@ void LabelSignaler::Signal(AmdGpu::EventType event_type, AmdGpu::EventIndex even
     signal_cv.notify_one();
 }
 
-bool LabelSignaler::NeedsFlush() const noexcept {
-    return last_signal_tick >= scheduler.CurrentTick();
+bool LabelSignaler::NeedsFlush() noexcept {
+    return last_signal_tick >= scheduler.CurrentTick() || (has_pending_work && has_pending_work());
 }
 
 void LabelSignaler::WaitForProgress(std::chrono::microseconds timeout) {
@@ -95,6 +97,9 @@ void LabelSignaler::SignalThread(std::stop_token stoken) {
 
         if (!WaitSignal(*signal, stoken)) {
             break;
+        }
+        if (signal->retire_id && on_retire) {
+            on_retire(u64{signal->retire_id});
         }
         signal->func();
 

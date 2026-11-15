@@ -191,6 +191,8 @@ private:
 
     bool attachment_feedback_loop{};
     bool needs_barrier{};
+    bool in_draw{};
+    u64 last_barrier_seq{};
 };
 
 } // namespace Vulkan

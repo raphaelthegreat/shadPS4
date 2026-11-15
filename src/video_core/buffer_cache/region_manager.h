@@ -6,6 +6,8 @@
 #include <utility>
 
 #include "common/adaptive_mutex.h"
+#include "common/alignment.h"
+#include "common/interval_set.h"
 #include "common/types.h"
 #include "core/emulator_settings.h"
 #include "video_core/buffer_cache/region_definitions.h"
@@ -182,6 +184,45 @@ public:
         }
     }
 
+    /// Marks a range as modified from the GPU and records the exact written interval.
+    void MarkGpuWritten(u64 offset, u64 size) {
+        std::scoped_lock lk{mutex};
+        ChangeRegionState<StateOp::None, StateOp::Set, false>(offset, size);
+        gpu_ranges.Add({cpu_addr + offset, cpu_addr + offset + size});
+    }
+
+    /// Unmarks pages as modified from the GPU and drops their written intervals.
+    template <bool is_write>
+    void UnmarkGpuWritten(u64 offset, u64 size) {
+        constexpr auto cpu_op = is_write ? StateOp::Set : StateOp::None;
+        std::scoped_lock lk{mutex};
+        ChangeRegionState<cpu_op, StateOp::Clear, false>(offset, size);
+        const u64 start = Common::AlignDown(offset, BYTES_PER_PAGE);
+        const u64 end = Common::AlignUp(offset + size, BYTES_PER_PAGE);
+        gpu_ranges.Subtract(cpu_addr + start, cpu_addr + end);
+    }
+
+    /// Calls 'func' for each GPU written interval in the range and drops the intervals. When clear
+    /// is set the range is extended to page boundaries and the pages are unmarked as GPU modified.
+    template <bool clear>
+    void ForEachGpuRange(u64 offset, u64 size, auto&& func) {
+        if constexpr (clear) {
+            size = Common::AlignUp(offset + size, BYTES_PER_PAGE);
+            offset = Common::AlignDown(offset, BYTES_PER_PAGE);
+            size -= offset;
+        }
+        const VAddr start = cpu_addr + offset;
+        const VAddr end = start + size;
+        std::scoped_lock lk{mutex};
+        gpu_ranges.ForEachInRange(start, end, [&](const Interval& range) {
+            func(std::max(range.start, start), std::min(range.end, end));
+        });
+        gpu_ranges.Subtract(start, end);
+        if constexpr (clear) {
+            ChangeRegionState<StateOp::None, StateOp::Clear, false>(offset, size);
+        }
+    }
+
     void Lock(const Bounds& bounds) noexcept {
         mutex.lock();
     }
@@ -334,6 +375,7 @@ private:
     u32 readbacks_mode;
     RegionBits cpu;
     RegionBits gpu;
+    IntervalList<> gpu_ranges;
     LockType mutex;
 };
 

@@ -78,6 +78,36 @@ static std::optional<LabelWrite> PendingLabelWrite(VAddr address, DataSelect dat
     }
 }
 
+static void WriteData(Vulkan::Rasterizer* rasterizer, const PM4CmdWriteData* write_data) {
+    ASSERT(write_data->dst_sel.Value() == 2 || write_data->dst_sel.Value() == 5);
+    ASSERT(!write_data->wr_one_addr.Value());
+    const u32 data_size = write_data->Size();
+    auto* address = write_data->Address<u8*>();
+    const bool is_guest = Core::Memory::Instance()->IsValidMapping(VAddr(address), data_size);
+    const auto write = [is_guest](void* address, const void* data, u32 data_size) {
+        if (!is_guest || !Core::Memory::Instance()->TryWriteBacking(address, data, data_size)) {
+            std::memcpy(address, data, data_size);
+        }
+    };
+    if (!rasterizer) {
+        write(address, write_data->data, data_size);
+        return;
+    }
+    rasterizer->OnFence();
+    std::optional<u64> value;
+    if (data_size <= sizeof(u64)) {
+        value.emplace();
+        std::memcpy(&*value, write_data->data, data_size);
+    }
+    rasterizer->GetLabelSignaler().Signal(
+        EventType::BottomOfPipeTs, EventIndex::EopReserved,
+        [write, address,
+         data = std::vector<u32>(write_data->data, write_data->data + data_size / 4)] {
+            write(address, data.data(), data.size() * sizeof(u32));
+        },
+        LabelWrite{reinterpret_cast<VAddr>(address), value, data_size});
+}
+
 static std::span<const u32> NextPacket(std::span<const u32> span, size_t offset) {
     if (offset > span.size()) {
         LOG_ERROR(
@@ -254,8 +284,15 @@ Liverpool::Task Liverpool::ProcessCeUpdate(std::span<const u32> ccb) {
         }
         case PM4ItOpcode::DumpConstRam: {
             const auto* dump_const = reinterpret_cast<const PM4DumpConstRam*>(header);
+            const u32 size = dump_const->Size();
+            if (rasterizer) {
+                auto& buffer_cache = rasterizer->GetBufferCache();
+                if (buffer_cache.IsRegionInSyncBatch(dump_const->Address<VAddr>(), size)) {
+                    buffer_cache.FlushSyncBatch();
+                }
+            }
             memcpy(dump_const->Address<void*>(),
-                   cblock.constants_heap.data() + dump_const->Offset(), dump_const->Size());
+                   cblock.constants_heap.data() + dump_const->Offset(), size);
             break;
         }
         case PM4ItOpcode::IncrementCeCounter: {
@@ -847,24 +884,13 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                                            dma_data->SrcAddress<VAddr>(), dma_data->NumBytes(),
                                            false, false);
                 } else {
-                    UNREACHABLE_MSG("WriteData src_sel = {}, dst_sel = {}", u32(dma_data->src_sel),
+                    UNREACHABLE_MSG("DmaData src_sel = {}, dst_sel = {}", u32(dma_data->src_sel),
                                     u32(dma_data->dst_sel));
                 }
                 break;
             }
             case PM4ItOpcode::WriteData: {
-                const auto* write_data = reinterpret_cast<const PM4CmdWriteData*>(header);
-                ASSERT(write_data->dst_sel.Value() == 2 || write_data->dst_sel.Value() == 5);
-                const u32 data_size = (header->type3.count.Value() - 2) * 4;
-                u64* address = write_data->Address<u64*>();
-                if (!write_data->wr_one_addr.Value()) {
-                    if (rasterizer) {
-                        rasterizer->OnFence();
-                    }
-                    std::memcpy(address, write_data->data, data_size);
-                } else {
-                    UNREACHABLE();
-                }
+                WriteData(rasterizer, reinterpret_cast<const PM4CmdWriteData*>(header));
                 break;
             }
             case PM4ItOpcode::CopyData: {
@@ -995,6 +1021,12 @@ Liverpool::Task Liverpool::ProcessGraphics(std::span<const u32> dcb) {
                     const VAddr dst_addr = strmout->DstAddress<VAddr>();
                     auto* memory = Core::Memory::Instance();
                     if (dst_addr && memory && memory->IsValidMapping(dst_addr, sizeof(offset))) {
+                        if (rasterizer) {
+                            auto& buffer_cache = rasterizer->GetBufferCache();
+                            if (buffer_cache.IsRegionInSyncBatch(dst_addr, sizeof(offset))) {
+                                buffer_cache.FlushSyncBatch();
+                            }
+                        }
                         std::memcpy(reinterpret_cast<void*>(dst_addr),
                                     &vgt_strmout_buffer_filled_size[buf_idx], sizeof(offset));
                     }
@@ -1248,17 +1280,7 @@ Liverpool::Task Liverpool::ProcessCompute(std::span<const u32> acb, u32 vqid) {
             break;
         }
         case PM4ItOpcode::WriteData: {
-            const auto* write_data = reinterpret_cast<const PM4CmdWriteData*>(header);
-            ASSERT(write_data->dst_sel.Value() == 2 || write_data->dst_sel.Value() == 5);
-            const u32 data_size = (header->type3.count.Value() - 2) * 4;
-            if (!write_data->wr_one_addr.Value()) {
-                if (rasterizer) {
-                    rasterizer->OnFence();
-                }
-                std::memcpy(write_data->Address<void*>(), write_data->data, data_size);
-            } else {
-                UNREACHABLE();
-            }
+            WriteData(rasterizer, reinterpret_cast<const PM4CmdWriteData*>(header));
             break;
         }
         case PM4ItOpcode::MemSemaphore: {
