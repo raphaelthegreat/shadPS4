@@ -4,6 +4,7 @@
 #include "common/assert.h"
 #include "common/number_utils.h"
 #include "video_core/amdgpu/pixel_format.h"
+#include "video_core/amdgpu/swizzle.h"
 #include "video_core/renderer_vulkan/liverpool_to_vk.h"
 
 #include <magic_enum/magic_enum.hpp>
@@ -828,8 +829,9 @@ vk::Format DepthFormat(DepthBuffer::ZFormat z_format, DepthBuffer::StencilFormat
 }
 
 vk::ClearValue ColorBufferClearValue(const AmdGpu::ColorBuffer& color_buffer) {
-    const auto comp_swizzle = color_buffer.Swizzle();
     const auto format = AmdGpu::DataFormat(color_buffer.info.format);
+    // The clear words are in memory layout, so only the host channel order applies.
+    const auto comp_swizzle = AmdGpu::RemapStoreSwizzle(format, AmdGpu::IdentityMapping);
     const auto number_type = color_buffer.GetFixedNumberFormat();
 
     const auto& c0 = color_buffer.clear_word0;
